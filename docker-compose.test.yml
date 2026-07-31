@@ -1,0 +1,11 @@
+services:
+  mosquitto:
+    # The 2.1 image ships an anonymous all-interfaces listener out of the box.
+    image: eclipse-mosquitto:2
+    ports:
+      - "127.0.0.1:1883:1883"
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_sub -h 127.0.0.1 -p 1883 -t healthcheck -E -i probe -W 3"]
+      interval: 2s
+      timeout: 5s
+      retries: 15

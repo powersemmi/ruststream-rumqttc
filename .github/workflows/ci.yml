@@ -25,10 +25,20 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          path: ruststream-rumqttc
+
+      # The workspace resolves `ruststream` through a sibling path until 0.6.0 is published on
+      # crates.io (the same bootstrap ruststream-nats used before 0.5).
+      - uses: actions/checkout@v4
+        with:
+          repository: powersemmi/ruststream
+          persist-credentials: false
+          path: ruststream
 
       # The MSRV leg follows `rust-version` in Cargo.toml, so an MSRV bump is a one-line change.
       - name: Resolve toolchain
         id: toolchain
+        working-directory: ruststream-rumqttc
         env:
           TOOLCHAIN: ${{ matrix.toolchain }}
         run: |
@@ -46,23 +56,79 @@ jobs:
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ruststream-rumqttc
 
       - name: cargo fmt
         if: matrix.toolchain == 'stable'
+        working-directory: ruststream-rumqttc
         run: cargo fmt --all -- --check
 
       - name: cargo clippy
         if: matrix.toolchain == 'stable'
+        working-directory: ruststream-rumqttc
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
       - name: cargo check (no default features)
+        working-directory: ruststream-rumqttc
         run: cargo check --workspace --no-default-features
 
       - name: cargo check (all features)
+        working-directory: ruststream-rumqttc
         run: cargo check --workspace --all-targets --all-features
 
-      - name: cargo test
+      - name: cargo test (handler-stub only, no live broker)
+        working-directory: ruststream-rumqttc
         run: cargo test --workspace --all-features
+
+  broker-integration:
+    name: Broker integration (mosquitto)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          path: ruststream-rumqttc
+
+      - uses: actions/checkout@v4
+        with:
+          repository: powersemmi/ruststream
+          persist-credentials: false
+          path: ruststream
+
+      - name: Start mosquitto
+        run: |
+          docker run -d --name mosquitto \
+            -p 127.0.0.1:1883:1883 \
+            eclipse-mosquitto:2
+
+      - name: Wait for mosquitto
+        timeout-minutes: 1
+        run: |
+          timeout 30 bash -c 'until docker exec mosquitto mosquitto_sub -h 127.0.0.1 -p 1883 -t healthcheck -E -i probe -W 2; do sleep 1; done'
+          docker logs mosquitto | tail -3
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ruststream-rumqttc
+
+      - name: Run integration + conformance against mosquitto
+        working-directory: ruststream-rumqttc
+        env:
+          MQTT_TEST_URL: mqtt://127.0.0.1:1883
+        run: >-
+          cargo test -p ruststream-rumqttc --all-features
+          --test integration_mqtt
+          --test conformance_mqtt
+          -- --test-threads=1
+
+      - name: Cleanup
+        if: always()
+        run: docker rm -f mosquitto
 
   security:
     name: Security scans
@@ -71,6 +137,15 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          path: ruststream-rumqttc
+
+      # cargo-deny resolves the whole dependency graph, so the cross-repo `ruststream`
+      # path dependency must be present.
+      - uses: actions/checkout@v4
+        with:
+          repository: powersemmi/ruststream
+          persist-credentials: false
+          path: ruststream
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -84,13 +159,16 @@ jobs:
       # versions, and registry sources, per the checked-in deny.toml. Not path-
       # gated: advisories arrive over time, not only with manifest changes.
       - name: cargo deny
+        working-directory: ruststream-rumqttc
         run: cargo deny check
 
       - name: Install uv
         uses: astral-sh/setup-uv@v3
 
       - name: codespell
+        working-directory: ruststream-rumqttc
         run: uvx codespell
 
       - name: zizmor
+        working-directory: ruststream-rumqttc
         run: uvx zizmor .github/workflows

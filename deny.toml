@@ -8,7 +8,18 @@ all-features = true
 [advisories]
 yanked = "deny"
 
-ignore = []
+# rumqttc 0.25.1 pins rustls-webpki 0.102 and rustls-pemfile 2.x directly; the fixed
+# versions exist upstream but the client has not released a bump (last release 2025-11).
+# The findings are X.509 validation corner cases (URI name constraints, wildcard subtree
+# constraints, a CRL-parsing panic) and an unmaintained-crate notice - none reachable
+# without TLS to a hostile broker. Revisit on the next rumqttc release.
+ignore = [
+    "RUSTSEC-2025-0134",
+    "RUSTSEC-2026-0049",
+    "RUSTSEC-2026-0098",
+    "RUSTSEC-2026-0099",
+    "RUSTSEC-2026-0104",
+]
 
 [licenses]
 # Apache-2.0/MIT-compatible permissive licenses only.
@@ -18,6 +29,14 @@ allow = [
     # unicode-ident is (MIT OR Apache-2.0) AND Unicode-3.0; the Unicode license
     # only covers the embedded character tables and is permissive.
     "Unicode-3.0",
+    # The client's rustls tree (ring, aws-lc-rs, untrusted): ISC, BSD-3-Clause, and
+    # MIT-0 are all OSI-approved and permissive.
+    "ISC",
+    "BSD-3-Clause",
+    "MIT-0",
+    # webpki-roots ships the Mozilla CA bundle under CDLA-Permissive-2.0, a
+    # permissive data license covering the embedded certificate set.
+    "CDLA-Permissive-2.0",
 ]
 
 [bans]

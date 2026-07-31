@@ -1,0 +1,3 @@
+[codespell]
+skip = target,*.lock,Cargo.lock,.git,dist,wheels,*.svg
+ignore-words-list = crate,crates,ser,nd,implementors,statics,dependant

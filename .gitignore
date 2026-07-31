@@ -1,0 +1,14 @@
+target/
+**/*.rs.bk
+
+# mkdocs build output
+site/
+.venv/
+__pycache__/
+
+.idea/
+.vscode/
+*.iml
+.DS_Store
+
+tmp/

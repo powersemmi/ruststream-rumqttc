@@ -1,0 +1,17 @@
+[package]
+name = "ruststream-rumqttc"
+description = "MQTT 5 broker implementation for the RustStream messaging framework, built on rumqttc."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+readme = "../../README.md"
+keywords = ["mqtt", "mqtt5", "iot", "broker", "faststream"]
+categories = ["asynchronous", "network-programming"]
+
+[lints]
+workspace = true
+
+[dependencies]

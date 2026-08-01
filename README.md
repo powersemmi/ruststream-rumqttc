@@ -30,7 +30,7 @@ MQTT 5 is the primary target because two things the framework relies on exist on
 
 ## Status
 
-Implemented and verified against Eclipse Mosquitto 2 (the framework's conformance lifecycle suite and the integration tests, including shared subscriptions and wildcard demultiplexing, run in CI against it). Not yet published to crates.io: the release rides the `ruststream` 0.6 line. Design and scope are tracked in [powersemmi/ruststream#191](https://github.com/powersemmi/ruststream/issues/191).
+Implemented and verified against Eclipse Mosquitto 2 (the framework's conformance lifecycle suite and the integration tests, including shared subscriptions and wildcard demultiplexing, run in CI against it). Tracks the `ruststream` 0.6 line; the crate itself is not published to crates.io yet. Design and scope are tracked in [powersemmi/ruststream#191](https://github.com/powersemmi/ruststream/issues/191).
 
 ## Write a service
 

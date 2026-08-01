@@ -1,31 +1,28 @@
 //! Retained messages: the broker keeps the last message per topic and hands it to new
 //! subscribers.
 //!
+//! The retain flag is pure declaration on the publish policy; the scope's `after_startup` hook
+//! runs it once the broker is connected, so the announcement cannot race the connection.
+//!
 //! Run a broker first (`just brokers-up`), then:
-//! `cargo run --example mqtt_retained`
+//! `cargo run --example mqtt_retained -- run`
 
-use ruststream::{Broker, ConnectedBroker, OutgoingMessage, PublishPolicy, Publisher};
-use ruststream_rumqttc::{MqttBroker, MqttPublish, Qos};
+use ruststream::runtime::{App, AppInfo, RustStream};
+use ruststream::{OutgoingMessage, Publisher};
+use ruststream_rumqttc::{MqttBroker, MqttError, MqttPublish, Qos};
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let connected = MqttBroker::new("mqtt://localhost:1883", "retained-example")
-        .connect()
-        .await?;
-
-    // The policy names the mode; the runtime pairs it the same way after connect.
-    let retained = MqttPublish::default()
-        .qos(Qos::AtLeastOnce)
-        .retain(true)
-        .pair(&connected)
-        .await?;
-    retained
-        .publish(OutgoingMessage::new(
-            "devices/dev42/state",
-            b"online".as_slice(),
-        ))
-        .await?;
-
-    connected.shutdown().await?;
-    Ok(())
+#[ruststream::app]
+fn app() -> impl App {
+    RustStream::new(AppInfo::new("retained", "0.1.0")).with_broker(
+        MqttBroker::new("mqtt://localhost:1883", "retained-example"),
+        |b| {
+            b.after_startup(
+                MqttPublish::default().qos(Qos::AtLeastOnce).retain(true),
+                async move |publisher| -> Result<(), MqttError> {
+                    let msg = OutgoingMessage::new("devices/dev42/state", b"online".as_slice());
+                    publisher.publish(msg).await
+                },
+            );
+        },
+    )
 }

@@ -6,10 +6,17 @@
 
 <p align="center">
   <a href="https://github.com/powersemmi/ruststream-rumqttc/actions/workflows/ci.yml"><img src="https://github.com/powersemmi/ruststream-rumqttc/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://crates.io/crates/ruststream-rumqttc"><img src="https://img.shields.io/crates/v/ruststream-rumqttc.svg" alt="crates.io"></a>
+  <a href="https://crates.io/crates/ruststream-rumqttc"><img src="https://img.shields.io/crates/dr/ruststream-rumqttc" alt="Recent downloads"></a>
+  <a href="https://docs.rs/ruststream-rumqttc"><img src="https://img.shields.io/docsrs/ruststream-rumqttc" alt="docs.rs"></a>
   <img src="https://img.shields.io/badge/MSRV-1.85-blue.svg" alt="MSRV 1.85">
   <img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License">
   <a href="https://t.me/ruststream_community"><img src="https://img.shields.io/badge/-Telegram-blue?logo=telegram&label=News" alt="Telegram news channel"></a>
   <a href="https://t.me/ruststream_communuty_ru_chat"><img src="https://img.shields.io/badge/-Telegram-blue?logo=telegram&label=RU" alt="Telegram RU chat"></a>
+</p>
+
+<p align="center">
+  <b><a href="https://powersemmi.github.io/ruststream-rumqttc/">Documentation</a></b>
 </p>
 
 ---
@@ -28,9 +35,17 @@ MQTT 5 is the primary target because two things the framework relies on exist on
 - **Sessions, wills, retained.** `clean_start`/`session_expiry` for persistent sessions, `last_will` on the broker, `retain` on the publish policy, TLS with client certificates (`tls_ca` + `tls_client_auth`) for managed MQTT services.
 - **In-process test broker** (feature `testing`). `MqttTestBroker` reproduces core routing with no server, implements `ruststream::testing::TestableBroker`, and passes the framework's conformance suite in process.
 
-## Status
+## Install
 
-Implemented and verified against Eclipse Mosquitto 2 (the framework's conformance lifecycle suite and the integration tests, including shared subscriptions and wildcard demultiplexing, run in CI against it). Tracks the `ruststream` 0.6 line; the crate itself is not published to crates.io yet. Design and scope are tracked in [powersemmi/ruststream#191](https://github.com/powersemmi/ruststream/issues/191).
+```toml
+[dependencies]
+ruststream = { version = "0.6", features = ["macros", "json"] }
+ruststream-rumqttc = "0.6"
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+ruststream-rumqttc = { version = "0.6", features = ["testing"] }
+```
 
 ## Write a service
 
@@ -69,7 +84,22 @@ fn app() -> impl App {
 
 ## Test it
 
-The `testing` feature runs handlers against an in-process MQTT stand-in - no server, same routing. Protocol behaviour (QoS handshakes, shared groups, session redelivery, retained messages) is covered by the env-gated live suite instead: `just test-brokers` starts mosquitto and runs the integration tests plus the framework conformance lifecycle against it.
+The `testing` feature runs handlers against an in-process MQTT stand-in - no server, same routing, same ladder. Inject a message as a device would with `TestableBroker::inject`, then assert on what a handler published with the free `expect_published`:
+
+```rust
+use ruststream::{Broker, OutgoingMessage};
+use ruststream::testing::{TestableBroker, expect_published};
+use ruststream_rumqttc::testing::MqttTestBroker;
+
+let broker = MqttTestBroker::new().connect().await?;
+broker.inject(OutgoingMessage::new(
+    "devices/dev42/telemetry",
+    br#"{"temperature":21.5}"#,
+));
+let alerts = expect_published(&broker, "alerts", 1, std::time::Duration::from_secs(1)).await;
+```
+
+Protocol behaviour (QoS handshakes, shared groups, session redelivery, retained messages) is covered by the env-gated live suite instead: `just test-brokers` starts mosquitto and runs the integration tests plus the framework conformance lifecycle against it.
 
 ## Layout
 

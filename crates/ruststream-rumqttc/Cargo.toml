@@ -14,4 +14,22 @@ categories = ["asynchronous", "network-programming"]
 [lints]
 workspace = true
 
+[features]
+default = []
+# The in-process test broker (TestableBroker + TestApp support). The conformance harness is a
+# broker-author tool and stays in this repo's dev-dependencies, not in the user-facing feature.
+testing = ["ruststream/testing"]
+
 [dependencies]
+ruststream = { workspace = true, default-features = false }
+rumqttc.workspace = true
+bytes.workspace = true
+futures.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+ruststream = { workspace = true, features = ["conformance", "testing", "macros", "json"] }
+serde = { version = "1", features = ["derive"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time"] }

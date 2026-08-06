@@ -14,28 +14,80 @@
 
 ---
 
-`ruststream-rumqttc` will implement the [RustStream](https://github.com/powersemmi/ruststream) broker contract over [`rumqttc`](https://crates.io/crates/rumqttc) (MQTT 3.1.1 and 5). Handlers, routers, codecs, and middleware come from the framework; this crate supplies the transport - and nothing broker-specific leaks back into the framework.
+`ruststream-rumqttc` implements the RustStream broker contract over [`rumqttc`](https://crates.io/crates/rumqttc). Handlers, routers, codecs, and middleware come from the framework; this crate supplies the transport - and nothing broker-specific leaks back into the framework.
+
+MQTT 5 is the primary target because two things the framework relies on exist only there: user properties (headers travel natively, no invented envelope) and shared subscriptions (competing consumers are expressible at all).
+
+## Features
+
+- **A crate-owned connection task.** The client exposes a single event loop that must be polled continuously; the crate drives it in a dedicated task that demultiplexes packets into independent per-subscription streams by topic-filter matching, reconnects with exponential backoff (the client itself retries with zero delay, forever), and resubscribes exactly when the broker reports the session gone - all without ever stalling keep-alive traffic. Delivery back-pressure is the protocol's receive-maximum, which bounds unacknowledged deliveries.
+- **QoS-aware acknowledgement.** QoS 1/2 acknowledge through the protocol under manual control (the client completes the QoS 2 handshake); QoS 0 reports `AckError::Unsupported` rather than pretending. MQTT has no negative acknowledgement, so `nack(requeue = true)` reports `Unsupported` too - unacked messages redeliver when a persistent session resumes - and `nack(requeue = false)` acknowledges.
+- **Shared subscriptions.** `MqttTopic::new("jobs").shared("workers")` subscribes `$share/workers/jobs`; the broker splits the stream across the group, and two group members on one connection round-robin locally (they are one wire subscription).
+- **Wildcards as the protocol defines them** (`+`, `#`), with messages reporting the real topic they arrived on.
+- **Headers ride user properties**; the well-known `content-type`, `reply-to`, and `correlation-id` headers ride the matching first-class MQTT 5 properties.
+- **Sessions, wills, retained.** `clean_start`/`session_expiry` for persistent sessions, `last_will` on the broker, `retain` on the publish policy, TLS with client certificates (`tls_ca` + `tls_client_auth`) for managed MQTT services.
+- **In-process test broker** (feature `testing`). `MqttTestBroker` reproduces core routing with no server, implements `ruststream::testing::TestableBroker`, and passes the framework's conformance suite in process.
 
 ## Status
 
-**Not implemented yet.** This repository is a scaffold: the workspace, CI, and release plumbing are in place, and the crate is an empty stub. The implementation will target the `ruststream` 0.6 line; the design and scope are tracked in [powersemmi/ruststream#191](https://github.com/powersemmi/ruststream/issues/191).
+Implemented and verified against Eclipse Mosquitto 2 (the framework's conformance lifecycle suite and the integration tests, including shared subscriptions and wildcard demultiplexing, run in CI against it). Tracks the `ruststream` 0.6 line; the crate itself is not published to crates.io yet. Design and scope are tracked in [powersemmi/ruststream#191](https://github.com/powersemmi/ruststream/issues/191).
 
-## Planned surface
+## Write a service
 
-- MQTT 5 as the primary target: user properties carry headers natively, and shared subscriptions express competing consumers.
-- A crate-owned event-loop task that demultiplexes packets into independent per-subscription streams without stalling keep-alive traffic.
-- QoS-aware acknowledgement: manual acks for at-least-once and exactly-once, `AckError::Unsupported` for at-most-once.
-- TLS with client certificates as part of the first release; retained messages, last will, and session persistence as configuration.
-- MQTT 3.1.1 as a documented compatibility mode with its limitations stated.
+```rust
+use std::time::Duration;
 
-The broker contract (lazy startup, the typed connect/shutdown lifecycle, and the optional capability traits) is defined by [`ruststream`](https://crates.io/crates/ruststream) and verified by `ruststream::conformance`, with the suite run against a real broker before release.
+use ruststream::runtime::{App, AppInfo, HandlerResult, RustStream};
+use ruststream::subscriber;
+use ruststream_rumqttc::{MqttBroker, MqttTopic, Qos};
+use serde::Deserialize;
+
+#[derive(Debug, Deserialize)]
+struct Telemetry {
+    temperature: f64,
+}
+
+#[subscriber(MqttTopic::new("devices/+/telemetry").qos(Qos::AtLeastOnce).shared("workers"))]
+async fn handle(telemetry: &Telemetry) -> HandlerResult {
+    println!("temperature: {}", telemetry.temperature);
+    HandlerResult::Ack
+}
+
+#[ruststream::app]
+fn app() -> impl App {
+    RustStream::new(AppInfo::new("telemetry", "0.1.0")).with_broker(
+        MqttBroker::new("mqtt://localhost:1883", "telemetry-svc")
+            .keep_alive(Duration::from_secs(30))
+            .clean_start(false)
+            .session_expiry(Duration::from_secs(3600)),
+        |b| {
+            b.include(handle);
+        },
+    )
+}
+```
+
+## Test it
+
+The `testing` feature runs handlers against an in-process MQTT stand-in - no server, same routing. Protocol behaviour (QoS handshakes, shared groups, session redelivery, retained messages) is covered by the env-gated live suite instead: `just test-brokers` starts mosquitto and runs the integration tests plus the framework conformance lifecycle against it.
+
+## Layout
+
+```
+ruststream-rumqttc/
+├── crates/
+│   └── ruststream-rumqttc/     the published crate
+│       └── examples/           runnable mqtt_* examples
+├── docker-compose.test.yml     mosquitto for the live suite
+└── Cargo.toml                  workspace
+```
 
 ## Contributing
 
 ```bash
-just check   # fmt, clippy, feature checks
-just test    # tests
-just ci      # the full local gate
+just check          # fmt, clippy, feature checks
+just test           # handler-stub tests, no server
+just test-brokers   # live integration + conformance against mosquitto
 ```
 
 ## License

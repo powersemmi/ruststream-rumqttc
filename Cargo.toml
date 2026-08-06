@@ -12,6 +12,14 @@ authors = ["RustStream contributors"]
 
 [workspace.dependencies]
 ruststream-rumqttc = { path = "crates/ruststream-rumqttc" }
+ruststream = { version = ">=0.6.0, <0.7.0", default-features = false }
+
+rumqttc = "0.25"
+bytes = "1"
+futures = "0.3"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+tracing = "0.1"
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

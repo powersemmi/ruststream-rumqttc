@@ -16,6 +16,7 @@ fn app() -> impl App {
     RustStream::new(AppInfo::new("retained", "0.1.0")).with_broker(
         MqttBroker::new("mqtt://localhost:1883", "retained-example"),
         |b| {
+            // --8<-- [start:retained]
             b.after_startup(
                 MqttPublish::default().qos(Qos::AtLeastOnce).retain(true),
                 async move |publisher| -> Result<(), MqttError> {
@@ -23,6 +24,7 @@ fn app() -> impl App {
                     publisher.publish(msg).await
                 },
             );
+            // --8<-- [end:retained]
         },
     )
 }

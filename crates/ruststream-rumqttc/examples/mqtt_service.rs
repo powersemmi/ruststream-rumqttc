@@ -5,6 +5,7 @@
 
 use std::time::Duration;
 
+// --8<-- [start:handler]
 use ruststream::runtime::{App, AppInfo, HandlerResult, RustStream};
 use ruststream::subscriber;
 use ruststream_rumqttc::{MqttBroker, MqttTopic, Qos};
@@ -20,7 +21,9 @@ async fn handle(telemetry: &Telemetry) -> HandlerResult {
     println!("temperature: {}", telemetry.temperature);
     HandlerResult::Ack
 }
+// --8<-- [end:handler]
 
+// --8<-- [start:app]
 #[ruststream::app]
 fn app() -> impl App {
     RustStream::new(AppInfo::new("telemetry", "0.1.0")).with_broker(
@@ -33,3 +36,4 @@ fn app() -> impl App {
         },
     )
 }
+// --8<-- [end:app]

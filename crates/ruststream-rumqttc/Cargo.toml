@@ -8,7 +8,7 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 readme = "../../README.md"
-keywords = ["mqtt", "mqtt5", "iot", "broker", "faststream"]
+keywords = ["mqtt", "mqtt5", "iot", "broker", "ruststream"]
 categories = ["asynchronous", "network-programming"]
 
 [lints]

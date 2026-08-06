@@ -12,6 +12,23 @@ ruststream-rumqttc = "0.6"
 serde = { version = "1", features = ["derive"] }
 ```
 
+## Capabilities
+
+Which of the framework's optional capability traits this broker implements natively, and where
+acknowledgement lands:
+
+| Capability | Native | Reason |
+| --- | --- | --- |
+| `Subscribe` | Yes | `ConnectedMqttBroker` opens a subscription from a topic filter, and `MqttTopic` is the `SubscriptionSource` descriptor. See [Subscriptions](#subscriptions). |
+| Acknowledgement (`ack` / `nack`) | Partial | `QoS` 1 and 2 settle through the protocol. `QoS` 0 and `nack(requeue = true)` report `AckError::Unsupported`. See [Acknowledgement](#acknowledgement). |
+| `BatchSubscriber` | No | MQTT delivers one PUBLISH packet at a time; the protocol has no batch fetch. |
+| `TransactionalPublisher` | No | MQTT has no transactions. |
+| `OwnedTransactions` | No | MQTT has no transactions. |
+| `RequestReply` | No | The protocol carries the pieces (MQTT 5 has a response-topic property, which the crate maps to the `reply-to` header in both directions), but the correlated `request(msg, timeout)` call is not implemented. A responder is written today as an ordinary handler that publishes to `ctx.headers().reply_to()`. See [Headers](#headers). |
+| `Partitioned` | No | MQTT has no partitions or routing keys; ordering is per topic on a connection. |
+| `Seekable` / `Positioned` | No | The broker keeps no history to reposition into. It stores one retained message per topic and the unacknowledged messages of a persistent session, neither of which is a seekable log. |
+| `DescribeServer` | Yes | `MqttBroker` reports its host and the `mqtt` protocol, which is what the AsyncAPI schema records. |
+
 ## The lifecycle
 
 The broker is a ladder of consuming transitions, so each state is a distinct type:

@@ -15,6 +15,10 @@
   <a href="https://t.me/ruststream_communuty_ru_chat"><img src="https://img.shields.io/badge/-Telegram-blue?logo=telegram&label=RU" alt="Telegram RU chat"></a>
 </p>
 
+<p align="center">
+  <b><a href="https://powersemmi.github.io/ruststream-rumqttc/">Documentation</a></b>
+</p>
+
 ---
 
 `ruststream-rumqttc` implements the RustStream broker contract over [`rumqttc`](https://crates.io/crates/rumqttc). Handlers, routers, codecs, and middleware come from the framework; this crate supplies the transport - and nothing broker-specific leaks back into the framework.

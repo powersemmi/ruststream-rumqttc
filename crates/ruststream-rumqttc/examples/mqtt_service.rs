@@ -6,9 +6,7 @@
 use std::time::Duration;
 
 // --8<-- [start:handler]
-use ruststream::runtime::{App, AppInfo, HandlerResult, RustStream};
-use ruststream::subscriber;
-use ruststream_rumqttc::{MqttBroker, MqttTopic, Qos};
+use ruststream_rumqttc::prelude::*;
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]

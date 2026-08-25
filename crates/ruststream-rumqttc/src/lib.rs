@@ -27,6 +27,7 @@ mod conn;
 mod error;
 mod filter;
 mod message;
+pub mod prelude;
 mod publisher;
 mod subscriber;
 #[cfg(feature = "testing")]

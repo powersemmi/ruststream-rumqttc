@@ -57,7 +57,8 @@ managed MQTT services that require a client certificate.
 
 `MqttTopic` is the subscription descriptor: one topic filter, a quality of service, and an optional
 share group. It implements `SubscriptionSource`, so it sits inline in the `#[subscriber(..)]`
-decorator:
+decorator. `ruststream_rumqttc::prelude` carries the framework's own prelude along with this
+crate's surface, so a service file states its broker once and imports nothing else:
 
 ```rust
 --8<-- "crates/ruststream-rumqttc/examples/mqtt_service.rs:handler"

@@ -53,9 +53,7 @@ ruststream-rumqttc = { version = "0.7", features = ["testing"] }
 ```rust
 use std::time::Duration;
 
-use ruststream::runtime::{App, AppInfo, HandlerResult, RustStream};
-use ruststream::subscriber;
-use ruststream_rumqttc::{MqttBroker, MqttTopic, Qos};
+use ruststream_rumqttc::prelude::*;
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]

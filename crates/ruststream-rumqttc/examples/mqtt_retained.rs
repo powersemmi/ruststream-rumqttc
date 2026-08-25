@@ -8,9 +8,11 @@
 //! Run a broker first (`just brokers-up`), then:
 //! `cargo run --example mqtt_retained -- run`
 
-use ruststream::runtime::{App, AppInfo, PublishError, PublishExt, RustStream};
-use ruststream::{OutgoingMessage, Publisher};
-use ruststream_rumqttc::{MqttBroker, MqttError, MqttPublish, MqttPublishOptions, Qos};
+use ruststream::OutgoingMessage;
+use ruststream::runtime::PublishError;
+// The error type is named here because this example handles it, in the hooks' return types.
+use ruststream_rumqttc::MqttError;
+use ruststream_rumqttc::prelude::*;
 
 #[ruststream::app]
 fn app() -> impl App {

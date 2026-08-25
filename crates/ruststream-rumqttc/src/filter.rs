@@ -105,12 +105,12 @@ impl MqttTopic {
                 self.filter
             )));
         }
-        if let Some(group) = &self.shared {
-            if group.is_empty() || group.contains(['/', '+', '#']) {
-                return Err(MqttError::Invalid(format!(
-                    "'{group}' is not a valid share group name"
-                )));
-            }
+        if let Some(group) = &self.shared
+            && (group.is_empty() || group.contains(['/', '+', '#']))
+        {
+            return Err(MqttError::Invalid(format!(
+                "'{group}' is not a valid share group name"
+            )));
         }
         Ok(())
     }

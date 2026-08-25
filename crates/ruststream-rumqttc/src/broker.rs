@@ -186,12 +186,12 @@ impl MqttBroker {
         if host.is_empty() {
             return Err(MqttError::Invalid("host must be non-empty".into()));
         }
-        if let Some(keep_alive) = self.keep_alive {
-            if keep_alive < Duration::from_secs(5) {
-                return Err(MqttError::Invalid(
-                    "keep_alive must be at least 5 seconds".into(),
-                ));
-            }
+        if let Some(keep_alive) = self.keep_alive
+            && keep_alive < Duration::from_secs(5)
+        {
+            return Err(MqttError::Invalid(
+                "keep_alive must be at least 5 seconds".into(),
+            ));
         }
 
         let mut options = MqttOptions::new(self.client_id.clone(), host, port);

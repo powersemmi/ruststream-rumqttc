@@ -3,16 +3,17 @@ resolver = "3"
 members = ["crates/ruststream-rumqttc"]
 
 [workspace.package]
-version = "0.6.0"
+version = "0.7.0"
 edition = "2024"
-rust-version = "1.85"
+# The floor tracks the core line: ruststream 0.7 requires 1.88, so a lower one cannot resolve it.
+rust-version = "1.88"
 license = "Apache-2.0"
 repository = "https://github.com/powersemmi/ruststream-rumqttc"
 authors = ["RustStream contributors"]
 
 [workspace.dependencies]
 ruststream-rumqttc = { path = "crates/ruststream-rumqttc" }
-ruststream = { version = ">=0.6.0, <0.7.0", default-features = false }
+ruststream = { version = ">=0.7.0, <0.8.0", default-features = false }
 
 rumqttc = "0.25"
 bytes = "1"

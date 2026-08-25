@@ -7,8 +7,8 @@ concepts (writing subscribers, routing, codecs, middleware), see the
 [RustStream documentation](https://powersemmi.github.io/ruststream/).
 
 ```toml
-ruststream = { version = "0.6", features = ["macros"] }
-ruststream-rumqttc = "0.6"
+ruststream = { version = "0.7", features = ["macros"] }
+ruststream-rumqttc = "0.7"
 serde = { version = "1", features = ["derive"] }
 ```
 
@@ -154,6 +154,34 @@ A successful publish means the message is owned by the client session, not that 
 confirmed it: for `QoS` 1 and 2 the session's state machine retransmits until acknowledged, across
 reconnects.
 
+### Per-message arguments
+
+The framework unified publishing behind one builder in 0.7: every surface (an injected publisher,
+an `Out` slot, a handler's reply) starts a publish the same way and differs only in what it
+declares. A broker embeds its own per-message arguments into that path with a publisher adapter -
+a step taken on the publisher before the builder starts, which carries the argument and hands the
+builder straight back.
+
+`MqttPublishOptions` supplies the two arguments MQTT carries on every PUBLISH packet:
+
+| Step | Overrides |
+| --- | --- |
+| `with_qos(qos)` | The delivery quality of service of this message. |
+| `with_retain(retain)` | Whether the broker keeps this message as the topic's retained one. |
+
+Both are per-message by protocol, while `MqttPublish` declares them for a whole publisher, so
+without the adapter a single retained announcement needs a publisher of its own. Either order
+composes, an argument the call does not name keeps the publisher's policy value, and the rest of
+the publish is the framework's:
+
+```rust
+--8<-- "crates/ruststream-rumqttc/examples/mqtt_retained.rs:per_publish"
+```
+
+The trait is also implemented for an `Out` slot holding an MQTT publisher, so a handler reaches
+the same steps through `Out<impl MqttPublishOptions>`. A publish made that way lands in the
+broker's publish log, but the `TestApp` harness does not attribute it to the slot.
+
 ### Retained messages
 
 `MqttPublish::default().retain(true)` publishes retained: the broker keeps the last message per
@@ -161,9 +189,10 @@ topic and hands it to each new subscriber on a matching filter, so a device's cu
 available to a service that starts after the state was published. Retained messages are not
 delivered to shared subscriptions.
 
-The retain flag is declaration on the policy, so the publish itself is ordinary. The scope's
-`after_startup` hook runs it once the broker is connected, which is where an announcement of this
-kind belongs:
+A publisher that retains everything it sends declares the flag once on its policy, and the publish
+itself is ordinary; a single announcement takes it per message with `with_retain(true)` instead.
+Either way the scope's `after_startup` hook runs it once the broker is connected, which is where an
+announcement of this kind belongs:
 
 ```rust
 --8<-- "crates/ruststream-rumqttc/examples/mqtt_retained.rs:retained"

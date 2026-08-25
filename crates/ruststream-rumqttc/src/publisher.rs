@@ -1,5 +1,7 @@
 //! [`MqttPublisher`] and its [`MqttPublish`] policy.
 
+use std::future::{Future, ready};
+
 use bytes::Bytes;
 use rumqttc::v5::mqttbytes::valid_topic;
 use ruststream::{OutgoingMessage, PairError, PublishPolicy, Publisher};
@@ -119,7 +121,10 @@ impl MqttPublish {
 impl PublishPolicy<ConnectedMqttBroker> for MqttPublish {
     type Live = MqttPublisher;
 
-    async fn pair(self, connected: &ConnectedMqttBroker) -> Result<Self::Live, PairError> {
-        Ok(connected.publisher_with(self))
+    fn pair(
+        self,
+        connected: &ConnectedMqttBroker,
+    ) -> impl Future<Output = Result<Self::Live, PairError>> {
+        ready(Ok(connected.publisher_with(self)))
     }
 }

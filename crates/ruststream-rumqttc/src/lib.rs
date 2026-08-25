@@ -16,9 +16,8 @@
 //!   `nack(requeue = true)` - MQTT has no negative acknowledgement, and unacked
 //!   messages redeliver when a persistent session resumes.
 //! - Retained messages, last will, session persistence, and TLS with client certificates are
-//!   configuration on the broker and the publish policy. The two arguments MQTT carries on every
-//!   PUBLISH packet, quality of service and the retain flag, are also available per message
-//!   through [`MqttPublishOptions`], which feeds them into the framework's publish builder.
+//!   configuration on the broker and the publish policy. Quality of service and the retain flag
+//!   are also settable per message through [`MqttPublishOptions`].
 
 #![forbid(unsafe_code)]
 

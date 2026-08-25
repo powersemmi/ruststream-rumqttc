@@ -58,7 +58,7 @@ managed MQTT services that require a client certificate.
 `MqttTopic` is the subscription descriptor: one topic filter, a quality of service, and an optional
 share group. It implements `SubscriptionSource`, so it sits inline in the `#[subscriber(..)]`
 decorator. `ruststream_rumqttc::prelude` carries the framework's own prelude along with this
-crate's surface, so a service file states its broker once and imports nothing else:
+crate's surface, so one glob covers a service file:
 
 ```rust
 --8<-- "crates/ruststream-rumqttc/examples/mqtt_service.rs:handler"
@@ -151,10 +151,9 @@ mount site, and the runtime pairs it with the connected broker at startup. It is
 default publish policy, so a `#[subscriber(.., publish("dest"))]` handler mounted without an
 explicit publisher sends through it.
 
-The prelude carries every policy under its broker-agnostic concept name, so a service that imports
-`ruststream_rumqttc::prelude::*` writes this one as `Publish` and a mount site reads the same on
-any broker. The prefixed `MqttPublish` remains at the crate root for a file that mixes brokers and
-has to say which one it means; the examples below use the prelude name.
+A service that imports `ruststream_rumqttc::prelude::*` writes this policy as `Publish`, the name
+the examples below use. The prefixed `MqttPublish` stays at the crate root, for a file that mixes
+brokers.
 
 A successful publish means the message is owned by the client session, not that the broker has
 confirmed it: for `QoS` 1 and 2 the session's state machine retransmits until acknowledged, across
@@ -162,23 +161,16 @@ reconnects.
 
 ### Per-message arguments
 
-The framework unified publishing behind one builder in 0.7: every surface (an injected publisher,
-an `Out` slot, a handler's reply) starts a publish the same way and differs only in what it
-declares. A broker embeds its own per-message arguments into that path with a publisher adapter -
-a step taken on the publisher before the builder starts, which carries the argument and hands the
-builder straight back.
-
-`MqttPublishOptions` supplies the two arguments MQTT carries on every PUBLISH packet:
+`MqttPublishOptions` overrides, for one message, the two arguments MQTT carries on every PUBLISH
+packet:
 
 | Step | Overrides |
 | --- | --- |
 | `with_qos(qos)` | The delivery quality of service of this message. |
 | `with_retain(retain)` | Whether the broker keeps this message as the topic's retained one. |
 
-Both are per-message by protocol, while `MqttPublish` declares them for a whole publisher, so
-without the adapter a single retained announcement needs a publisher of its own. Either order
-composes, an argument the call does not name keeps the publisher's policy value, and the rest of
-the publish is the framework's:
+Take either step on a publisher, in either order, then continue with the publish as usual. An
+argument the call does not name keeps the publisher's policy value:
 
 ```rust
 --8<-- "crates/ruststream-rumqttc/examples/mqtt_retained.rs:per_publish"
@@ -195,10 +187,9 @@ topic and hands it to each new subscriber on a matching filter, so a device's cu
 available to a service that starts after the state was published. Retained messages are not
 delivered to shared subscriptions.
 
-A publisher that retains everything it sends declares the flag once on its policy, and the publish
-itself is ordinary; a single announcement takes it per message with `with_retain(true)` instead.
-Either way the scope's `after_startup` hook runs it once the broker is connected, which is where an
-announcement of this kind belongs:
+A publisher that retains everything it sends declares the flag once on its policy; a single
+announcement takes it per message with `with_retain(true)`. Either way the scope's `after_startup`
+hook runs the publish once the broker is connected:
 
 ```rust
 --8<-- "crates/ruststream-rumqttc/examples/mqtt_retained.rs:retained"

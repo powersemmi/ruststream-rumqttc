@@ -33,7 +33,7 @@ MQTT 5 is the primary target because two things the framework relies on exist on
 - **Wildcards as the protocol defines them** (`+`, `#`), with messages reporting the real topic they arrived on.
 - **Headers ride user properties**; the well-known `content-type`, `reply-to`, and `correlation-id` headers ride the matching first-class MQTT 5 properties.
 - **Sessions, wills, retained.** `clean_start`/`session_expiry` for persistent sessions, `last_will` on the broker, `retain` on the publish policy, TLS with client certificates (`tls_ca` + `tls_client_auth`) for managed MQTT services.
-- **Per-message QoS and retain.** Both ride every PUBLISH packet, so `MqttPublishOptions` reopens them at the call site (`publisher.with_retain(true).message(&state).publish()`) instead of demanding a publisher whose policy declares them.
+- **Per-message QoS and retain.** `MqttPublishOptions` sets either on a single publish: `publisher.with_retain(true).message(&state).publish()`.
 - **In-process test broker** (feature `testing`). `MqttTestBroker` reproduces core routing with no server, implements `ruststream::testing::TestableBroker`, and passes the framework's conformance suite in process.
 
 ## Install

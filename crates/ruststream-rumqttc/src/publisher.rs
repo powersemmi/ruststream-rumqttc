@@ -145,17 +145,13 @@ impl Publisher for MqttPublishOverride<'_> {
 
 /// The two arguments MQTT carries on every PUBLISH packet, reopened at the call site.
 ///
-/// `QoS` and the retain flag are per-message by protocol, but [`MqttPublish`] declares them for
-/// a whole publisher, so a single retained announcement otherwise needs a publisher of its own.
-/// Each method here returns an [`MqttPublishOverride`] adapter carrying the value into the
-/// framework's publish builder, which continues unchanged from there:
-/// `publisher.with_retain(true).message(&state).publish()`.
+/// Each method returns an [`MqttPublishOverride`] adapter carrying the value, and the publish
+/// continues from there: `publisher.with_retain(true).message(&state).publish()`.
 ///
-/// Implemented for the publisher and for an `Out` slot holding one; the adapter's own methods
-/// of the same names refine it further, so the two arguments compose in either order. A publish
-/// made from a slot through the adapter reaches the broker's publish log, but is not attributed
-/// to the slot by the `TestApp` harness's per-slot capture, the same way a value taken out of a
-/// slot always is.
+/// Implemented for the publisher and for an `Out` slot holding one; the adapter's own methods of
+/// the same names refine it further, so the two arguments compose in either order. A publish made
+/// from a slot through the adapter reaches the broker's publish log, but the `TestApp` harness
+/// does not attribute it to the slot.
 ///
 /// # Examples
 ///

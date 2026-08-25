@@ -21,7 +21,7 @@ fn app() -> impl App {
         |b| {
             // --8<-- [start:retained]
             b.after_startup(
-                MqttPublish::default().qos(Qos::AtLeastOnce).retain(true),
+                Publish::default().qos(Qos::AtLeastOnce).retain(true),
                 async move |publisher| -> Result<(), MqttError> {
                     let msg = OutgoingMessage::new("devices/dev42/state", b"online".as_slice());
                     publisher.publish(msg).await
@@ -31,7 +31,7 @@ fn app() -> impl App {
 
             // --8<-- [start:per_publish]
             b.after_startup(
-                MqttPublish::default(),
+                Publish::default(),
                 async move |publisher| -> Result<(), PublishError<MqttError>> {
                     publisher
                         .with_retain(true)

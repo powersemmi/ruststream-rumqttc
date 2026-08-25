@@ -26,6 +26,14 @@ pub use ruststream::prelude::*;
 // glob is exactly how a user reaches `with_qos` / `with_retain` without naming it.
 pub use crate::{MqttBroker, MqttPublish, MqttPublishOptions, MqttTopic, Qos};
 
+// This glob is also this broker's capability manifest: it re-exports every optional capability
+// trait the connected and live forms implement, so a multi-broker service globbing two preludes
+// unifies on the same core items and the compiler checks the overlap. MQTT implements none of
+// them - no transactions, no partitions or routing keys, no seekable log, no native
+// request/reply, and one PUBLISH packet at a time rather than a batch fetch (see the capability
+// table in `docs/mqtt.md` for the protocol reason behind each). Add the trait here when a
+// capability is implemented: an empty manifest is a statement about the broker, not an oversight.
+
 // Deliberately absent:
 //
 // - `testing` (`MqttTestBroker` and its policy): feature-gated broker-author tooling, imported

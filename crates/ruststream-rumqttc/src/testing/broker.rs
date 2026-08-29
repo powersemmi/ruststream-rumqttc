@@ -25,7 +25,7 @@ impl TestState {
         self.coordinator.get()
     }
 
-    pub(crate) fn publish(&self, name: &str, payload: Bytes, headers: ruststream::Headers) {
+    pub(crate) fn publish(&self, name: &str, payload: Bytes, headers: ruststream::HeaderMap) {
         self.router
             .publish(name, payload, headers, self.coordinator());
     }

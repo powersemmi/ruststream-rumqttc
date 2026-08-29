@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use futures::StreamExt;
 use ruststream::{
-    AckError, Broker, ConnectedBroker, Headers, IncomingMessage, OutgoingMessage, Publisher,
+    AckError, Broker, ConnectedBroker, HeaderMap, IncomingMessage, OutgoingMessage, Publisher,
     Subscriber,
 };
 use ruststream_rumqttc::{ConnectedMqttBroker, MqttBroker, MqttPublishOptions, MqttTopic, Qos};
@@ -47,7 +47,7 @@ async fn roundtrip_preserves_payload_and_headers() {
         .await
         .expect("subscription opens");
 
-    let mut headers = Headers::new();
+    let mut headers = HeaderMap::new();
     headers.insert("content-type", "application/json");
     headers.insert("x-tenant", "acme");
     headers.insert("correlation-id", "corr-1");

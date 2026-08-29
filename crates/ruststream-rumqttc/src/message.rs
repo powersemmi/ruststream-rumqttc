@@ -8,7 +8,7 @@ use bytes::Bytes;
 use rumqttc::v5::AsyncClient;
 use rumqttc::v5::mqttbytes::QoS;
 use rumqttc::v5::mqttbytes::v5::{Publish, PublishProperties};
-use ruststream::{AckError, Headers, IncomingMessage, OutgoingMessage};
+use ruststream::{AckError, HeaderMap, IncomingMessage, OutgoingMessage};
 
 /// A message delivered by an [`MqttSubscriber`](crate::MqttSubscriber).
 ///
@@ -20,7 +20,7 @@ use ruststream::{AckError, Headers, IncomingMessage, OutgoingMessage};
 /// outcome the protocol offers).
 pub struct MqttMessage {
     payload: Bytes,
-    headers: Headers,
+    headers: HeaderMap,
     topic: String,
     /// `None` when this delivery carries no acknowledgement: `QoS` 0, or a fanned-out copy on
     /// an overlapping filter (the wire ack belongs to exactly one delivery).
@@ -38,7 +38,7 @@ impl std::fmt::Debug for MqttMessage {
 
 impl MqttMessage {
     pub(crate) fn new(topic: String, publish: &Publish, client: Option<AsyncClient>) -> Self {
-        let mut headers = Headers::new();
+        let mut headers = HeaderMap::new();
         if let Some(properties) = &publish.properties {
             for (name, value) in &properties.user_properties {
                 headers.insert(name.clone(), value.clone());
@@ -77,7 +77,7 @@ impl IncomingMessage for MqttMessage {
         &self.payload
     }
 
-    fn headers(&self) -> &Headers {
+    fn headers(&self) -> &HeaderMap {
         &self.headers
     }
 
@@ -130,7 +130,7 @@ mod tests {
 
     #[test]
     fn well_known_headers_ride_first_class_properties() {
-        let mut headers = Headers::new();
+        let mut headers = HeaderMap::new();
         headers.insert("content-type", "application/json");
         headers.insert("reply-to", "replies/1");
         headers.insert("correlation-id", "corr-1");

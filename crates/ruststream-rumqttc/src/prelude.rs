@@ -1,7 +1,15 @@
-//! The imports a service on MQTT writes every time, in one glob.
+//! The imports a routes file on MQTT writes every time, in one glob.
 //!
 //! Carries the framework's own prelude plus this crate's surface: the broker, the subscription
-//! descriptor and its quality of service, the [`MqttPublish`] policy, and the per-publish steps.
+//! descriptor and its quality of service, the publish policy as [`Publish`], and the per-publish
+//! steps.
+//!
+//! A handler file needs none of it: a body binds its injected publisher with a capability trait
+//! and names no broker type, so it imports the framework's prelude alone. This glob is the mount
+//! site's, and importing it is the statement of which broker the routes run on.
+//!
+//! A file that mixes two brokers imports the prefixed [`MqttPublish`](crate::MqttPublish) from
+//! the crate root instead.
 //!
 //! # Examples
 //!
@@ -12,7 +20,7 @@
 //! let topic = MqttTopic::new("devices/+/telemetry")
 //!     .qos(Qos::AtLeastOnce)
 //!     .shared("workers");
-//! let policy = MqttPublish::default().qos(Qos::ExactlyOnce).retain(true);
+//! let policy = Publish::default().qos(Qos::ExactlyOnce).retain(true);
 //! # let _ = (broker, topic, policy);
 //! ```
 
@@ -20,11 +28,10 @@
 // the core glob rides along here instead of being left to each service file.
 pub use ruststream::prelude::*;
 
-// Every name here stays prefixed. An unprefixed alias would win over the glob above rather than
-// clash with it, so a framework name this crate happened to reuse would go silently missing from
-// a service that imports the prelude: `Publish`, the framework's slot capability trait, is the
-// live case.
-pub use crate::{MqttBroker, MqttPublish, MqttPublishOptions, MqttTopic, Qos};
+// Policies are re-exported under their broker-agnostic concept name; keep the alias when adding
+// one. The name is this glob's to give: a handler bounds its slot with a capability trait through
+// the framework's prelude, and never sees this one.
+pub use crate::{MqttBroker, MqttPublish as Publish, MqttPublishOptions, MqttTopic, Qos};
 
 // Capability manifest deliberately empty: MQTT implements none of the seven (see the capability
 // table in docs/mqtt.md); add a trait here when a capability lands.
@@ -39,13 +46,13 @@ pub use crate::{MqttBroker, MqttPublish, MqttPublishOptions, MqttTopic, Qos};
 mod tests {
     use super::*;
 
-    // A shadowed framework name reports nothing here and nothing at the re-export: the error
-    // lands in the service that imported this prelude, naming a type where it wanted a trait.
-    // These bounds move it back to this crate, where the shadowing would be introduced.
-    fn _publish_is_the_framework_slot_trait<T: Publish>(_: T) {}
-    fn _publisher_is_the_framework_trait<T: Publisher>(_: T) {}
+    // The two vocabularies this glob has to serve, pinned where they are handed out rather than
+    // in the service that would otherwise meet the failure: the capability a handler binds with
+    // stays a trait, and the policy a mount site attaches answers to its concept name.
+    fn _the_capability_a_handler_binds_with_is_a_trait<T: Publisher>() {}
 
-    fn _the_policy_keeps_its_prefixed_name() -> MqttPublish {
-        MqttPublish::default()
+    #[test]
+    fn the_policy_answers_to_its_concept_name() {
+        let _: Publish = Publish::default();
     }
 }

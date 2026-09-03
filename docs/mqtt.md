@@ -151,6 +151,15 @@ mount site, and the runtime pairs it with the connected broker at startup. It is
 default publish policy, so a `#[subscriber(.., publish("dest"))]` handler mounted without an
 explicit publisher sends through it.
 
+Which name a file writes follows from which prelude it imports, and the two do not overlap. A
+handler file imports `ruststream::prelude::*` and bounds its injected publisher with a capability
+trait - `Out<impl Publisher>`, or this crate's `Out<impl MqttPublishOptions>` - so the body names no
+broker type at all. A routes file imports `ruststream_rumqttc::prelude::*`, which carries the
+framework's prelude along with this crate's surface and gives each policy its uniform mount-site
+name: `MqttPublish` is `Publish` there, so a mount site reads the same whichever broker it runs on
+and porting a service changes the import rather than the call. The prefixed name stays at the crate
+root, for a file that mixes two brokers and has to say which one it means.
+
 A successful publish means the message is owned by the client session, not that the broker has
 confirmed it: for `QoS` 1 and 2 the session's state machine retransmits until acknowledged, across
 reconnects.
@@ -207,7 +216,7 @@ broker refuses it on the same terms, which is where a service meets the mistake 
 
 ### Retained messages
 
-`MqttPublish::default().retain(true)` publishes retained: the broker keeps the last message per
+`Publish::default().retain(true)` publishes retained: the broker keeps the last message per
 topic and hands it to each new subscriber on a matching filter, so a device's current state is
 available to a service that starts after the state was published. Retained messages are not
 delivered to shared subscriptions.

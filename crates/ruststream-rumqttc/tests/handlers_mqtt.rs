@@ -168,7 +168,7 @@ fn a_slot_bound_with_the_crate_capability_mounts_on_the_real_broker() {
         MqttBroker::new("mqtt://localhost:1883", "mqtt-handlers"),
         |b| {
             b.include(announce_state)
-                .out(States, MqttPublish::default())
+                .out(States, Publish::default())
                 .build();
         },
     );

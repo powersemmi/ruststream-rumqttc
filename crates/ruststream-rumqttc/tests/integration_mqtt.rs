@@ -11,7 +11,9 @@ use ruststream::{
     AckError, Broker, ConnectedBroker, HeaderMap, IncomingMessage, OutgoingMessage, Publisher,
     Subscriber,
 };
-use ruststream_rumqttc::{ConnectedMqttBroker, MqttBroker, MqttPublishOptions, MqttTopic, Qos};
+use ruststream_rumqttc::{
+    ConnectedMqttBroker, MqttBroker, MqttError, MqttPublishOptions, MqttTopic, QOS_HEADER, Qos,
+};
 
 const RECV_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -216,6 +218,56 @@ async fn a_per_publish_qos_override_settles_through_the_protocol() {
         .expect("stream is open")
         .expect("delivery is ok");
     assert_eq!(message.payload(), b"once");
+    message.ack().await.expect("ack succeeds");
+
+    connected.shutdown().await.expect("shutdown succeeds");
+}
+
+/// A publish naming a delivery guarantee this crate cannot read is refused against a live
+/// connection too, and the subscription that would have received it sees nothing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_unreadable_publish_argument_is_refused_before_the_wire() {
+    let Some(url) = test_url() else { return };
+    let connected = connect(&url, "bad-argument").await;
+
+    let topic = unique("refused");
+    let mut subscriber = connected
+        .subscribe_topic(MqttTopic::new(&topic))
+        .await
+        .expect("subscription opens");
+
+    let mut headers = HeaderMap::new();
+    headers.insert(QOS_HEADER, "sometimes");
+    let error = connected
+        .publisher()
+        .publish(OutgoingMessage::new(&topic, b"never sent".as_slice()).with_headers(headers))
+        .await
+        .expect_err("the argument is outside the vocabulary");
+    assert!(matches!(
+        &error,
+        MqttError::InvalidPublishArgument { header, value, .. }
+            if *header == QOS_HEADER && value == "sometimes"
+    ));
+
+    // A publish that did happen proves the subscription is live, so the silence above is the
+    // refusal rather than a delivery still in flight.
+    connected
+        .publisher()
+        .publish(OutgoingMessage::new(&topic, b"sent".as_slice()))
+        .await
+        .expect("publish succeeds");
+
+    let mut stream = pin!(subscriber.stream());
+    let message = tokio::time::timeout(RECV_TIMEOUT, stream.next())
+        .await
+        .expect("delivery arrives")
+        .expect("stream is open")
+        .expect("delivery is ok");
+    assert_eq!(
+        message.payload(),
+        b"sent",
+        "the refused message never reached the broker"
+    );
     message.ack().await.expect("ack succeeds");
 
     connected.shutdown().await.expect("shutdown succeeds");

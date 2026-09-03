@@ -19,10 +19,15 @@ use crate::message::to_wire_properties;
 /// [`Publisher::publish`] takes a message and nothing else, so a per-message transport argument
 /// reaches the send path as a header - the mechanism the framework names for a delivery option a
 /// broker expresses that way. The publisher consumes it: it never travels as a user property.
+///
+/// Any other value fails the publish with
+/// [`MqttError::InvalidPublishArgument`](crate::MqttError::InvalidPublishArgument), naming the
+/// header and quoting what arrived. Nothing reaches the wire: a call that asked for a delivery
+/// guarantee is not quietly served with the publisher's own.
 pub const QOS_HEADER: &str = "mqtt-qos";
 
-/// The header the per-message retain flag rides (`"true"` or `"false"`), consumed by the
-/// publisher exactly as [`QOS_HEADER`] is.
+/// The header the per-message retain flag rides (`"true"` or `"false"`), consumed - and, on any
+/// other value, refused - by the publisher exactly as [`QOS_HEADER`] is.
 pub const RETAIN_HEADER: &str = "mqtt-retain";
 
 /// The single send path: every publishing form resolves to a `QoS` and a retain flag, and the
@@ -43,10 +48,12 @@ async fn send(
             reason: "not a valid MQTT topic (wildcards are subscribe-only)".to_owned(),
         });
     }
-    let payload = Bytes::copy_from_slice(msg.payload());
-    let (per_message, properties) = to_wire_properties(&msg);
+    // Read before anything is built, so a publish naming an argument this crate cannot read is
+    // refused rather than sent under the publisher's own guarantee.
+    let (per_message, properties) = to_wire_properties(&msg)?;
     let qos = per_message.qos.unwrap_or(qos);
     let retain = per_message.retain.unwrap_or(retain);
+    let payload = Bytes::copy_from_slice(msg.payload());
     let outcome = match properties {
         Some(properties) => {
             core.client

@@ -148,14 +148,14 @@ impl Publisher for MqttTestPublisher {
 
     fn publish(&self, msg: OutgoingMessage<'_>) -> impl Future<Output = Result<(), Self::Error>> {
         // The per-message arguments are consumed here as the real publisher consumes them, so a
-        // delivery carries what a subscriber would see. Applying them is protocol behaviour this
-        // transport does not reproduce, which is what the live suite covers.
-        self.state.publish(
-            msg.name(),
-            Bytes::copy_from_slice(msg.payload()),
-            without_per_message(msg.headers().clone()),
-        );
-        ready(Ok(()))
+        // delivery carries what a subscriber would see and an unreadable one is refused on the
+        // same terms. Applying them is protocol behaviour this transport does not reproduce,
+        // which is what the live suite covers.
+        let outcome = without_per_message(msg.headers().clone()).map(|headers| {
+            self.state
+                .publish(msg.name(), Bytes::copy_from_slice(msg.payload()), headers);
+        });
+        ready(outcome)
     }
 }
 

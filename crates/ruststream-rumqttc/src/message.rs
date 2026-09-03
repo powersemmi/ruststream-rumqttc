@@ -10,6 +10,7 @@ use rumqttc::v5::mqttbytes::QoS;
 use rumqttc::v5::mqttbytes::v5::{Publish, PublishProperties};
 use ruststream::{AckError, HeaderMap, IncomingMessage, OutgoingMessage};
 
+use crate::error::MqttError;
 use crate::filter::Qos;
 use crate::publisher::{QOS_HEADER, RETAIN_HEADER};
 
@@ -113,32 +114,54 @@ pub(crate) struct PerMessage {
     pub(crate) retain: Option<bool>,
 }
 
+/// Reads the quality of service off its header, naming what the header takes and what arrived.
+fn read_qos(value: &[u8]) -> Result<Qos, MqttError> {
+    Qos::from_header(value).ok_or_else(|| MqttError::InvalidPublishArgument {
+        header: QOS_HEADER,
+        value: String::from_utf8_lossy(value).into_owned(),
+        expected: "a quality of service (\"0\", \"1\", \"2\")",
+    })
+}
+
+/// Reads the retain flag off its header, on the same terms.
+fn read_retain(value: &[u8]) -> Result<bool, MqttError> {
+    match value {
+        b"true" => Ok(true),
+        b"false" => Ok(false),
+        _ => Err(MqttError::InvalidPublishArgument {
+            header: RETAIN_HEADER,
+            value: String::from_utf8_lossy(value).into_owned(),
+            expected: "a retain flag (\"true\", \"false\")",
+        }),
+    }
+}
+
 /// Splits an outgoing message's headers into the per-message transport arguments and the wire
 /// properties for everything else.
 ///
 /// The two arguments are a channel between the adapter and this send path, so they are consumed
 /// here and never travel as user properties. The properties are `None` when nothing else is left
 /// to send, so a plain message stays property-free on the wire.
+///
+/// # Errors
+///
+/// Returns [`MqttError::InvalidPublishArgument`] when an argument header carries a value outside
+/// its vocabulary. A publish that named a delivery guarantee is refused rather than sent under
+/// the publisher's own, which would substitute a different guarantee without saying so.
 pub(crate) fn to_wire_properties(
     msg: &OutgoingMessage<'_>,
-) -> (PerMessage, Option<PublishProperties>) {
+) -> Result<(PerMessage, Option<PublishProperties>), MqttError> {
     let mut per_message = PerMessage::default();
     let mut properties = PublishProperties::default();
     let mut carries_properties = false;
     for (name, value) in msg.headers().iter() {
-        // A value this crate does not recognise leaves the argument unset, which keeps the
-        // publisher's own policy rather than guessing at an intent the header cannot state.
         match name {
             QOS_HEADER => {
-                per_message.qos = Qos::from_header(value);
+                per_message.qos = Some(read_qos(value)?);
                 continue;
             }
             RETAIN_HEADER => {
-                per_message.retain = match value {
-                    b"true" => Some(true),
-                    b"false" => Some(false),
-                    _ => None,
-                };
+                per_message.retain = Some(read_retain(value)?);
                 continue;
             }
             _ => {}
@@ -154,17 +177,26 @@ pub(crate) fn to_wire_properties(
             other => properties.user_properties.push((other.to_owned(), text)),
         }
     }
-    (per_message, carries_properties.then_some(properties))
+    Ok((per_message, carries_properties.then_some(properties)))
 }
 
 /// Drops the per-message transport arguments from a header map, leaving what a subscriber sees.
 /// The in-process test broker routes through it so its deliveries carry what the real transport
 /// delivers; the arguments themselves say nothing without a protocol to apply them to.
+///
+/// # Errors
+///
+/// Reads each argument it drops, so an unreadable one is refused here exactly as the live
+/// publisher refuses it, and a test meets the error a server would have produced.
 #[cfg(feature = "testing")]
-pub(crate) fn without_per_message(mut headers: HeaderMap) -> HeaderMap {
-    headers.remove(QOS_HEADER);
-    headers.remove(RETAIN_HEADER);
-    headers
+pub(crate) fn without_per_message(mut headers: HeaderMap) -> Result<HeaderMap, MqttError> {
+    if let Some(value) = headers.remove(QOS_HEADER) {
+        read_qos(&value)?;
+    }
+    if let Some(value) = headers.remove(RETAIN_HEADER) {
+        read_retain(&value)?;
+    }
+    Ok(headers)
 }
 
 #[cfg(test)]
@@ -180,7 +212,7 @@ mod tests {
         headers.insert("x-tenant", "acme");
         let outgoing = OutgoingMessage::new("orders", b"{}".as_slice()).with_headers(headers);
 
-        let (per_message, properties) = to_wire_properties(&outgoing);
+        let (per_message, properties) = to_wire_properties(&outgoing).expect("headers are read");
         assert_eq!(per_message, PerMessage::default());
         let properties = properties.expect("properties built");
         assert_eq!(properties.content_type.as_deref(), Some("application/json"));
@@ -198,7 +230,8 @@ mod tests {
     #[test]
     fn plain_messages_stay_property_free() {
         let outgoing = OutgoingMessage::new("orders", b"{}".as_slice());
-        assert!(to_wire_properties(&outgoing).1.is_none());
+        let (_, properties) = to_wire_properties(&outgoing).expect("headers are read");
+        assert!(properties.is_none());
     }
 
     #[test]
@@ -208,7 +241,7 @@ mod tests {
         headers.insert(RETAIN_HEADER, "true");
         let outgoing = OutgoingMessage::new("states", b"online".as_slice()).with_headers(headers);
 
-        let (per_message, properties) = to_wire_properties(&outgoing);
+        let (per_message, properties) = to_wire_properties(&outgoing).expect("headers are read");
         assert_eq!(per_message.qos, Some(Qos::ExactlyOnce));
         assert_eq!(per_message.retain, Some(true));
         assert!(
@@ -217,13 +250,38 @@ mod tests {
         );
     }
 
+    /// The message has to name the header and quote the value: the publish is refused, and what
+    /// the caller wrote is the only thing that says why.
     #[test]
-    fn an_unreadable_argument_leaves_the_publisher_policy_in_place() {
+    fn an_unreadable_quality_of_service_fails_the_publish_by_name() {
         let mut headers = HeaderMap::new();
         headers.insert(QOS_HEADER, "sometimes");
+        let outgoing = OutgoingMessage::new("states", b"online".as_slice()).with_headers(headers);
+
+        let error = to_wire_properties(&outgoing).expect_err("the value is outside the vocabulary");
+        assert!(matches!(
+            &error,
+            MqttError::InvalidPublishArgument { header, value, .. }
+                if *header == QOS_HEADER && value == "sometimes"
+        ));
+        assert_eq!(
+            error.to_string(),
+            "invalid mqtt publish argument: the mqtt-qos header carries a quality of service \
+             (\"0\", \"1\", \"2\"); got \"sometimes\""
+        );
+    }
+
+    #[test]
+    fn an_unreadable_retain_flag_fails_the_publish_by_name() {
+        let mut headers = HeaderMap::new();
         headers.insert(RETAIN_HEADER, "perhaps");
         let outgoing = OutgoingMessage::new("states", b"online".as_slice()).with_headers(headers);
 
-        assert_eq!(to_wire_properties(&outgoing).0, PerMessage::default());
+        let error = to_wire_properties(&outgoing).expect_err("the value is outside the vocabulary");
+        assert!(matches!(
+            &error,
+            MqttError::InvalidPublishArgument { header, value, .. }
+                if *header == RETAIN_HEADER && value == "perhaps"
+        ));
     }
 }

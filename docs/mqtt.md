@@ -196,8 +196,14 @@ goes through the slot's own `message(..)` and names the arguments in its headers
 headers - `mqtt-qos` (the protocol's own `0`, `1`, `2`) and `mqtt-retain` (`true` or `false`), both
 exported as `QOS_HEADER` and `RETAIN_HEADER`. This is the mechanism the framework names for a
 delivery option a broker expresses that way, and it is what lets the step wrap a slot entry rather
-than the publisher underneath it. The publisher consumes both: neither travels as a user property,
-and a value it cannot read leaves the publisher's own policy in place.
+than the publisher underneath it. The publisher consumes both, so neither travels as a user
+property.
+
+A value outside those vocabularies fails the publish with `MqttError::InvalidPublishArgument`,
+naming the header and quoting what arrived, and nothing reaches the wire. Sending the message under
+the publisher's own quality of service instead would answer a call that asked for one guarantee
+with another and say nothing about it, so the error is the only honest outcome. The in-process test
+broker refuses it on the same terms, which is where a service meets the mistake first.
 
 ### Retained messages
 

@@ -15,9 +15,9 @@ struct Telemetry {
 }
 
 #[subscriber(MqttTopic::new("devices/+/telemetry").qos(Qos::AtLeastOnce).shared("workers"))]
-async fn handle(telemetry: &Telemetry) -> HandlerResult {
+async fn handle(telemetry: &Telemetry) -> HandlerOutcome {
     println!("temperature: {}", telemetry.temperature);
-    HandlerResult::Ack
+    HandlerOutcome::ack()
 }
 // --8<-- [end:handler]
 

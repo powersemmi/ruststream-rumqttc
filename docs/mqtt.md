@@ -159,6 +159,16 @@ A successful publish means the message is owned by the client session, not that 
 confirmed it: for `QoS` 1 and 2 the session's state machine retransmits until acknowledged, across
 reconnects.
 
+An MQTT payload is frequently a wire value the service already holds - a state string, a sensor
+frame, a protobuf record - rather than a model the framework should encode. Declare it as a
+serialized type and the bytes leave exactly as they are, with no codec on the path, while the
+declaration still names the topic; a `{placeholder}` in that name becomes a setter the call fills
+in:
+
+```rust
+--8<-- "crates/ruststream-rumqttc/examples/mqtt_retained.rs:state"
+```
+
 ### Per-message arguments
 
 `MqttPublishOptions` overrides, for one message, the two arguments MQTT carries on every PUBLISH

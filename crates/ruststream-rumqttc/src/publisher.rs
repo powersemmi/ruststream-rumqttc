@@ -101,15 +101,21 @@ impl Publisher for MqttPublisher {
 ///
 /// ```
 /// use ruststream::runtime::PublishExt;
+/// use ruststream::{Outgoing, Serialized};
 /// use ruststream_rumqttc::{MqttBroker, MqttPublishOptions, Qos};
+///
+/// // An MQTT state is bytes on the wire rather than an encoded model, so the type carries its
+/// // own bytes and no codec runs on them.
+/// #[derive(Outgoing, Serialized)]
+/// #[outgoing(name = "devices/dev42/state")]
+/// struct DeviceState(Vec<u8>);
 ///
 /// # async fn demo() -> Result<(), Box<dyn std::error::Error>> {
 /// let publisher = MqttBroker::new("mqtt://localhost:1883", "states").publisher();
 /// publisher
 ///     .with_retain(true)
 ///     .with_qos(Qos::ExactlyOnce)
-///     .raw(b"online")
-///     .to("devices/dev42/state")
+///     .message(&DeviceState(b"online".to_vec()))
 ///     .publish()
 ///     .await?;
 /// # Ok(())

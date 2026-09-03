@@ -186,6 +186,11 @@ The trait is also implemented for an `Out` slot holding an MQTT publisher, so a 
 the same steps through `Out<impl MqttPublishOptions>`. A publish made that way lands in the
 broker's publish log, but the `TestApp` harness does not attribute it to the slot.
 
+Quality of service and retain are transport arguments, and the in-process test broker reproduces
+core routing only, so its publisher does not carry them: a handler bound to this trait mounts on
+the real broker and is exercised against a server. A handler that only needs to publish binds the
+framework's own `Out<impl Publisher>` instead and runs on both.
+
 ### Retained messages
 
 `MqttPublish::default().retain(true)` publishes retained: the broker keeps the last message per

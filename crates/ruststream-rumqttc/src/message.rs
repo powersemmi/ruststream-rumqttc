@@ -10,6 +10,9 @@ use rumqttc::v5::mqttbytes::QoS;
 use rumqttc::v5::mqttbytes::v5::{Publish, PublishProperties};
 use ruststream::{AckError, HeaderMap, IncomingMessage, OutgoingMessage};
 
+use crate::filter::Qos;
+use crate::publisher::{QOS_HEADER, RETAIN_HEADER};
+
 /// A message delivered by an [`MqttSubscriber`](crate::MqttSubscriber).
 ///
 /// `ack` acknowledges through the protocol for `QoS` 1 (`PUBACK`) and `QoS` 2 (`PUBREC`, with the
@@ -102,15 +105,45 @@ impl IncomingMessage for MqttMessage {
     }
 }
 
-/// Builds the wire properties for an outgoing publish. Returns `None` when the message
-/// carries no headers, so plain messages stay property-free on the wire.
-pub(crate) fn to_publish_properties(msg: &OutgoingMessage<'_>) -> Option<PublishProperties> {
-    let headers = msg.headers();
-    if headers.is_empty() {
-        return None;
-    }
+/// The per-message transport arguments an [`MqttPublishOptions`](crate::MqttPublishOptions)
+/// adapter put on an outgoing message. Absent means "keep the publisher's policy value".
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PerMessage {
+    pub(crate) qos: Option<Qos>,
+    pub(crate) retain: Option<bool>,
+}
+
+/// Splits an outgoing message's headers into the per-message transport arguments and the wire
+/// properties for everything else.
+///
+/// The two arguments are a channel between the adapter and this send path, so they are consumed
+/// here and never travel as user properties. The properties are `None` when nothing else is left
+/// to send, so a plain message stays property-free on the wire.
+pub(crate) fn to_wire_properties(
+    msg: &OutgoingMessage<'_>,
+) -> (PerMessage, Option<PublishProperties>) {
+    let mut per_message = PerMessage::default();
     let mut properties = PublishProperties::default();
-    for (name, value) in headers.iter() {
+    let mut carries_properties = false;
+    for (name, value) in msg.headers().iter() {
+        // A value this crate does not recognise leaves the argument unset, which keeps the
+        // publisher's own policy rather than guessing at an intent the header cannot state.
+        match name {
+            QOS_HEADER => {
+                per_message.qos = Qos::from_header(value);
+                continue;
+            }
+            RETAIN_HEADER => {
+                per_message.retain = match value {
+                    b"true" => Some(true),
+                    b"false" => Some(false),
+                    _ => None,
+                };
+                continue;
+            }
+            _ => {}
+        }
+        carries_properties = true;
         let text = String::from_utf8_lossy(value).into_owned();
         match name {
             "content-type" => properties.content_type = Some(text),
@@ -121,7 +154,17 @@ pub(crate) fn to_publish_properties(msg: &OutgoingMessage<'_>) -> Option<Publish
             other => properties.user_properties.push((other.to_owned(), text)),
         }
     }
-    Some(properties)
+    (per_message, carries_properties.then_some(properties))
+}
+
+/// Drops the per-message transport arguments from a header map, leaving what a subscriber sees.
+/// The in-process test broker routes through it so its deliveries carry what the real transport
+/// delivers; the arguments themselves say nothing without a protocol to apply them to.
+#[cfg(feature = "testing")]
+pub(crate) fn without_per_message(mut headers: HeaderMap) -> HeaderMap {
+    headers.remove(QOS_HEADER);
+    headers.remove(RETAIN_HEADER);
+    headers
 }
 
 #[cfg(test)]
@@ -137,7 +180,9 @@ mod tests {
         headers.insert("x-tenant", "acme");
         let outgoing = OutgoingMessage::new("orders", b"{}".as_slice()).with_headers(headers);
 
-        let properties = to_publish_properties(&outgoing).expect("properties built");
+        let (per_message, properties) = to_wire_properties(&outgoing);
+        assert_eq!(per_message, PerMessage::default());
+        let properties = properties.expect("properties built");
         assert_eq!(properties.content_type.as_deref(), Some("application/json"));
         assert_eq!(properties.response_topic.as_deref(), Some("replies/1"));
         assert_eq!(
@@ -153,6 +198,32 @@ mod tests {
     #[test]
     fn plain_messages_stay_property_free() {
         let outgoing = OutgoingMessage::new("orders", b"{}".as_slice());
-        assert!(to_publish_properties(&outgoing).is_none());
+        assert!(to_wire_properties(&outgoing).1.is_none());
+    }
+
+    #[test]
+    fn the_per_message_arguments_are_read_off_and_never_reach_the_wire() {
+        let mut headers = HeaderMap::new();
+        headers.insert(QOS_HEADER, Qos::ExactlyOnce.as_header());
+        headers.insert(RETAIN_HEADER, "true");
+        let outgoing = OutgoingMessage::new("states", b"online".as_slice()).with_headers(headers);
+
+        let (per_message, properties) = to_wire_properties(&outgoing);
+        assert_eq!(per_message.qos, Some(Qos::ExactlyOnce));
+        assert_eq!(per_message.retain, Some(true));
+        assert!(
+            properties.is_none(),
+            "a message carrying only the arguments stays property-free"
+        );
+    }
+
+    #[test]
+    fn an_unreadable_argument_leaves_the_publisher_policy_in_place() {
+        let mut headers = HeaderMap::new();
+        headers.insert(QOS_HEADER, "sometimes");
+        headers.insert(RETAIN_HEADER, "perhaps");
+        let outgoing = OutgoingMessage::new("states", b"online".as_slice()).with_headers(headers);
+
+        assert_eq!(to_wire_properties(&outgoing).0, PerMessage::default());
     }
 }

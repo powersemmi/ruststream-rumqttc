@@ -36,5 +36,7 @@ pub use broker::{ConnectedMqttBroker, MqttBroker};
 pub use error::MqttError;
 pub use filter::{MqttTopic, Qos};
 pub use message::MqttMessage;
-pub use publisher::{MqttPublish, MqttPublishOptions, MqttPublishOverride, MqttPublisher};
+pub use publisher::{
+    MqttPublish, MqttPublishOptions, MqttPublishOverride, MqttPublisher, QOS_HEADER, RETAIN_HEADER,
+};
 pub use subscriber::MqttSubscriber;

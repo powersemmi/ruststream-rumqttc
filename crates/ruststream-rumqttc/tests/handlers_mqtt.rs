@@ -10,6 +10,7 @@
 use ruststream::testing::TestApp;
 use ruststream_rumqttc::prelude::*;
 use ruststream_rumqttc::testing::{MqttTestBroker, MqttTestPublish};
+use ruststream_rumqttc::{QOS_HEADER, RETAIN_HEADER};
 use serde::{Deserialize, Serialize};
 
 // The attribute takes the topic as a literal; the assertions address the same subscription.
@@ -77,19 +78,26 @@ async fn a_handler_publishes_through_its_slot_on_the_in_process_broker() {
         });
 }
 
+const STATE: &str = "devices/dev42/state";
+
 /// A device state is bytes on the wire rather than an encoded model, so the type carries its own
 /// bytes and no codec runs on them.
 #[derive(Outgoing, Serialized)]
 #[outgoing(name = "devices/dev42/state")]
 struct DeviceState(Vec<u8>);
 
+#[derive(OutSlot)]
+#[publishes(DeviceState)]
+struct States;
+
 /// A body that needs the two arguments MQTT carries on every PUBLISH packet bounds its slot with
-/// this crate's own [`MqttPublishOptions`] instead, which the framework's slot wrapper carries
-/// through to the paired publisher.
+/// this crate's own [`MqttPublishOptions`] instead. The step resolves on the slot entry the body
+/// holds, so the publish stays the slot's; resolving one layer down would reach the same wire and
+/// lose the attribution.
 #[subscriber("devices/dev42/telemetry")]
 async fn announce_state(
     telemetry: &Telemetry,
-    Out(out): Out<impl MqttPublishOptions>,
+    Out(out): Out<impl MqttPublishOptions, States>,
 ) -> HandlerOutcome {
     let state = if telemetry.temperature > 30.0 {
         "hot"
@@ -109,15 +117,59 @@ async fn announce_state(
     HandlerOutcome::ack()
 }
 
-/// Quality of service and retain are transport behaviour the in-process broker deliberately does
-/// not reproduce, so a body bound to them mounts on the real broker and the mount itself is what
-/// is checked here; the wire behaviour belongs to the live suite. Building the app is I/O-free.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_per_message_arguments_ride_the_slot_and_stop_at_the_transport() {
+    let app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(
+        MqttTestBroker::new(),
+        |b| {
+            b.include(announce_state)
+                .out(States, MqttTestPublish)
+                .build();
+        },
+    );
+
+    let tb = TestApp::start(app).await.expect("the harness starts");
+    tb.broker::<MqttTestBroker>()
+        .message(&Telemetry {
+            device: "dev42".to_owned(),
+            temperature: 31.5,
+        })
+        .to(TELEMETRY)
+        .publish()
+        .await
+        .expect("the injected reading is routed");
+
+    // The slot saw it, which is what says the step resolved on the entry rather than past it.
+    let states = tb.out::<States>().assert_called_once().with_raw(b"hot");
+    let attributed = &states.messages()[0];
+    assert_eq!(attributed.name(), STATE);
+    assert_eq!(
+        attributed.headers().get_str(QOS_HEADER),
+        Some("2"),
+        "the arguments travel with the message to the publisher"
+    );
+    assert_eq!(attributed.headers().get_str(RETAIN_HEADER), Some("true"));
+
+    // The transport consumed them, so a subscriber sees a plain message.
+    let delivered = tb.broker::<MqttTestBroker>().published::<()>(STATE);
+    let delivered = delivered.assert_called_once().messages()[0]
+        .headers()
+        .clone();
+    assert_eq!(delivered.get(QOS_HEADER), None);
+    assert_eq!(delivered.get(RETAIN_HEADER), None);
+}
+
+/// The same body mounts on the real broker, which is where the two arguments reach a wire.
+/// Building the app is I/O-free, so the mount is what this checks; the wire effect is the live
+/// suite's.
 #[test]
-fn a_slot_bound_with_the_crate_capability_mounts_on_the_broker() {
+fn a_slot_bound_with_the_crate_capability_mounts_on_the_real_broker() {
     let _app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(
         MqttBroker::new("mqtt://localhost:1883", "mqtt-handlers"),
         |b| {
-            b.include(announce_state).publisher(MqttPublish::default());
+            b.include(announce_state)
+                .out(States, MqttPublish::default())
+                .build();
         },
     );
 }

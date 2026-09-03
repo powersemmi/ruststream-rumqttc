@@ -11,6 +11,8 @@ use ruststream::{
 };
 
 use crate::error::MqttError;
+use crate::message::without_per_message;
+use crate::publisher::MqttPublishOptions;
 use crate::testing::router::AddressRouter;
 use crate::testing::subscriber::MqttTestSubscriber;
 
@@ -145,14 +147,20 @@ impl Publisher for MqttTestPublisher {
     type Error = MqttError;
 
     fn publish(&self, msg: OutgoingMessage<'_>) -> impl Future<Output = Result<(), Self::Error>> {
+        // The per-message arguments are consumed here as the real publisher consumes them, so a
+        // delivery carries what a subscriber would see. Applying them is protocol behaviour this
+        // transport does not reproduce, which is what the live suite covers.
         self.state.publish(
             msg.name(),
             Bytes::copy_from_slice(msg.payload()),
-            msg.headers().clone(),
+            without_per_message(msg.headers().clone()),
         );
         ready(Ok(()))
     }
 }
+
+// The same steps on the in-process transport, so a handler bound to them mounts on both brokers.
+impl MqttPublishOptions for MqttTestPublisher {}
 
 /// The publish policy for [`MqttTestPublisher`], mirroring
 /// [`MqttPublish`](crate::MqttPublish) on the real broker.

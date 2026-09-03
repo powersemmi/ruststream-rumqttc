@@ -182,14 +182,22 @@ argument the call does not name keeps the publisher's policy value:
 --8<-- "crates/ruststream-rumqttc/examples/mqtt_retained.rs:per_publish"
 ```
 
-The trait is also implemented for an `Out` slot holding an MQTT publisher, so a handler reaches
-the same steps through `Out<impl MqttPublishOptions>`. A publish made that way lands in the
-broker's publish log, but the `TestApp` harness does not attribute it to the slot.
+The trait is implemented for the live publisher, for the in-process test broker's publisher, and
+for the `Out` slot entry a handler body holds, so the same call works in a handler
+(`Out<impl MqttPublishOptions>`), in a startup hook, and under the `TestApp` harness. Resolving on
+the entry is what keeps the publish attributed: `tb.out::<Marker>()` records it like any other slot
+publish.
 
-Quality of service and retain are transport arguments, and the in-process test broker reproduces
-core routing only, so its publisher does not carry them: a handler bound to this trait mounts on
-the real broker and is exercised against a server. A handler that only needs to publish binds the
-framework's own `Out<impl Publisher>` instead and runs on both.
+The step yields a plain publisher, so a publish built on it resolves the crate's default codec
+rather than the one named at the include site. A slot publish that needs the include site's codec
+goes through the slot's own `message(..)` and names the arguments in its headers instead.
+
+`Publisher::publish` takes a message and nothing else, so the two arguments reach the send path as
+headers - `mqtt-qos` (the protocol's own `0`, `1`, `2`) and `mqtt-retain` (`true` or `false`), both
+exported as `QOS_HEADER` and `RETAIN_HEADER`. This is the mechanism the framework names for a
+delivery option a broker expresses that way, and it is what lets the step wrap a slot entry rather
+than the publisher underneath it. The publisher consumes both: neither travels as a user property,
+and a value it cannot read leaves the publisher's own policy in place.
 
 ### Retained messages
 
@@ -211,7 +219,9 @@ hook runs the publish once the broker is connected:
 Headers travel as MQTT 5 user properties, so no envelope format is invented and non-Rust peers see
 plain MQTT messages. The well-known `content-type`, `reply-to`, and `correlation-id` headers ride
 the matching first-class properties instead (content type, response topic, correlation data), in
-both directions. A message with no headers is published without any properties at all.
+both directions. A message with no headers is published without any properties at all, and the two
+[per-message argument](#per-message-arguments) headers are consumed by the publisher rather than
+sent, so they do not count as headers for that rule.
 
 A responder built on this is a plain handler: an incoming request carries its response topic in the
 `reply-to` header, so the handler reads `ctx.headers().reply_to()` and publishes the answer to that

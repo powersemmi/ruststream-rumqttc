@@ -34,3 +34,18 @@ pub use crate::{MqttBroker, MqttPublish, MqttPublishOptions, MqttTopic, Qos};
 // - `MqttMessage`, `MqttSubscriber`, `MqttPublisher`, `MqttPublishOverride`,
 //   `ConnectedMqttBroker`: a service reaches these through the framework's own surfaces.
 // - `MqttError`: named where it is handled.
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // A shadowed framework name reports nothing here and nothing at the re-export: the error
+    // lands in the service that imported this prelude, naming a type where it wanted a trait.
+    // These bounds move it back to this crate, where the shadowing would be introduced.
+    fn _publish_is_the_framework_slot_trait<T: Publish>(_: T) {}
+    fn _publisher_is_the_framework_trait<T: Publisher>(_: T) {}
+
+    fn _the_policy_keeps_its_prefixed_name() -> MqttPublish {
+        MqttPublish::default()
+    }
+}

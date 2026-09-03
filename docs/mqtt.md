@@ -151,10 +151,6 @@ mount site, and the runtime pairs it with the connected broker at startup. It is
 default publish policy, so a `#[subscriber(.., publish("dest"))]` handler mounted without an
 explicit publisher sends through it.
 
-A service that imports `ruststream_rumqttc::prelude::*` writes this policy as `Publish`, the name
-the examples below use. The prefixed `MqttPublish` stays at the crate root, for a file that mixes
-brokers.
-
 A successful publish means the message is owned by the client session, not that the broker has
 confirmed it: for `QoS` 1 and 2 the session's state machine retransmits until acknowledged, across
 reconnects.
@@ -192,7 +188,7 @@ broker's publish log, but the `TestApp` harness does not attribute it to the slo
 
 ### Retained messages
 
-`Publish::default().retain(true)` publishes retained: the broker keeps the last message per
+`MqttPublish::default().retain(true)` publishes retained: the broker keeps the last message per
 topic and hands it to each new subscriber on a matching filter, so a device's current state is
 available to a service that starts after the state was published. Retained messages are not
 delivered to shared subscriptions.

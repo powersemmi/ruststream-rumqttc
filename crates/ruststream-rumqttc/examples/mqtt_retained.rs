@@ -29,7 +29,7 @@ fn app() -> impl App {
         |b| {
             // --8<-- [start:retained]
             b.after_startup(
-                Publish::default().qos(Qos::AtLeastOnce).retain(true),
+                MqttPublish::default().qos(Qos::AtLeastOnce).retain(true),
                 async move |publisher| -> Result<(), PublishError<MqttError>> {
                     publisher
                         .message(&DeviceState(b"online".to_vec()))
@@ -43,7 +43,7 @@ fn app() -> impl App {
 
             // --8<-- [start:per_publish]
             b.after_startup(
-                Publish::default(),
+                MqttPublish::default(),
                 async move |publisher| -> Result<(), PublishError<MqttError>> {
                     publisher
                         .with_retain(true)

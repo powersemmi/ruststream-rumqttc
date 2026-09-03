@@ -1,13 +1,7 @@
 //! The imports a service on MQTT writes every time, in one glob.
 //!
 //! Carries the framework's own prelude plus this crate's surface: the broker, the subscription
-//! descriptor and its quality of service, the publish policy as [`Publish`], and the per-publish
-//! steps.
-//!
-//! A file that mixes two brokers imports the prefixed [`MqttPublish`](crate::MqttPublish) from
-//! the crate root instead.
-//!
-//! [`Publish`] is the publish policy, not the framework's `runtime::Publish` builder.
+//! descriptor and its quality of service, the [`MqttPublish`] policy, and the per-publish steps.
 //!
 //! # Examples
 //!
@@ -18,7 +12,7 @@
 //! let topic = MqttTopic::new("devices/+/telemetry")
 //!     .qos(Qos::AtLeastOnce)
 //!     .shared("workers");
-//! let policy = Publish::default().qos(Qos::ExactlyOnce).retain(true);
+//! let policy = MqttPublish::default().qos(Qos::ExactlyOnce).retain(true);
 //! # let _ = (broker, topic, policy);
 //! ```
 
@@ -26,9 +20,11 @@
 // the core glob rides along here instead of being left to each service file.
 pub use ruststream::prelude::*;
 
-// Policies are re-exported under their broker-agnostic concept name; keep the alias when adding
-// one.
-pub use crate::{MqttBroker, MqttPublish as Publish, MqttPublishOptions, MqttTopic, Qos};
+// Every name here stays prefixed. An unprefixed alias would win over the glob above rather than
+// clash with it, so a framework name this crate happened to reuse would go silently missing from
+// a service that imports the prelude: `Publish`, the framework's slot capability trait, is the
+// live case.
+pub use crate::{MqttBroker, MqttPublish, MqttPublishOptions, MqttTopic, Qos};
 
 // Capability manifest deliberately empty: MQTT implements none of the seven (see the capability
 // table in docs/mqtt.md); add a trait here when a capability lands.

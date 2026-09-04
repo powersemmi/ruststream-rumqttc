@@ -173,3 +173,63 @@ fn a_slot_bound_with_the_crate_capability_mounts_on_the_real_broker() {
         },
     );
 }
+
+const READINGS: &str = "devices/dev42/readings";
+
+/// A page handler: MQTT delivers one PUBLISH packet at a time, so the pages are assembled on the
+/// client, and nothing in this body or its mount site says so.
+#[subscriber("devices/dev42/readings")]
+async fn ingest(readings: &[Telemetry]) -> HandlerOutcome {
+    let _ = readings.len();
+    HandlerOutcome::ack()
+}
+
+/// The size a mount site names is the size the pages come back at. One is the split that holds
+/// without a replayable log to publish into ahead of the subscription; the conformance batch
+/// suite covers the general case at size three, against this transport and a server alike.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_page_handler_is_handed_pages_of_the_size_its_mount_site_named() {
+    let app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(
+        MqttTestBroker::new(),
+        |b| {
+            b.include(ingest.batch(nonzero!(1)));
+        },
+    );
+
+    let tb = TestApp::start(app).await.expect("the harness starts");
+    for temperature in [21.5, 22.0, 23.5] {
+        tb.broker::<MqttTestBroker>()
+            .message(&Telemetry {
+                device: "dev42".to_owned(),
+                temperature,
+            })
+            .to(READINGS)
+            .publish()
+            .await
+            .expect("the injected reading is routed");
+    }
+    tb.settle().await.expect("the pages settle");
+
+    let broker = tb.broker::<MqttTestBroker>();
+    let subscriber = broker.subscriber(READINGS);
+    assert_eq!(
+        subscriber.received::<Telemetry>().len(),
+        3,
+        "every reading reaches the body"
+    );
+    subscriber
+        .assert_page_sizes(&[1, 1, 1])
+        .settled(HandlerOutcome::ack());
+}
+
+/// The page handler mounts on the real broker too: its subscriber carries the same capability,
+/// which is the whole of what a `&[T]` body asks of a transport.
+#[test]
+fn a_page_handler_mounts_on_the_real_broker() {
+    let _app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(
+        MqttBroker::new("mqtt://localhost:1883", "mqtt-handlers"),
+        |b| {
+            b.include(ingest.batch(nonzero!(8)));
+        },
+    );
+}

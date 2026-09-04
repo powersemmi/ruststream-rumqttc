@@ -33,8 +33,10 @@ pub use ruststream::prelude::*;
 // the framework's prelude, and never sees this one.
 pub use crate::{MqttBroker, MqttPublish as Publish, MqttPublishOptions, MqttTopic, Qos};
 
-// Capability manifest deliberately empty: MQTT implements none of the seven (see the capability
-// table in docs/mqtt.md); add a trait here when a capability lands.
+// Capability manifest deliberately empty. Of the framework's optional capabilities MQTT
+// implements only `BatchSubscriber` (see the capability table in docs/mqtt.md), and the manifest
+// is for the traits a handler bounds its slot with: a page handler names a size at its mount site
+// and never that trait. Add one here when a capability a body binds lands.
 
 // Deliberately absent, do not add:
 // - `testing`: feature-gated broker-author tooling, imported by the tests that use it.

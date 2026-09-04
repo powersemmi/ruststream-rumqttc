@@ -6,7 +6,8 @@
 
 #![cfg(feature = "testing")]
 
-use ruststream::conformance::harness;
+use ruststream::Name;
+use ruststream::conformance::{capabilities, harness};
 use ruststream_rumqttc::testing::MqttTestBroker;
 use ruststream_rumqttc::{MqttBroker, MqttTopic};
 
@@ -34,6 +35,33 @@ async fn mqtt_broker_passes_lifecycle() {
     let Some(url) = test_url() else { return };
     harness::lifecycle(
         || MqttBroker::new(url.clone(), format!("lifecycle-{}", std::process::id())),
+        |name| MqttTopic::new(name),
+        |connected| connected.publisher(),
+    )
+    .await;
+}
+
+/// MQTT has no batch fetch, so the pages come off the client-side buffer. The suite is what says
+/// the delegation honours the size it is opened with, on the in-process transport.
+#[allow(clippy::redundant_closure, clippy::redundant_closure_for_method_calls)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_in_process_broker_passes_the_batch_suite() {
+    capabilities::batches(
+        MqttTestBroker::new,
+        |name| Name::new(name.to_owned()),
+        |connected| connected.publisher(),
+    )
+    .await;
+}
+
+/// The same suite where the pages are filled by a real broker's deliveries rather than an
+/// in-process channel, which is the only place the deadline meets a network.
+#[allow(clippy::redundant_closure, clippy::redundant_closure_for_method_calls)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mqtt_broker_passes_the_batch_suite() {
+    let Some(url) = test_url() else { return };
+    capabilities::batches(
+        || MqttBroker::new(url.clone(), format!("batches-{}", std::process::id())),
         |name| MqttTopic::new(name),
         |connected| connected.publisher(),
     )

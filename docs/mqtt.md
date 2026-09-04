@@ -21,7 +21,7 @@ acknowledgement lands:
 | --- | --- | --- |
 | `Subscribe` | Yes | `ConnectedMqttBroker` opens a subscription from a topic filter, and `MqttTopic` is the `SubscriptionSource` descriptor. See [Subscriptions](#subscriptions). |
 | Acknowledgement (`ack` / `nack`) | Partial | `QoS` 1 and 2 settle through the protocol. `QoS` 0 and `nack(requeue = true)` report `AckError::Unsupported`. See [Acknowledgement](#acknowledgement). |
-| `BatchSubscriber` | No | MQTT delivers one PUBLISH packet at a time; the protocol has no batch fetch. |
+| `BatchSubscriber` | On the client | A PUBLISH packet carries one message, so there is no batch fetch to hand a page size to. The crate assembles the pages instead, to the size the mount site named. See [Pages](#pages). |
 | `TransactionalPublisher` | No | MQTT has no transactions. |
 | `OwnedTransactions` | No | MQTT has no transactions. |
 | `RequestReply` | No | The protocol carries the pieces (MQTT 5 has a response-topic property, which the crate maps to the `reply-to` header in both directions), but the correlated `request(msg, timeout)` call is not implemented. A responder is written today as an ordinary handler that publishes to `ctx.headers().reply_to()`. See [Headers](#headers). |
@@ -101,6 +101,27 @@ competing consumers are expressed in MQTT. The group name is part of the wire fi
 Two members of one group on a single connection are one wire subscription as far as the broker is
 concerned, so the crate round-robins their deliveries locally. Share group names are validated with
 the filter: an empty name, or one containing `/`, `+`, or `#`, is an error before any I/O.
+
+### Pages
+
+A handler taking `&[T]` consumes a page, and its mount site names the size:
+
+```rust
+--8<-- "crates/ruststream-rumqttc/examples/mqtt_pages.rs:pages"
+```
+
+MQTT has no batch fetch to hand that number to - a PUBLISH packet carries one message - so the
+crate assembles the pages on the client. A page closes when it holds the size the mount site named,
+or 20 milliseconds after its first delivery, whichever comes first; an idle subscription waits
+indefinitely for that first delivery, so a quiet topic costs nothing. The size is the mount site's
+and the deadline is the crate's, and a page never carries more than the size it was opened with -
+which is what the framework's conformance batch suite checks, against a server and the in-process
+broker alike.
+
+Nothing at the mount site says which side of the wire filled the page, which is the point: a page
+handler written for another broker mounts here unchanged. Settlement stays per delivery, so a page
+whose stream is dropped mid-fill leaves its collected messages unacknowledged, to redeliver when a
+persistent session resumes.
 
 ## Acknowledgement
 
@@ -251,6 +272,9 @@ connected form implements `ruststream::testing::TestableBroker`, so the same bro
 `broker.inject(OutgoingMessage::new(..))` and assert on published output with the free
 `ruststream::testing::expect_published`. See
 [Unit-testing a service with TestApp](https://powersemmi.github.io/ruststream/latest/guides/testing/#unit-testing-a-service-with-testapp).
+
+It pages the way the real subscriber does, with the same size from the mount site and the same
+deadline, so a page handler is handed under the harness what a server would have produced.
 
 The test broker routes by exact address match and does not simulate protocol behaviour. Quality of
 service handshakes, shared group distribution, session redelivery, retained messages, and wildcard

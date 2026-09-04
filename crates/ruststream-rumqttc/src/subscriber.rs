@@ -13,16 +13,16 @@ use crate::conn::Shared;
 use crate::error::MqttError;
 use crate::message::MqttMessage;
 
-/// How long a partial page waits for more deliveries after its first one.
+/// How long a partial batch waits for more deliveries after its first one.
 ///
 /// The crate's own choice, not the mount site's: MQTT delivers one PUBLISH packet at a time over
-/// a network event loop, so a page that is not yet full waits a network-shaped moment for the
-/// next packet rather than an in-process one. The page size is the registration's, and arrives
+/// a network event loop, so a batch that is not yet full waits a network-shaped moment for the
+/// next packet rather than an in-process one. The batch size is the registration's, and arrives
 /// per subscription as the argument of [`BatchSubscriber::batches`].
 ///
-/// The in-process test broker pages with the same deadline, so a page handler behaves the same
+/// The in-process test broker batches with the same deadline, so a batch handler behaves the same
 /// under the harness as it does on a server.
-pub(crate) const PAGE_MAX_WAIT: Duration = Duration::from_millis(20);
+pub(crate) const BATCH_MAX_WAIT: Duration = Duration::from_millis(20);
 
 /// The wire half of a subscription: whatever the connection task demultiplexed onto this
 /// filter's channel, one delivery at a time, which is all the protocol offers.
@@ -59,20 +59,20 @@ impl Subscriber for WireSubscriber {
     }
 }
 
-/// A subscription to one MQTT topic filter; yields [`MqttMessage`]s one at a time, or in pages.
+/// A subscription to one MQTT topic filter; yields [`MqttMessage`]s one at a time, or in batches.
 ///
 /// Delivery back-pressure is the protocol's receive-maximum: the broker bounds unacked
 /// `QoS` 1/2 deliveries, so unsettled messages cap what sits in this subscriber's queue
 /// (`QoS` 0 has no such bound by design). Dropping the subscriber unsubscribes the filter.
 ///
-/// MQTT has no batch fetch - a PUBLISH packet carries one message - so the pages a `&[T]`
+/// MQTT has no batch fetch - a PUBLISH packet carries one message - so the batches a `&[T]`
 /// handler consumes are assembled on the client by the framework's
-/// [`BufferedSubscriber`]: a page closes when it holds the size the mount site named, or once
+/// [`BufferedSubscriber`]: a batch closes when it holds the size the mount site named, or once
 /// the crate's own 20 ms deadline has elapsed after its first delivery. Nothing at the mount
 /// site says which of the two happened, which is the point.
 pub struct MqttSubscriber {
     filter: String,
-    paged: BufferedSubscriber<WireSubscriber>,
+    buffered: BufferedSubscriber<WireSubscriber>,
 }
 
 impl std::fmt::Debug for MqttSubscriber {
@@ -93,13 +93,13 @@ impl MqttSubscriber {
     ) -> Self {
         Self {
             filter,
-            paged: BufferedSubscriber::new(WireSubscriber {
+            buffered: BufferedSubscriber::new(WireSubscriber {
                 id,
                 shared,
                 client,
                 rx,
             })
-            .max_wait(PAGE_MAX_WAIT),
+            .max_wait(BATCH_MAX_WAIT),
         }
     }
 
@@ -115,7 +115,7 @@ impl Subscriber for MqttSubscriber {
     type Error = MqttError;
 
     fn stream(&mut self) -> impl Stream<Item = Result<MqttMessage, MqttError>> + Send + '_ {
-        self.paged.stream()
+        self.buffered.stream()
     }
 }
 
@@ -124,14 +124,14 @@ impl BatchSubscriber for MqttSubscriber {
 
     /// # Cancel safety
     ///
-    /// Cancel-safe between polls, like [`Subscriber::stream`]: the page being filled lives
+    /// Cancel-safe between polls, like [`Subscriber::stream`]: the batch being filled lives
     /// inside the returned stream and survives a cancelled poll. Dropping the whole stream
-    /// abandons that page's deliveries unacknowledged, and MQTT redelivers them when a
+    /// abandons that batch's deliveries unacknowledged, and MQTT redelivers them when a
     /// persistent session resumes.
     fn batches(
         &mut self,
         size: NonZeroUsize,
     ) -> impl Stream<Item = Result<Self::Batch, MqttError>> + Send + '_ {
-        self.paged.batches(size)
+        self.buffered.batches(size)
     }
 }

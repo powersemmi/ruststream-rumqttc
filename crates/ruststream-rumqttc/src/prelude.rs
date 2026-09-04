@@ -35,7 +35,7 @@ pub use crate::{MqttBroker, MqttPublish as Publish, MqttPublishOptions, MqttTopi
 
 // Capability manifest deliberately empty. Of the framework's optional capabilities MQTT
 // implements only `BatchSubscriber` (see the capability table in docs/mqtt.md), and the manifest
-// is for the traits a handler bounds its slot with: a page handler names a size at its mount site
+// is for the traits a handler bounds its slot with: a batch handler names a size at its mount site
 // and never that trait. Add one here when a capability a body binds lands.
 
 // Deliberately absent, do not add:

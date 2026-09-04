@@ -12,7 +12,7 @@ use ruststream::{
 };
 
 use crate::error::MqttError;
-use crate::subscriber::PAGE_MAX_WAIT;
+use crate::subscriber::BATCH_MAX_WAIT;
 use crate::testing::broker::TestState;
 use crate::testing::router::{Delivery, DeliveryReceiver, DeliverySender, SubscriptionId};
 
@@ -67,10 +67,10 @@ impl Subscriber for WireTestSubscriber {
 /// Subscriber returned by [`ConnectedMqttTestBroker`](crate::testing::ConnectedMqttTestBroker).
 ///
 /// Dropping it unregisters the subscription, so handlers stop receiving as soon as their task
-/// finishes. Pages are assembled on the client with the real subscriber's deadline, so a page
+/// finishes. Batches are assembled on the client with the real subscriber's deadline, so a batch
 /// handler behaves under the harness the way it behaves on a server.
 pub struct MqttTestSubscriber {
-    paged: BufferedSubscriber<WireTestSubscriber>,
+    buffered: BufferedSubscriber<WireTestSubscriber>,
 }
 
 impl std::fmt::Debug for MqttTestSubscriber {
@@ -88,14 +88,14 @@ impl MqttTestSubscriber {
         coordinator: Option<Coordinator>,
     ) -> Self {
         Self {
-            paged: BufferedSubscriber::new(WireTestSubscriber {
+            buffered: BufferedSubscriber::new(WireTestSubscriber {
                 state,
                 id,
                 rx,
                 requeue,
                 coordinator,
             })
-            .max_wait(PAGE_MAX_WAIT),
+            .max_wait(BATCH_MAX_WAIT),
         }
     }
 }
@@ -105,7 +105,7 @@ impl Subscriber for MqttTestSubscriber {
     type Error = MqttError;
 
     fn stream(&mut self) -> impl Stream<Item = Result<Self::Message, Self::Error>> + Send + '_ {
-        self.paged.stream()
+        self.buffered.stream()
     }
 }
 
@@ -116,7 +116,7 @@ impl BatchSubscriber for MqttTestSubscriber {
         &mut self,
         size: NonZeroUsize,
     ) -> impl Stream<Item = Result<Self::Batch, MqttError>> + Send + '_ {
-        self.paged.batches(size)
+        self.buffered.batches(size)
     }
 }
 

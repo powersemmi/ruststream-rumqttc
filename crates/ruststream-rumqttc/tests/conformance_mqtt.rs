@@ -41,7 +41,7 @@ async fn mqtt_broker_passes_lifecycle() {
     .await;
 }
 
-/// MQTT has no batch fetch, so the pages come off the client-side buffer. The suite is what says
+/// MQTT has no batch fetch, so the batches come off the client-side buffer. The suite is what says
 /// the delegation honours the size it is opened with, on the in-process transport.
 #[allow(clippy::redundant_closure, clippy::redundant_closure_for_method_calls)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -54,7 +54,7 @@ async fn the_in_process_broker_passes_the_batch_suite() {
     .await;
 }
 
-/// The same suite where the pages are filled by a real broker's deliveries rather than an
+/// The same suite where the batches are filled by a real broker's deliveries rather than an
 /// in-process channel, which is the only place the deadline meets a network.
 #[allow(clippy::redundant_closure, clippy::redundant_closure_for_method_calls)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -49,7 +49,9 @@ async fn a_handler_publishes_through_its_slot_on_the_in_process_broker() {
     let app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(
         MqttTestBroker::new(),
         |b| {
-            b.include(raise_alert).publisher(MqttTestPublish);
+            b.include(raise_alert)
+                .out(DefaultSlot, MqttTestPublish)
+                .build();
         },
     );
 

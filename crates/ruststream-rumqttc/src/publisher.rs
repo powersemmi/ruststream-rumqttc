@@ -5,7 +5,7 @@ use std::future::{Future, ready};
 
 use bytes::Bytes;
 use rumqttc::v5::mqttbytes::valid_topic;
-use ruststream::runtime::{OutSlot, Slot};
+use ruststream::runtime::{OutPipeline, OutSlot, Slot};
 use ruststream::{HeaderMap, OutgoingMessage, PairError, PublishPolicy, Publisher};
 
 use crate::broker::{ConnectedMqttBroker, CoreCell};
@@ -166,8 +166,8 @@ impl MqttPublishOptions for MqttPublisher {}
 // slot; an impl one layer down is reached by autoderef past the entry instead, and a publish
 // built on it leaves through the unwrapped publisher, where the harness's per-slot capture never
 // sees it.
-impl<M: OutSlot, W: MqttPublishOptions, E: Send + Sync, Body> MqttPublishOptions
-    for Slot<M, W, E, Body>
+impl<M: OutSlot, W: MqttPublishOptions, E: Send + Sync, Pipe: OutPipeline, Body> MqttPublishOptions
+    for Slot<M, W, E, Pipe, Body>
 {
 }
 

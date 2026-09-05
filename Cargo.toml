@@ -3,16 +3,20 @@ resolver = "3"
 members = ["crates/ruststream-rumqttc"]
 
 [workspace.package]
-version = "0.6.0"
+version = "0.7.0"
 edition = "2024"
-rust-version = "1.85"
+# The floor tracks the core line: ruststream 0.7 requires 1.88, so a lower one cannot resolve it.
+rust-version = "1.88"
 license = "Apache-2.0"
 repository = "https://github.com/powersemmi/ruststream-rumqttc"
 authors = ["RustStream contributors"]
 
 [workspace.dependencies]
 ruststream-rumqttc = { path = "crates/ruststream-rumqttc" }
-ruststream = { version = ">=0.6.0, <0.7.0", default-features = false }
+# The lower bound names the pre-release so cargo admits it: a range that mentions no pre-release
+# excludes every pre-release, so `>=0.7.0` would skip 0.7.0-rc.1. The final 0.7.0 satisfies this
+# range too, so the requirement does not need revisiting once the core line settles.
+ruststream = { version = ">=0.7.0-rc.1, <0.8.0", default-features = false }
 
 rumqttc = "0.25"
 bytes = "1"

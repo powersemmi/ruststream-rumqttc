@@ -7,8 +7,8 @@ concepts (writing subscribers, routing, codecs, middleware), see the
 [RustStream documentation](https://powersemmi.github.io/ruststream/).
 
 ```toml
-ruststream = { version = "0.6", features = ["macros"] }
-ruststream-rumqttc = "0.6"
+ruststream = { version = "0.7", features = ["macros"] }
+ruststream-rumqttc = "0.7"
 serde = { version = "1", features = ["derive"] }
 ```
 
@@ -21,7 +21,7 @@ acknowledgement lands:
 | --- | --- | --- |
 | `Subscribe` | Yes | `ConnectedMqttBroker` opens a subscription from a topic filter, and `MqttTopic` is the `SubscriptionSource` descriptor. See [Subscriptions](#subscriptions). |
 | Acknowledgement (`ack` / `nack`) | Partial | `QoS` 1 and 2 settle through the protocol. `QoS` 0 and `nack(requeue = true)` report `AckError::Unsupported`. See [Acknowledgement](#acknowledgement). |
-| `BatchSubscriber` | No | MQTT delivers one PUBLISH packet at a time; the protocol has no batch fetch. |
+| `BatchSubscriber` | On the client | A PUBLISH packet carries one message, so there is no batch fetch to hand a batch size to. The crate assembles the batches instead, to the size the mount site named. See [Batches](#batches). |
 | `TransactionalPublisher` | No | MQTT has no transactions. |
 | `OwnedTransactions` | No | MQTT has no transactions. |
 | `RequestReply` | No | The protocol carries the pieces (MQTT 5 has a response-topic property, which the crate maps to the `reply-to` header in both directions), but the correlated `request(msg, timeout)` call is not implemented. A responder is written today as an ordinary handler that publishes to `ctx.headers().reply_to()`. See [Headers](#headers). |
@@ -57,7 +57,8 @@ managed MQTT services that require a client certificate.
 
 `MqttTopic` is the subscription descriptor: one topic filter, a quality of service, and an optional
 share group. It implements `SubscriptionSource`, so it sits inline in the `#[subscriber(..)]`
-decorator:
+decorator. `ruststream_rumqttc::prelude` carries the framework's own prelude along with this
+crate's surface, so one glob covers a service file:
 
 ```rust
 --8<-- "crates/ruststream-rumqttc/examples/mqtt_service.rs:handler"
@@ -100,6 +101,27 @@ competing consumers are expressed in MQTT. The group name is part of the wire fi
 Two members of one group on a single connection are one wire subscription as far as the broker is
 concerned, so the crate round-robins their deliveries locally. Share group names are validated with
 the filter: an empty name, or one containing `/`, `+`, or `#`, is an error before any I/O.
+
+### Batches
+
+A handler taking `&[T]` consumes a batch, and its mount site names the size:
+
+```rust
+--8<-- "crates/ruststream-rumqttc/examples/mqtt_batches.rs:batches"
+```
+
+MQTT has no batch fetch to hand that number to - a PUBLISH packet carries one message - so the
+crate assembles the batches on the client. A batch closes when it holds the size the mount site
+named, or 20 milliseconds after its first delivery, whichever comes first; an idle subscription
+waits indefinitely for that first delivery, so a quiet topic costs nothing. The size is the mount
+site's and the deadline is the crate's, and a batch never carries more than the size it was opened
+with - which is what the framework's conformance batch suite checks, against a server and the
+in-process broker alike.
+
+Nothing at the mount site says which side of the wire filled the batch, which is the point: a batch
+handler written for another broker mounts here unchanged. Settlement stays per delivery, so a batch
+whose stream is dropped mid-fill leaves its collected messages unacknowledged, to redeliver when a
+persistent session resumes.
 
 ## Acknowledgement
 
@@ -147,23 +169,87 @@ subscribed again. Dropping a subscriber unsubscribes its filter.
 A publisher is a policy plus the live connection. `MqttPublish` is pure declaration - a quality of
 service and the retain flag - so it is constructed anywhere, in a router, in configuration, at a
 mount site, and the runtime pairs it with the connected broker at startup. It is also the broker's
-default publish policy, so a `#[subscriber(.., publish("dest"))]` handler mounted without an
-explicit publisher sends through it.
+default publish policy, so a `#[subscriber(.., publish("dest"))]` handler mounted without a policy
+of its own sends through it.
+
+A mount site that does name one uses the framework's single publish verb, `.out(marker, policy)`:
+`.out(Reply, Publish::default().qos(Qos::ExactlyOnce))` for what the handler returns, and the same
+call under an `Out` slot's own marker for a publisher the body holds. The arguments ride the policy
+either way, so a slot and a reply read alike.
+
+Which name a file writes follows from which prelude it imports, and the two do not overlap. A
+handler file imports `ruststream::prelude::*` and bounds its injected publisher with a capability
+trait - `Out<impl Publisher>`, or this crate's `Out<impl MqttPublishOptions>` - so the body names no
+broker type at all. A routes file imports `ruststream_rumqttc::prelude::*`, which carries the
+framework's prelude along with this crate's surface and gives each policy its uniform mount-site
+name: `MqttPublish` is `Publish` there, so a mount site reads the same whichever broker it runs on
+and porting a service changes the import rather than the call. The prefixed name stays at the crate
+root, for a file that mixes two brokers and has to say which one it means.
 
 A successful publish means the message is owned by the client session, not that the broker has
 confirmed it: for `QoS` 1 and 2 the session's state machine retransmits until acknowledged, across
 reconnects.
 
+An MQTT payload is frequently a wire value the service already holds - a state string, a sensor
+frame, a protobuf record - rather than a model the framework should encode. Declare it as a
+serialized type and the bytes leave exactly as they are, with no codec on the path, while the
+declaration still names the topic; a `{placeholder}` in that name becomes a setter the call fills
+in:
+
+```rust
+--8<-- "crates/ruststream-rumqttc/examples/mqtt_retained.rs:state"
+```
+
+### Per-message arguments
+
+`MqttPublishOptions` overrides, for one message, the two arguments MQTT carries on every PUBLISH
+packet:
+
+| Step | Overrides |
+| --- | --- |
+| `with_qos(qos)` | The delivery quality of service of this message. |
+| `with_retain(retain)` | Whether the broker keeps this message as the topic's retained one. |
+
+Take either step on a publisher, in either order, then continue with the publish as usual. An
+argument the call does not name keeps the publisher's policy value:
+
+```rust
+--8<-- "crates/ruststream-rumqttc/examples/mqtt_retained.rs:per_publish"
+```
+
+The trait is implemented for the live publisher, for the in-process test broker's publisher, and
+for the `Out` slot entry a handler body holds, so the same call works in a handler
+(`Out<impl MqttPublishOptions>`), in a startup hook, and under the `TestApp` harness. Resolving on
+the entry is what keeps the publish attributed: `tb.out::<Marker>()` records it like any other slot
+publish.
+
+The step yields a plain publisher, so a publish built on it resolves the crate's default codec
+rather than the one named at the include site. A slot publish that needs the include site's codec
+goes through the slot's own `message(..)` and names the arguments in its headers instead.
+
+`Publisher::publish` takes a message and nothing else, so the two arguments reach the send path as
+headers - `mqtt-qos` (the protocol's own `0`, `1`, `2`) and `mqtt-retain` (`true` or `false`), both
+exported as `QOS_HEADER` and `RETAIN_HEADER`. This is the mechanism the framework names for a
+delivery option a broker expresses that way, and it is what lets the step wrap a slot entry rather
+than the publisher underneath it. The publisher consumes both, so neither travels as a user
+property.
+
+A value outside those vocabularies fails the publish with `MqttError::InvalidPublishArgument`,
+naming the header and quoting what arrived, and nothing reaches the wire. Sending the message under
+the publisher's own quality of service instead would answer a call that asked for one guarantee
+with another and say nothing about it, so the error is the only honest outcome. The in-process test
+broker refuses it on the same terms, which is where a service meets the mistake first.
+
 ### Retained messages
 
-`MqttPublish::default().retain(true)` publishes retained: the broker keeps the last message per
+`Publish::default().retain(true)` publishes retained: the broker keeps the last message per
 topic and hands it to each new subscriber on a matching filter, so a device's current state is
 available to a service that starts after the state was published. Retained messages are not
 delivered to shared subscriptions.
 
-The retain flag is declaration on the policy, so the publish itself is ordinary. The scope's
-`after_startup` hook runs it once the broker is connected, which is where an announcement of this
-kind belongs:
+A publisher that retains everything it sends declares the flag once on its policy; a single
+announcement takes it per message with `with_retain(true)`. Either way the scope's `after_startup`
+hook runs the publish once the broker is connected:
 
 ```rust
 --8<-- "crates/ruststream-rumqttc/examples/mqtt_retained.rs:retained"
@@ -174,7 +260,9 @@ kind belongs:
 Headers travel as MQTT 5 user properties, so no envelope format is invented and non-Rust peers see
 plain MQTT messages. The well-known `content-type`, `reply-to`, and `correlation-id` headers ride
 the matching first-class properties instead (content type, response topic, correlation data), in
-both directions. A message with no headers is published without any properties at all.
+both directions. A message with no headers is published without any properties at all, and the two
+[per-message argument](#per-message-arguments) headers are consumed by the publisher rather than
+sent, so they do not count as headers for that rule.
 
 A responder built on this is a plain handler: an incoming request carries its response topic in the
 `reply-to` header, so the handler reads `ctx.headers().reply_to()` and publishes the answer to that
@@ -189,6 +277,9 @@ connected form implements `ruststream::testing::TestableBroker`, so the same bro
 `broker.inject(OutgoingMessage::new(..))` and assert on published output with the free
 `ruststream::testing::expect_published`. See
 [Unit-testing a service with TestApp](https://powersemmi.github.io/ruststream/latest/guides/testing/#unit-testing-a-service-with-testapp).
+
+It batches the way the real subscriber does, with the same size from the mount site and the same
+deadline, so a batch handler is handed under the harness what a server would have produced.
 
 The test broker routes by exact address match and does not simulate protocol behaviour. Quality of
 service handshakes, shared group distribution, session redelivery, retained messages, and wildcard

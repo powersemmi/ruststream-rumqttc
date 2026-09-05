@@ -1,20 +1,24 @@
 //! [`MqttTestSubscriber`] and [`MqttTestMessage`].
 
+use std::future::{Future, ready};
+use std::num::NonZeroUsize;
 use std::sync::{Arc, OnceLock};
 
 use futures::Stream;
 
-use ruststream::{AckError, Headers, IncomingMessage, Subscriber, testing::Coordinator};
+use ruststream::{
+    AckError, BatchSubscriber, BufferedSubscriber, HeaderMap, IncomingMessage, Subscriber,
+    testing::Coordinator,
+};
 
 use crate::error::MqttError;
+use crate::subscriber::BATCH_MAX_WAIT;
 use crate::testing::broker::TestState;
 use crate::testing::router::{Delivery, DeliveryReceiver, DeliverySender, SubscriptionId};
 
-/// Subscriber returned by [`ConnectedMqttTestBroker`](crate::testing::ConnectedMqttTestBroker).
-///
-/// Dropping it unregisters the subscription, so handlers stop receiving as soon as their task
-/// finishes.
-pub struct MqttTestSubscriber {
+/// The in-process counterpart of the real subscriber's wire half: one delivery at a time off
+/// the router's channel.
+struct WireTestSubscriber {
     state: Arc<TestState>,
     id: SubscriptionId,
     rx: DeliveryReceiver,
@@ -24,37 +28,19 @@ pub struct MqttTestSubscriber {
     coordinator: Option<Coordinator>,
 }
 
-impl std::fmt::Debug for MqttTestSubscriber {
+impl std::fmt::Debug for WireTestSubscriber {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("MqttTestSubscriber").finish_non_exhaustive()
+        f.debug_struct("WireTestSubscriber").finish_non_exhaustive()
     }
 }
 
-impl MqttTestSubscriber {
-    pub(crate) fn new(
-        state: Arc<TestState>,
-        id: SubscriptionId,
-        rx: DeliveryReceiver,
-        requeue: DeliverySender,
-        coordinator: Option<Coordinator>,
-    ) -> Self {
-        Self {
-            state,
-            id,
-            rx,
-            requeue,
-            coordinator,
-        }
-    }
-}
-
-impl Drop for MqttTestSubscriber {
+impl Drop for WireTestSubscriber {
     fn drop(&mut self) {
         self.state.router.unsubscribe(self.id);
     }
 }
 
-impl Subscriber for MqttTestSubscriber {
+impl Subscriber for WireTestSubscriber {
     type Message = MqttTestMessage;
     type Error = MqttError;
 
@@ -75,6 +61,62 @@ impl Subscriber for MqttTestSubscriber {
                 })
             })
         })
+    }
+}
+
+/// Subscriber returned by [`ConnectedMqttTestBroker`](crate::testing::ConnectedMqttTestBroker).
+///
+/// Dropping it unregisters the subscription, so handlers stop receiving as soon as their task
+/// finishes. Batches are assembled on the client with the real subscriber's deadline, so a batch
+/// handler behaves under the harness the way it behaves on a server.
+pub struct MqttTestSubscriber {
+    buffered: BufferedSubscriber<WireTestSubscriber>,
+}
+
+impl std::fmt::Debug for MqttTestSubscriber {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MqttTestSubscriber").finish_non_exhaustive()
+    }
+}
+
+impl MqttTestSubscriber {
+    pub(crate) fn new(
+        state: Arc<TestState>,
+        id: SubscriptionId,
+        rx: DeliveryReceiver,
+        requeue: DeliverySender,
+        coordinator: Option<Coordinator>,
+    ) -> Self {
+        Self {
+            buffered: BufferedSubscriber::new(WireTestSubscriber {
+                state,
+                id,
+                rx,
+                requeue,
+                coordinator,
+            })
+            .max_wait(BATCH_MAX_WAIT),
+        }
+    }
+}
+
+impl Subscriber for MqttTestSubscriber {
+    type Message = MqttTestMessage;
+    type Error = MqttError;
+
+    fn stream(&mut self) -> impl Stream<Item = Result<Self::Message, Self::Error>> + Send + '_ {
+        self.buffered.stream()
+    }
+}
+
+impl BatchSubscriber for MqttTestSubscriber {
+    type Batch = Vec<MqttTestMessage>;
+
+    fn batches(
+        &mut self,
+        size: NonZeroUsize,
+    ) -> impl Stream<Item = Result<Self::Batch, MqttError>> + Send + '_ {
+        self.buffered.batches(size)
     }
 }
 
@@ -129,19 +171,19 @@ impl IncomingMessage for MqttTestMessage {
             .unwrap_or_default()
     }
 
-    fn headers(&self) -> &Headers {
-        static EMPTY: OnceLock<Headers> = OnceLock::new();
+    fn headers(&self) -> &HeaderMap {
+        static EMPTY: OnceLock<HeaderMap> = OnceLock::new();
         self.delivery
             .as_ref()
-            .map_or_else(|| EMPTY.get_or_init(Headers::new), |d| &d.headers)
+            .map_or_else(|| EMPTY.get_or_init(HeaderMap::new), |d| &d.headers)
     }
 
-    async fn ack(mut self) -> Result<(), AckError> {
+    fn ack(mut self) -> impl Future<Output = Result<(), AckError>> {
         self.delivery.take();
-        Ok(())
+        ready(Ok(()))
     }
 
-    async fn nack(mut self, requeue: bool) -> Result<(), AckError> {
+    fn nack(mut self, requeue: bool) -> impl Future<Output = Result<(), AckError>> {
         let delivery = self
             .delivery
             .take()
@@ -156,6 +198,6 @@ impl IncomingMessage for MqttTestMessage {
                 coordinator.enqueued();
             }
         }
-        Ok(())
+        ready(Ok(()))
     }
 }

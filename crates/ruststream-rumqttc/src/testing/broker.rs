@@ -1,5 +1,6 @@
 //! [`MqttTestBroker`]: the in-process transport and its connected form.
 
+use std::future::{Future, ready};
 use std::sync::{Arc, OnceLock};
 
 use bytes::Bytes;
@@ -10,6 +11,8 @@ use ruststream::{
 };
 
 use crate::error::MqttError;
+use crate::message::without_per_message;
+use crate::publisher::MqttPublishOptions;
 use crate::testing::router::AddressRouter;
 use crate::testing::subscriber::MqttTestSubscriber;
 
@@ -25,7 +28,7 @@ impl TestState {
         self.coordinator.get()
     }
 
-    pub(crate) fn publish(&self, name: &str, payload: Bytes, headers: ruststream::Headers) {
+    pub(crate) fn publish(&self, name: &str, payload: Bytes, headers: ruststream::HeaderMap) {
         self.router
             .publish(name, payload, headers, self.coordinator());
     }
@@ -66,8 +69,8 @@ impl Broker for MqttTestBroker {
     type Error = MqttError;
     type Connected = ConnectedMqttTestBroker;
 
-    async fn connect(self) -> Result<Self::Connected, Self::Error> {
-        Ok(ConnectedMqttTestBroker { state: self.state })
+    fn connect(self) -> impl Future<Output = Result<Self::Connected, Self::Error>> {
+        ready(Ok(ConnectedMqttTestBroker { state: self.state }))
     }
 }
 
@@ -93,24 +96,24 @@ impl ConnectedBroker for ConnectedMqttTestBroker {
     type Error = MqttError;
     type Closed = ();
 
-    async fn shutdown(self) -> Result<(), Self::Error> {
+    fn shutdown(self) -> impl Future<Output = Result<(), Self::Error>> {
         self.state.router.clear();
-        Ok(())
+        ready(Ok(()))
     }
 }
 
 impl Subscribe for ConnectedMqttTestBroker {
     type Subscriber = MqttTestSubscriber;
 
-    async fn subscribe(&self, name: &str) -> Result<Self::Subscriber, Self::Error> {
+    fn subscribe(&self, name: &str) -> impl Future<Output = Result<Self::Subscriber, Self::Error>> {
         let (id, requeue, rx) = self.state.router.subscribe(name.to_owned());
-        Ok(MqttTestSubscriber::new(
+        ready(Ok(MqttTestSubscriber::new(
             Arc::clone(&self.state),
             id,
             rx,
             requeue,
             self.state.coordinator().cloned(),
-        ))
+        )))
     }
 }
 
@@ -143,15 +146,21 @@ pub struct MqttTestPublisher {
 impl Publisher for MqttTestPublisher {
     type Error = MqttError;
 
-    async fn publish(&self, msg: OutgoingMessage<'_>) -> Result<(), Self::Error> {
-        self.state.publish(
-            msg.name(),
-            Bytes::copy_from_slice(msg.payload()),
-            msg.headers().clone(),
-        );
-        Ok(())
+    fn publish(&self, msg: OutgoingMessage<'_>) -> impl Future<Output = Result<(), Self::Error>> {
+        // The per-message arguments are consumed here as the real publisher consumes them, so a
+        // delivery carries what a subscriber would see and an unreadable one is refused on the
+        // same terms. Applying them is protocol behaviour this transport does not reproduce,
+        // which is what the live suite covers.
+        let outcome = without_per_message(msg.headers().clone()).map(|headers| {
+            self.state
+                .publish(msg.name(), Bytes::copy_from_slice(msg.payload()), headers);
+        });
+        ready(outcome)
     }
 }
+
+// The same steps on the in-process transport, so a handler bound to them mounts on both brokers.
+impl MqttPublishOptions for MqttTestPublisher {}
 
 /// The publish policy for [`MqttTestPublisher`], mirroring
 /// [`MqttPublish`](crate::MqttPublish) on the real broker.
@@ -171,8 +180,11 @@ pub struct MqttTestPublish;
 impl PublishPolicy<ConnectedMqttTestBroker> for MqttTestPublish {
     type Live = MqttTestPublisher;
 
-    async fn pair(self, connected: &ConnectedMqttTestBroker) -> Result<Self::Live, PairError> {
-        Ok(connected.publisher())
+    fn pair(
+        self,
+        connected: &ConnectedMqttTestBroker,
+    ) -> impl Future<Output = Result<Self::Live, PairError>> {
+        ready(Ok(connected.publisher()))
     }
 }
 

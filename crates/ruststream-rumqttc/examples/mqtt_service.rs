@@ -6,9 +6,7 @@
 use std::time::Duration;
 
 // --8<-- [start:handler]
-use ruststream::runtime::{App, AppInfo, HandlerResult, RustStream};
-use ruststream::subscriber;
-use ruststream_rumqttc::{MqttBroker, MqttTopic, Qos};
+use ruststream_rumqttc::prelude::*;
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -17,9 +15,9 @@ struct Telemetry {
 }
 
 #[subscriber(MqttTopic::new("devices/+/telemetry").qos(Qos::AtLeastOnce).shared("workers"))]
-async fn handle(telemetry: &Telemetry) -> HandlerResult {
+async fn handle(telemetry: &Telemetry) -> HandlerOutcome {
     println!("temperature: {}", telemetry.temperature);
-    HandlerResult::Ack
+    HandlerOutcome::ack()
 }
 // --8<-- [end:handler]
 

@@ -27,7 +27,7 @@ body:
     attributes:
       label: RustStream version
       description: The `ruststream-rumqttc` version, plus the `ruststream` version.
-      placeholder: "ruststream-rumqttc 0.6.0, ruststream 0.6.0"
+      placeholder: "ruststream-rumqttc 0.7.0, ruststream 0.7.0"
     validations:
       required: true
   - type: input
@@ -35,7 +35,7 @@ body:
     attributes:
       label: Rust version
       description: Output of `rustc --version`.
-      placeholder: "1.85.0"
+      placeholder: "1.88.0"
     validations:
       required: true
   - type: input

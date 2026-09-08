@@ -8,10 +8,12 @@ use std::time::Duration;
 
 use futures::StreamExt;
 use ruststream::{
-    AckError, Broker, ConnectedBroker, Headers, IncomingMessage, OutgoingMessage, Publisher,
+    AckError, Broker, ConnectedBroker, HeaderMap, IncomingMessage, OutgoingMessage, Publisher,
     Subscriber,
 };
-use ruststream_rumqttc::{ConnectedMqttBroker, MqttBroker, MqttTopic, Qos};
+use ruststream_rumqttc::{
+    ConnectedMqttBroker, MqttBroker, MqttError, MqttPublishOptions, MqttTopic, QOS_HEADER, Qos,
+};
 
 const RECV_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -47,7 +49,7 @@ async fn roundtrip_preserves_payload_and_headers() {
         .await
         .expect("subscription opens");
 
-    let mut headers = Headers::new();
+    let mut headers = HeaderMap::new();
     headers.insert("content-type", "application/json");
     headers.insert("x-tenant", "acme");
     headers.insert("correlation-id", "corr-1");
@@ -148,6 +150,125 @@ async fn shared_subscriptions_split_the_stream() {
         message.ack().await.expect("ack succeeds");
         seen += 1;
     }
+
+    connected.shutdown().await.expect("shutdown succeeds");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_per_publish_retain_override_reaches_a_later_subscriber() {
+    let Some(url) = test_url() else { return };
+    let connected = connect(&url, "retain").await;
+
+    let topic = unique("state");
+    // The publisher's own policy does not retain: the flag on this one packet is what makes the
+    // broker keep it for a subscriber that is not there yet.
+    let publisher = connected.publisher();
+    publisher
+        .with_retain(true)
+        .publish(OutgoingMessage::new(&topic, b"online".as_slice()))
+        .await
+        .expect("publish succeeds");
+
+    let mut subscriber = connected
+        .subscribe_topic(MqttTopic::new(&topic))
+        .await
+        .expect("subscription opens");
+    let mut stream = pin!(subscriber.stream());
+    let message = tokio::time::timeout(RECV_TIMEOUT, stream.next())
+        .await
+        .expect("the retained message arrives on subscribe")
+        .expect("stream is open")
+        .expect("delivery is ok");
+    assert_eq!(message.payload(), b"online");
+    message.ack().await.expect("ack succeeds");
+
+    // An empty retained payload clears the broker's stored message for the topic.
+    publisher
+        .with_retain(true)
+        .publish(OutgoingMessage::new(&topic, b"".as_slice()))
+        .await
+        .expect("the retained message is cleared");
+
+    connected.shutdown().await.expect("shutdown succeeds");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_per_publish_qos_override_settles_through_the_protocol() {
+    let Some(url) = test_url() else { return };
+    let connected = connect(&url, "qos-override").await;
+
+    let topic = unique("exactly");
+    let mut subscriber = connected
+        .subscribe_topic(MqttTopic::new(&topic).qos(Qos::ExactlyOnce))
+        .await
+        .expect("subscription opens");
+
+    // The publisher's policy is QoS 1; the override raises this packet to the QoS 2 handshake.
+    connected
+        .publisher()
+        .with_qos(Qos::ExactlyOnce)
+        .publish(OutgoingMessage::new(&topic, b"once".as_slice()))
+        .await
+        .expect("publish succeeds");
+
+    let mut stream = pin!(subscriber.stream());
+    let message = tokio::time::timeout(RECV_TIMEOUT, stream.next())
+        .await
+        .expect("delivery arrives")
+        .expect("stream is open")
+        .expect("delivery is ok");
+    assert_eq!(message.payload(), b"once");
+    message.ack().await.expect("ack succeeds");
+
+    connected.shutdown().await.expect("shutdown succeeds");
+}
+
+/// A publish naming a delivery guarantee this crate cannot read is refused against a live
+/// connection too, and the subscription that would have received it sees nothing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_unreadable_publish_argument_is_refused_before_the_wire() {
+    let Some(url) = test_url() else { return };
+    let connected = connect(&url, "bad-argument").await;
+
+    let topic = unique("refused");
+    let mut subscriber = connected
+        .subscribe_topic(MqttTopic::new(&topic))
+        .await
+        .expect("subscription opens");
+
+    let mut headers = HeaderMap::new();
+    headers.insert(QOS_HEADER, "sometimes");
+    let error = connected
+        .publisher()
+        .publish(OutgoingMessage::new(&topic, b"never sent".as_slice()).with_headers(headers))
+        .await
+        .expect_err("the argument is outside the vocabulary");
+    assert!(matches!(
+        &error,
+        MqttError::InvalidPublishArgument { header, value, .. }
+            if *header == QOS_HEADER && value == "sometimes"
+    ));
+
+    // A publish that did happen proves the subscription is live, so the silence above is the
+    // refusal rather than a delivery still in flight.
+    connected
+        .publisher()
+        .publish(OutgoingMessage::new(&topic, b"sent".as_slice()))
+        .await
+        .expect("publish succeeds");
+
+    let mut stream = pin!(subscriber.stream());
+    let message = tokio::time::timeout(RECV_TIMEOUT, stream.next())
+        .await
+        .expect("delivery arrives")
+        .expect("stream is open")
+        .expect("delivery is ok");
+    assert_eq!(
+        message.payload(),
+        b"sent",
+        "the refused message never reached the broker"
+    );
+    message.ack().await.expect("ack succeeds");
 
     connected.shutdown().await.expect("shutdown succeeds");
 }

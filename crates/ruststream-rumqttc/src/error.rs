@@ -41,6 +41,21 @@ pub enum MqttError {
     #[error("mqtt broker is not connected")]
     NotConnected,
 
+    /// A per-message publish argument arrived on its header with a value this crate cannot read
+    /// ([`QOS_HEADER`](crate::QOS_HEADER), [`RETAIN_HEADER`](crate::RETAIN_HEADER)).
+    ///
+    /// The publish is refused rather than sent under the publisher's policy: the call asked for
+    /// a delivery guarantee, and sending under another one silently is the failure this reports.
+    #[error("invalid mqtt publish argument: the {header} header carries {expected}; got {value:?}")]
+    InvalidPublishArgument {
+        /// The header the value arrived on.
+        header: &'static str,
+        /// The value as it arrived, lossily decoded for the message.
+        value: String,
+        /// The vocabulary that header accepts.
+        expected: &'static str,
+    },
+
     /// A broker option or subscription descriptor is invalid.
     #[error("invalid mqtt descriptor: {0}")]
     Invalid(String),

@@ -12,7 +12,7 @@ use std::sync::{
 };
 
 use bytes::Bytes;
-use ruststream::{Headers, RawMessage, testing::Coordinator};
+use ruststream::{HeaderMap, RawMessage, testing::Coordinator};
 use tokio::sync::mpsc;
 
 /// Opaque handle identifying one subscription inside an [`AddressRouter`].
@@ -23,7 +23,7 @@ pub(crate) struct SubscriptionId(u64);
 #[derive(Debug, Clone)]
 pub(crate) struct Delivery {
     pub(crate) payload: Bytes,
-    pub(crate) headers: Headers,
+    pub(crate) headers: HeaderMap,
 }
 
 pub(crate) type DeliverySender = mpsc::UnboundedSender<Delivery>;
@@ -88,7 +88,7 @@ impl AddressRouter {
         &self,
         address: &str,
         payload: Bytes,
-        headers: Headers,
+        headers: HeaderMap,
         coordinator: Option<&Coordinator>,
     ) {
         let snapshot = RawMessage::new(address, payload.clone()).with_headers(headers.clone());

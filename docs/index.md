@@ -14,8 +14,8 @@ properties, which carry headers natively instead of through an invented envelope
 subscriptions, which make competing consumers expressible.
 
 ```toml
-ruststream = { version = "0.6", features = ["macros", "json"] }
-ruststream-rumqttc = "0.6"
+ruststream = { version = "0.7", features = ["macros", "json"] }
+ruststream-rumqttc = "0.7"
 serde = { version = "1", features = ["derive"] }
 ```
 

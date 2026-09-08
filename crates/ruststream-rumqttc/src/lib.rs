@@ -15,8 +15,12 @@
 //!   [`AckError::Unsupported`](ruststream::AckError::Unsupported), as does
 //!   `nack(requeue = true)` - MQTT has no negative acknowledgement, and unacked
 //!   messages redeliver when a persistent session resumes.
+//! - A handler taking a batch (`&[T]`) gets one. A PUBLISH packet carries a single message, so
+//!   the batches are assembled on the client to the size the mount site named, and nothing at
+//!   that mount site says which side of the wire filled them.
 //! - Retained messages, last will, session persistence, and TLS with client certificates are
-//!   configuration on the broker and the publish policy.
+//!   configuration on the broker and the publish policy. Quality of service and the retain flag
+//!   are also settable per message through [`MqttPublishOptions`].
 
 #![forbid(unsafe_code)]
 
@@ -25,6 +29,7 @@ mod conn;
 mod error;
 mod filter;
 mod message;
+pub mod prelude;
 mod publisher;
 mod subscriber;
 #[cfg(feature = "testing")]
@@ -34,5 +39,7 @@ pub use broker::{ConnectedMqttBroker, MqttBroker};
 pub use error::MqttError;
 pub use filter::{MqttTopic, Qos};
 pub use message::MqttMessage;
-pub use publisher::{MqttPublish, MqttPublisher};
+pub use publisher::{
+    MqttPublish, MqttPublishOptions, MqttPublishOverride, MqttPublisher, QOS_HEADER, RETAIN_HEADER,
+};
 pub use subscriber::MqttSubscriber;

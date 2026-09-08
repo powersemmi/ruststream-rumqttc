@@ -9,7 +9,7 @@
   <a href="https://crates.io/crates/ruststream-rumqttc"><img src="https://img.shields.io/crates/v/ruststream-rumqttc.svg" alt="crates.io"></a>
   <a href="https://crates.io/crates/ruststream-rumqttc"><img src="https://img.shields.io/crates/dr/ruststream-rumqttc" alt="Recent downloads"></a>
   <a href="https://docs.rs/ruststream-rumqttc"><img src="https://img.shields.io/docsrs/ruststream-rumqttc" alt="docs.rs"></a>
-  <img src="https://img.shields.io/badge/MSRV-1.85-blue.svg" alt="MSRV 1.85">
+  <img src="https://img.shields.io/badge/MSRV-1.88-blue.svg" alt="MSRV 1.88">
   <img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License">
   <a href="https://t.me/ruststream_community"><img src="https://img.shields.io/badge/-Telegram-blue?logo=telegram&label=News" alt="Telegram news channel"></a>
   <a href="https://t.me/ruststream_communuty_ru_chat"><img src="https://img.shields.io/badge/-Telegram-blue?logo=telegram&label=RU" alt="Telegram RU chat"></a>
@@ -31,20 +31,22 @@ MQTT 5 is the primary target because two things the framework relies on exist on
 - **QoS-aware acknowledgement.** QoS 1/2 acknowledge through the protocol under manual control (the client completes the QoS 2 handshake); QoS 0 has no protocol acknowledgement, so it reports `AckError::Unsupported` instead of reporting success. MQTT has no negative acknowledgement, so `nack(requeue = true)` reports `Unsupported` too - unacked messages redeliver when a persistent session resumes - and `nack(requeue = false)` acknowledges.
 - **Shared subscriptions.** `MqttTopic::new("jobs").shared("workers")` subscribes `$share/workers/jobs`; the broker splits the stream across the group, and two group members on one connection round-robin locally (they are one wire subscription).
 - **Wildcards as the protocol defines them** (`+`, `#`), with messages reporting the real topic they arrived on.
+- **Batches for `&[T]` handlers.** A PUBLISH packet carries one message, so the crate assembles batches on the client to the size the mount site named (`b.include(ingest.batch(nonzero!(64)))`), closing a partial batch 20 ms after its first delivery. Nothing at the mount site says which side of the wire filled it.
 - **Headers ride user properties**; the well-known `content-type`, `reply-to`, and `correlation-id` headers ride the matching first-class MQTT 5 properties.
 - **Sessions, wills, retained.** `clean_start`/`session_expiry` for persistent sessions, `last_will` on the broker, `retain` on the publish policy, TLS with client certificates (`tls_ca` + `tls_client_auth`) for managed MQTT services.
+- **Per-message QoS and retain.** `MqttPublishOptions` sets either on a single publish: `publisher.with_retain(true).message(&state).publish()`.
 - **In-process test broker** (feature `testing`). `MqttTestBroker` reproduces core routing with no server, implements `ruststream::testing::TestableBroker`, and passes the framework's conformance suite in process.
 
 ## Install
 
 ```toml
 [dependencies]
-ruststream = { version = "0.6", features = ["macros", "json"] }
-ruststream-rumqttc = "0.6"
+ruststream = { version = "0.7", features = ["macros", "json"] }
+ruststream-rumqttc = "0.7"
 serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
-ruststream-rumqttc = { version = "0.6", features = ["testing"] }
+ruststream-rumqttc = { version = "0.7", features = ["testing"] }
 ```
 
 ## Write a service
@@ -52,9 +54,7 @@ ruststream-rumqttc = { version = "0.6", features = ["testing"] }
 ```rust
 use std::time::Duration;
 
-use ruststream::runtime::{App, AppInfo, HandlerResult, RustStream};
-use ruststream::subscriber;
-use ruststream_rumqttc::{MqttBroker, MqttTopic, Qos};
+use ruststream_rumqttc::prelude::*;
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -63,9 +63,9 @@ struct Telemetry {
 }
 
 #[subscriber(MqttTopic::new("devices/+/telemetry").qos(Qos::AtLeastOnce).shared("workers"))]
-async fn handle(telemetry: &Telemetry) -> HandlerResult {
+async fn handle(telemetry: &Telemetry) -> HandlerOutcome {
     println!("temperature: {}", telemetry.temperature);
-    HandlerResult::Ack
+    HandlerOutcome::ack()
 }
 
 #[ruststream::app]

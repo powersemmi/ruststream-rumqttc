@@ -67,6 +67,38 @@ hooks:
 plugins:
   - search
   # Versioned docs are published with `mike` (see the Docs workflow and the version switcher).
+  # Each translation is a tree of its own under `docs/<locale>/`, mirroring the English paths.
+  # English stays at the docs root: a file outside a locale folder is the default language.
+  #
+  # English is normative; a page with no translation yet falls back to the English text inside
+  # the localized site rather than disappearing from it, which is what lets translations land
+  # page by page. Nothing is translated yet, so today every locale serves the English pages.
+  - i18n:
+      docs_structure: folder
+      fallback_to_default: true
+      reconfigure_material: true
+      reconfigure_search: true
+      languages:
+        - locale: en
+          name: English
+          default: true
+          build: true
+        - locale: ru
+          name: Russian
+          build: true
+          nav_translations:
+            Home: Главная
+            Guide: Руководство
+            RustStream docs: Документация RustStream
+            API reference: Справочник API
+        - locale: zh
+          name: Chinese
+          build: true
+          nav_translations:
+            Home: 首页
+            Guide: 指南
+            RustStream docs: RustStream 文档
+            API reference: API 参考
 
 extra:
   version:

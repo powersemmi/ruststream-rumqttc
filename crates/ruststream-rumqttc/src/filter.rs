@@ -32,6 +32,25 @@ impl Qos {
             Self::ExactlyOnce => rumqttc::v5::mqttbytes::QoS::ExactlyOnce,
         }
     }
+
+    /// The protocol's own numbering, which is what the value travels as on
+    /// [`QOS_HEADER`](crate::QOS_HEADER).
+    pub(crate) const fn as_header(self) -> &'static str {
+        match self {
+            Self::AtMostOnce => "0",
+            Self::AtLeastOnce => "1",
+            Self::ExactlyOnce => "2",
+        }
+    }
+
+    pub(crate) fn from_header(value: &[u8]) -> Option<Self> {
+        match value {
+            b"0" => Some(Self::AtMostOnce),
+            b"1" => Some(Self::AtLeastOnce),
+            b"2" => Some(Self::ExactlyOnce),
+            _ => None,
+        }
+    }
 }
 
 /// A subscription descriptor for one MQTT topic filter.
@@ -105,12 +124,12 @@ impl MqttTopic {
                 self.filter
             )));
         }
-        if let Some(group) = &self.shared {
-            if group.is_empty() || group.contains(['/', '+', '#']) {
-                return Err(MqttError::Invalid(format!(
-                    "'{group}' is not a valid share group name"
-                )));
-            }
+        if let Some(group) = &self.shared
+            && (group.is_empty() || group.contains(['/', '+', '#']))
+        {
+            return Err(MqttError::Invalid(format!(
+                "'{group}' is not a valid share group name"
+            )));
         }
         Ok(())
     }

@@ -15,33 +15,29 @@ concurrency:
 
 jobs:
   rust:
-    name: Rust ${{ matrix.toolchain }}
+    name: Build and test (${{ matrix.toolchain }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        toolchain: [stable, msrv]
+        # The floor, what users build with, and the early warning. Releases in between add
+        # nothing: what fails on a later one fails on the floor too. The floor is spelled out
+        # rather than read from the manifest so it can select the toolchain directly; keep it in
+        # step with `rust-version` in Cargo.toml.
+        toolchain: [stable, beta, "1.88"]
+    # Installing a toolchain does not select it: `rust-toolchain.toml` outranks the rustup
+    # default the install action sets. RUSTUP_TOOLCHAIN outranks the file.
+    env:
+      RUSTUP_TOOLCHAIN: ${{ matrix.toolchain }}
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
-      # The MSRV leg follows `rust-version` in Cargo.toml, so an MSRV bump is a one-line change.
-      - name: Resolve toolchain
-        id: toolchain
-        env:
-          TOOLCHAIN: ${{ matrix.toolchain }}
-        run: |
-          if [ "$TOOLCHAIN" = "msrv" ]; then
-            TOOLCHAIN="$(sed -n 's/^rust-version *= *"\(.*\)"/\1/p' Cargo.toml)"
-            test -n "$TOOLCHAIN"
-          fi
-          echo "toolchain=$TOOLCHAIN" >> "$GITHUB_OUTPUT"
-
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: ${{ steps.toolchain.outputs.toolchain }}
+          toolchain: ${{ matrix.toolchain }}
           components: rustfmt, clippy
 
       - name: Cache cargo
@@ -53,16 +49,112 @@ jobs:
 
       - name: cargo clippy
         if: matrix.toolchain == 'stable'
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+
+      # Advisory, not a gate: surfaces a lint added by the next clippy release six weeks
+      # before it turns the build red.
+      - name: cargo clippy (beta, advisory)
+        if: matrix.toolchain == 'beta'
+        continue-on-error: true
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
       - name: cargo check (no default features)
-        run: cargo check --workspace --no-default-features
+        run: cargo check --locked --workspace --no-default-features
 
       - name: cargo check (all features)
-        run: cargo check --workspace --all-targets --all-features
+        run: cargo check --locked --workspace --all-targets --all-features
 
+      # The handler-stub suite only: the live tests skip themselves without MQTT_TEST_URL, and
+      # the broker-backed job below runs them against a real mosquitto.
+      # --no-fail-fast: a failing target must not hide failures in the targets behind it;
+      # the log then lists every red test, not just the first binary's.
       - name: cargo test (handler-stub only, no live broker)
-        run: cargo test --workspace --all-features
+        run: cargo test --locked --workspace --all-features --no-fail-fast
+
+      # The crate-root missing_docs deny covers item docs; this gate catches what rustc
+      # cannot: broken intra-doc links and redundant targets only rustdoc resolves.
+      - name: cargo doc
+        if: matrix.toolchain == 'stable'
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --locked --workspace --all-features --no-deps
+
+  features:
+    name: Each feature alone
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-hack
+        uses: taiki-e/install-action@v2.86.5
+        with:
+          tool: cargo-hack
+
+      # --no-dev-deps: a dev-dependency in scope masks a missing feature gate in the library.
+      # It also rewrites the manifests in place, which is why this is the one job without
+      # --locked.
+      - name: cargo hack check (each feature)
+        run: cargo hack check --workspace --each-feature --no-dev-deps
+
+  minimal-versions:
+    name: Minimal versions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install nightly (resolver only)
+        uses: dtolnay/rust-toolchain@nightly
+
+      # The floor, for the build step below. Keep the version in step with
+      # `rust-version` in the workspace manifest.
+      - name: Install the MSRV toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.88"
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      # The full flag rather than -Z direct-minimal-versions: the narrow one leaves the assembled
+      # graph unverified, and that is what a user builds. It costs the pinning list below.
+      - name: Resolve minimal versions
+        run: cargo +nightly update -Z minimal-versions
+
+      # Both are too-loose bounds in third-party manifests reached through this crate's own
+      # dependencies; drop each when the crate that declares it moves its floor.
+      #
+      # aws-lc-sys 0.21.0 (rustls' default crypto provider, reached through rumqttc's TLS
+      # transport) declares `cc = "1.0.83"` but its build script hands `Build::flag` a `String`,
+      # which that method only accepts from 1.1.x on.
+      #
+      # tracing-attributes 0.1.13 (reached through `tracing`) declares `syn = "1.0"` but calls
+      # `LitInt::base10_parse`, added in 1.0.4.
+      - name: Pin dependencies whose declared bounds are too loose
+        run: |
+          cargo update -p cc --precise 1.1.5
+          cargo update -p syn@1.0.0 --precise 1.0.4
+
+      # Minimum dependencies on the minimum compiler: the worst case a user can assemble.
+      # Resolution above needs nightly, so only this step drops to the floor.
+      - name: Build and test against minimal versions
+        env:
+          RUSTUP_TOOLCHAIN: "1.88"
+        run: |
+          cargo check --locked --workspace --all-targets --all-features
+          cargo test --locked --workspace --all-features --no-fail-fast
 
   broker-integration:
     name: Broker integration (mosquitto)
@@ -94,7 +186,7 @@ jobs:
         env:
           MQTT_TEST_URL: mqtt://127.0.0.1:1883
         run: >-
-          cargo test -p ruststream-rumqttc --all-features
+          cargo test --locked -p ruststream-rumqttc --all-features
           --test integration_mqtt
           --test conformance_mqtt
           -- --test-threads=1
@@ -115,7 +207,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install cargo-deny
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@v2.86.5
         with:
           tool: cargo-deny
 

@@ -136,7 +136,8 @@ impl TestableBroker for ConnectedMqttTestBroker {
 
 ruststream::register_testable_broker!(ConnectedMqttTestBroker);
 
-/// Publisher for the in-process broker.
+/// Publisher for the in-process broker: what [`MqttPublish`](crate::MqttPublish) pairs into here,
+/// and what [`publisher`](ConnectedMqttTestBroker::publisher) hands out directly.
 #[derive(Debug, Clone)]
 pub struct MqttTestPublisher {
     state: Arc<TestState>,

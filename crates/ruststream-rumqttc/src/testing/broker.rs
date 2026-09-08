@@ -145,11 +145,12 @@ impl ConnectedMqttTestBroker {
         topic.validate()?;
         self.state.ensure_open()?;
         let (filter, group, qos) = topic.into_parts();
-        let (id, rx) = self.state.router.subscribe(filter, group);
+        let (id, requeue, rx) = self.state.router.subscribe(filter, group);
         Ok(MqttTestSubscriber::new(
             Arc::clone(&self.state),
             id,
             rx,
+            requeue,
             qos,
             self.state.coordinator().cloned(),
         ))

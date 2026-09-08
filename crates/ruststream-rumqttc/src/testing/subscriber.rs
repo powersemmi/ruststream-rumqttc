@@ -12,6 +12,7 @@ use ruststream::{
 };
 
 use crate::error::MqttError;
+use crate::filter::Qos;
 use crate::subscriber::BATCH_MAX_WAIT;
 use crate::testing::broker::TestState;
 use crate::testing::router::{Delivery, DeliveryReceiver, DeliverySender, SubscriptionId};
@@ -23,6 +24,10 @@ struct WireTestSubscriber {
     id: SubscriptionId,
     rx: DeliveryReceiver,
     requeue: DeliverySender,
+    /// The quality of service this subscription was opened with. It caps the delivery's own, the
+    /// way a server delivers at the lesser of the two, and a delivery that comes out at `QoS` 0
+    /// carries no acknowledgement.
+    qos: Qos,
     /// A clone of the broker's harness coordinator, threaded into each yielded message so a
     /// requeue re-counts and a consumed delivery decrements. `None` outside a harness run.
     coordinator: Option<Coordinator>,
@@ -46,6 +51,7 @@ impl Subscriber for WireTestSubscriber {
 
     fn stream(&mut self) -> impl Stream<Item = Result<Self::Message, Self::Error>> + Send + '_ {
         let requeue = self.requeue.clone();
+        let subscribed_at = self.qos;
         let coordinator = self.coordinator.clone();
         // Poll the receiver in place rather than wrapping it in an owning stream, so `stream`
         // can be called again after the returned stream is dropped (the runtime and the
@@ -53,9 +59,14 @@ impl Subscriber for WireTestSubscriber {
         futures::stream::poll_fn(move |cx| {
             self.rx.poll_recv(cx).map(|next| {
                 next.map(|delivery| {
+                    // A delivery comes out at the lesser of the two levels, as it does on the
+                    // wire, so an acknowledgement needs both sides to carry one.
+                    let acknowledges =
+                        delivery.qos != Qos::AtMostOnce && subscribed_at != Qos::AtMostOnce;
                     Ok(MqttTestMessage::new(
                         delivery,
                         requeue.clone(),
+                        acknowledges,
                         coordinator.clone(),
                     ))
                 })
@@ -85,6 +96,7 @@ impl MqttTestSubscriber {
         id: SubscriptionId,
         rx: DeliveryReceiver,
         requeue: DeliverySender,
+        qos: Qos,
         coordinator: Option<Coordinator>,
     ) -> Self {
         Self {
@@ -93,6 +105,7 @@ impl MqttTestSubscriber {
                 id,
                 rx,
                 requeue,
+                qos,
                 coordinator,
             })
             .max_wait(BATCH_MAX_WAIT),
@@ -122,12 +135,24 @@ impl BatchSubscriber for MqttTestSubscriber {
 
 /// Message handed to handlers from an [`MqttTestSubscriber`].
 ///
-/// `ack` consumes the handle; `nack(requeue = true)` re-queues the delivery on the owning
-/// subscription's channel so the next handler invocation sees it again; `nack(requeue = false)`
-/// drops it, matching the real subscriber's reject path in effect.
+/// Settlement follows the delivered quality of service - the lesser of the publish's and the
+/// subscription's - as it does on the wire: a delivery that comes out at [`Qos::AtMostOnce`]
+/// carries no acknowledgement, so `ack` and `nack` both report [`AckError::Unsupported`] here
+/// exactly as the real message does. Otherwise `ack` consumes the handle, `nack(requeue = true)`
+/// re-queues the delivery on the owning subscription's channel so the next handler invocation sees
+/// it again, and `nack(requeue = false)` drops it.
+///
+/// The requeue is the framework's redelivery contract, which every in-process transport owes the
+/// core's routing suite (`conformance::harness::run_suite`) and the retry path built on it. It is
+/// the one place this transport answers where MQTT itself cannot: the protocol has no negative
+/// acknowledgement, so the real message reports [`AckError::Unsupported`] and an unacknowledged
+/// delivery comes back when the session resumes. A test that needs to see that answer needs the
+/// live suite.
 pub struct MqttTestMessage {
     delivery: Option<Delivery>,
     requeue: DeliverySender,
+    /// Mirrors the real message's acker: absent for `QoS` 0, where nothing can be settled.
+    acknowledges: bool,
     /// A clone of the broker's harness coordinator. When set, this delivery is counted in
     /// flight and is decremented exactly once when the message is consumed or dropped.
     coordinator: Option<Coordinator>,
@@ -153,11 +178,13 @@ impl MqttTestMessage {
     pub(crate) fn new(
         delivery: Delivery,
         requeue: DeliverySender,
+        acknowledges: bool,
         coordinator: Option<Coordinator>,
     ) -> Self {
         Self {
             delivery: Some(delivery),
             requeue,
+            acknowledges,
             coordinator,
         }
     }
@@ -179,8 +206,14 @@ impl IncomingMessage for MqttTestMessage {
     }
 
     fn ack(mut self) -> impl Future<Output = Result<(), AckError>> {
+        // The handle is consumed either way, as it is on the wire: what QoS 0 lacks is the
+        // acknowledgement, not the delivery.
         self.delivery.take();
-        ready(Ok(()))
+        ready(if self.acknowledges {
+            Ok(())
+        } else {
+            Err(AckError::Unsupported)
+        })
     }
 
     fn nack(mut self, requeue: bool) -> impl Future<Output = Result<(), AckError>> {
@@ -188,6 +221,9 @@ impl IncomingMessage for MqttTestMessage {
             .delivery
             .take()
             .expect("MqttTestMessage ack/nack invoked twice");
+        if !self.acknowledges {
+            return ready(Err(AckError::Unsupported));
+        }
         if requeue {
             let sent = self.requeue.send(delivery);
             // The requeue bypasses fanout, so count the re-enqueue here to balance this

@@ -180,23 +180,27 @@ pub(crate) fn to_wire_properties(
     Ok((per_message, carries_properties.then_some(properties)))
 }
 
-/// Drops the per-message transport arguments from a header map, leaving what a subscriber sees.
-/// The in-process test broker routes through it so its deliveries carry what the real transport
-/// delivers; the arguments themselves say nothing without a protocol to apply them to.
+/// Takes the per-message transport arguments off a header map, returning them with the headers a
+/// subscriber sees. The in-process test broker routes through it so its deliveries carry what the
+/// real transport delivers, and so the quality of service a publish asked for reaches the delivery
+/// rather than being lost with its header.
 ///
 /// # Errors
 ///
-/// Reads each argument it drops, so an unreadable one is refused here exactly as the live
+/// Reads each argument it takes, so an unreadable one is refused here exactly as the live
 /// publisher refuses it, and a test meets the error a server would have produced.
 #[cfg(feature = "testing")]
-pub(crate) fn without_per_message(mut headers: HeaderMap) -> Result<HeaderMap, MqttError> {
+pub(crate) fn take_per_message(
+    mut headers: HeaderMap,
+) -> Result<(PerMessage, HeaderMap), MqttError> {
+    let mut per_message = PerMessage::default();
     if let Some(value) = headers.remove(QOS_HEADER) {
-        read_qos(&value)?;
+        per_message.qos = Some(read_qos(&value)?);
     }
     if let Some(value) = headers.remove(RETAIN_HEADER) {
-        read_retain(&value)?;
+        per_message.retain = Some(read_retain(&value)?);
     }
-    Ok(headers)
+    Ok((per_message, headers))
 }
 
 #[cfg(test)]

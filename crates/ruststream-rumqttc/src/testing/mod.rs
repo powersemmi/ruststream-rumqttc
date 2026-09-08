@@ -11,12 +11,22 @@
 //! file is mounted here as written, both halves of it - there is no in-process descriptor and no
 //! in-process policy to swap in.
 //!
-//! What a descriptor asks for past address selection is protocol behaviour, and this transport
-//! has no protocol: the quality of service, the retain flag, and the broker-side distribution of
-//! a shared group are ignored, as are session redelivery and dead-letter timing. A test here
-//! therefore proves that a handler sees what a broker would route to it; it cannot prove a
-//! delivery guarantee. Those are verified end to end against a real broker, and each ignored
-//! option says at its own definition what a test must not read into it.
+//! What the descriptor asks for is honoured as far as the answer is observable without a server: a
+//! share group makes its members compete for one delivery instead of each taking a copy, and the
+//! quality of service - the lesser of the publish's and the subscription's, as on the wire -
+//! decides whether a delivery can be settled at all, so a `QoS` 0 delivery reports
+//! [`AckError::Unsupported`](ruststream::AckError::Unsupported) here exactly as it does live.
+//!
+//! What is left out is the protocol itself: the acknowledgement exchange behind an acknowledged
+//! `QoS`, retained messages, the session that redelivers, dead-letter timing. A test here proves
+//! what a handler saw, how it settled, and what it published; it cannot prove that a guarantee was
+//! kept on a wire. That is what the live suite is for, and each unmodelled behaviour says at its
+//! own definition what a test must not read into it.
+//!
+//! The framework's own contract suites run against this transport, not only against a server:
+//! `conformance::harness::run_suite` for routing, `conformance::harness::lifecycle` for the
+//! ladder, and `conformance::capabilities::batches` for the one capability this broker implements.
+//! Whatever the core means by correct broker behaviour, the stand-in is held to it.
 
 mod broker;
 mod router;

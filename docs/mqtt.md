@@ -293,12 +293,24 @@ deliveries with, so that filter selects in process the topics it selects on the 
 publishing `devices/dev42/telemetry` reaches the body. The descriptor is validated here as well: a
 filter a server would reject fails startup rather than passing its first test.
 
-Everything past address selection is protocol behaviour, and the stand-in has no protocol. The
-quality of service is not handshaked, the retain flag is not applied, and a shared group is not
-distributed - in process each member holding the group's filter gets its own copy. A policy's `qos`
-and `retain` are dropped when it pairs here, and are not recorded as headers either, because on the
-wire the publisher consumes them: a delivery in process carries exactly what a subscriber would
-see. So a test here says what a handler received, how it settled, and what it published where -
-never that a delivery was acknowledged under the guarantee the policy names, that a message was
-retained, or that work was shared. Those, with session redelivery, are covered by the live suite
-against Eclipse Mosquitto instead, gated behind `MQTT_TEST_URL`.
+The rest of the descriptor is honoured as far as an answer is observable without a server. A share
+group makes its members compete: four publishes are four deliveries across the group, not one per
+member, so a test can assert that work was shared rather than only that it happened. The quality of
+service decides whether a delivery can be settled - the lesser of the publish's and the
+subscription's, as on the wire - so a `QoS` 0 delivery reports `AckError::Unsupported` here exactly
+as it does against Mosquitto, and a handler cannot quietly prove a guarantee nobody asked for.
+
+What the stand-in leaves out is the protocol itself: the acknowledgement exchange behind an
+acknowledged `QoS`, retained messages, and the session that redelivers. A policy's `retain` stops
+at the pairing for the same reason - nothing in process keeps a last message per topic - and
+neither per-message argument is recorded as a header, because on the wire the publisher consumes
+them, so a delivery here carries exactly what a subscriber would see. A test on this transport
+therefore says what a handler received, how it settled, and what it published where; the live suite
+against Eclipse Mosquitto, gated behind `MQTT_TEST_URL`, is what says the same answers hold on a
+wire.
+
+The framework's contract suites are run against both. The routing suite is in-process only - it
+drives `TestableBroker`, which no server implements - while the lifecycle ladder and the batch
+capability suite run twice, once against the stand-in and once against Mosquitto. Each scenario in
+`tests/stand_in_mqtt.rs` is the twin of a live one in `tests/integration_mqtt.rs`, so a behaviour
+asserted in process can be traced to the server run that backs it.

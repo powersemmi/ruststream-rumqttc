@@ -1,6 +1,7 @@
 //! [`MqttTestBroker`]: the in-process transport and its connected form.
 
 use std::future::{Future, ready};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use bytes::Bytes;
@@ -10,7 +11,8 @@ use ruststream::{
 };
 
 use crate::error::MqttError;
-use crate::message::without_per_message;
+use crate::filter::{MqttTopic, Qos};
+use crate::message::take_per_message;
 use crate::publisher::{MqttPublish, MqttPublishOptions};
 use crate::testing::router::AddressRouter;
 use crate::testing::subscriber::MqttTestSubscriber;
@@ -20,6 +22,7 @@ use crate::testing::subscriber::MqttTestSubscriber;
 pub(crate) struct TestState {
     pub(crate) router: AddressRouter,
     coordinator: OnceLock<Coordinator>,
+    closed: AtomicBool,
 }
 
 impl TestState {
@@ -27,9 +30,24 @@ impl TestState {
         self.coordinator.get()
     }
 
-    pub(crate) fn publish(&self, name: &str, payload: Bytes, headers: ruststream::HeaderMap) {
+    /// The shutdown witness closes the connection for its owner, but handles handed out earlier
+    /// alias it and outlive it, so they ask here - as the real handles ask the connection task.
+    fn ensure_open(&self) -> Result<(), MqttError> {
+        if self.closed.load(Ordering::Acquire) {
+            return Err(MqttError::NotConnected);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn publish(
+        &self,
+        name: &str,
+        payload: Bytes,
+        headers: ruststream::HeaderMap,
+        qos: Qos,
+    ) {
         self.router
-            .publish(name, payload, headers, self.coordinator());
+            .publish(name, payload, headers, qos, self.coordinator());
     }
 }
 
@@ -60,6 +78,7 @@ impl MqttTestBroker {
     pub fn publisher(&self) -> MqttTestPublisher {
         MqttTestPublisher {
             state: Arc::clone(&self.state),
+            qos: Qos::default(),
         }
     }
 }
@@ -82,12 +101,59 @@ pub struct ConnectedMqttTestBroker {
 }
 
 impl ConnectedMqttTestBroker {
-    /// A publisher from the connected form.
+    /// A publisher from the connected form, with the same policy defaults as the real one.
     #[must_use]
     pub fn publisher(&self) -> MqttTestPublisher {
         MqttTestPublisher {
             state: Arc::clone(&self.state),
+            qos: Qos::default(),
         }
+    }
+
+    /// A publisher carrying `policy`, mirroring
+    /// [`ConnectedMqttBroker::publisher_with`](crate::ConnectedMqttBroker). The policy's quality
+    /// of service travels with each delivery, because it is what decides whether a subscriber can
+    /// settle one; its retain flag stops here, since nothing in process retains.
+    #[must_use]
+    pub(crate) fn publisher_with(&self, policy: MqttPublish) -> MqttTestPublisher {
+        MqttTestPublisher {
+            state: Arc::clone(&self.state),
+            qos: policy.qos_value(),
+        }
+    }
+
+    /// Opens a subscription for `topic`, mirroring
+    /// [`ConnectedMqttBroker::subscribe_topic`](crate::ConnectedMqttBroker::subscribe_topic): the
+    /// descriptor is validated first, its filter selects the deliveries, its share group makes the
+    /// subscription a competing consumer, and its quality of service decides whether a delivery
+    /// can be settled at all.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MqttError::Invalid`] for a descriptor no broker would accept, and
+    /// [`MqttError::NotConnected`] once this broker has shut down.
+    pub fn subscribe_topic(
+        &self,
+        topic: MqttTopic,
+    ) -> impl Future<Output = Result<MqttTestSubscriber, MqttError>> {
+        // Registering is a lock and a channel, so there is nothing to await here. The signature
+        // stays the real one's, which waits for the broker's SUBACK.
+        ready(self.register(topic))
+    }
+
+    fn register(&self, topic: MqttTopic) -> Result<MqttTestSubscriber, MqttError> {
+        topic.validate()?;
+        self.state.ensure_open()?;
+        let (filter, group, qos) = topic.into_parts();
+        let (id, requeue, rx) = self.state.router.subscribe(filter, group);
+        Ok(MqttTestSubscriber::new(
+            Arc::clone(&self.state),
+            id,
+            rx,
+            requeue,
+            qos,
+            self.state.coordinator().cloned(),
+        ))
     }
 }
 
@@ -96,6 +162,9 @@ impl ConnectedBroker for ConnectedMqttTestBroker {
     type Closed = ();
 
     fn shutdown(self) -> impl Future<Output = Result<(), Self::Error>> {
+        // Closed before the registry is dropped, so a handle racing the shutdown is refused
+        // rather than routed into a registry that is about to go.
+        self.state.closed.store(true, Ordering::Release);
         self.state.router.clear();
         ready(Ok(()))
     }
@@ -105,14 +174,7 @@ impl Subscribe for ConnectedMqttTestBroker {
     type Subscriber = MqttTestSubscriber;
 
     fn subscribe(&self, name: &str) -> impl Future<Output = Result<Self::Subscriber, Self::Error>> {
-        let (id, requeue, rx) = self.state.router.subscribe(name.to_owned());
-        ready(Ok(MqttTestSubscriber::new(
-            Arc::clone(&self.state),
-            id,
-            rx,
-            requeue,
-            self.state.coordinator().cloned(),
-        )))
+        self.subscribe_topic(MqttTopic::new(name))
     }
 }
 
@@ -122,10 +184,14 @@ impl TestableBroker for ConnectedMqttTestBroker {
     }
 
     fn inject(&self, message: OutgoingMessage<'_>) {
+        // An injection stands in for an outside producer this crate did not configure, so it
+        // publishes at the default quality of service rather than at none: a harness message must
+        // be settleable, as one from any ordinary client would be.
         self.state.publish(
             message.name(),
             Bytes::copy_from_slice(message.payload()),
             message.headers().clone(),
+            Qos::default(),
         );
     }
 
@@ -141,6 +207,7 @@ ruststream::register_testable_broker!(ConnectedMqttTestBroker);
 #[derive(Debug, Clone)]
 pub struct MqttTestPublisher {
     state: Arc<TestState>,
+    qos: Qos,
 }
 
 impl Publisher for MqttTestPublisher {
@@ -151,9 +218,15 @@ impl Publisher for MqttTestPublisher {
         // delivery carries what a subscriber would see and an unreadable one is refused on the
         // same terms. Applying them is protocol behaviour this transport does not reproduce,
         // which is what the live suite covers.
-        let outcome = without_per_message(msg.headers().clone()).map(|headers| {
-            self.state
-                .publish(msg.name(), Bytes::copy_from_slice(msg.payload()), headers);
+        let outcome = self.state.ensure_open().and_then(|()| {
+            take_per_message(msg.headers().clone()).map(|(per_message, headers)| {
+                self.state.publish(
+                    msg.name(),
+                    Bytes::copy_from_slice(msg.payload()),
+                    headers,
+                    per_message.qos.unwrap_or(self.qos),
+                );
+            })
         });
         ready(outcome)
     }

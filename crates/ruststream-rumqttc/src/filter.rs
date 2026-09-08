@@ -5,8 +5,6 @@
 //! consumers are expressed at all.
 
 use rumqttc::v5::mqttbytes::valid_filter;
-#[cfg(feature = "testing")]
-use ruststream::Subscribe;
 use ruststream::SubscriptionSource;
 
 use crate::broker::ConnectedMqttBroker;
@@ -112,6 +110,15 @@ impl MqttTopic {
         self.qos
     }
 
+    /// Consumes the descriptor into what a subscription registry needs of it: the filter to match
+    /// on, the wire filter that names its share group, and the quality of service its deliveries
+    /// are settled under.
+    #[cfg(feature = "testing")]
+    pub(crate) fn into_parts(self) -> (String, Option<String>, Qos) {
+        let group = self.shared.as_ref().map(|_| self.wire_filter());
+        (self.filter, group, self.qos)
+    }
+
     /// The filter as subscribed on the wire (`$share/<group>/<filter>` when shared).
     pub(crate) fn wire_filter(&self) -> String {
         self.shared.as_ref().map_or_else(
@@ -156,13 +163,14 @@ impl SubscriptionSource<ConnectedMqttBroker> for MqttTopic {
 /// declares for production is what the harness mounts: no second descriptor type, and no name
 /// rewritten at the mount site.
 ///
-/// The stand-in has no protocol, so it honours the filter and nothing else: [`qos`](MqttTopic::qos)
-/// and [`shared`](MqttTopic::shared) are dropped here. Which topics the subscription selects is
-/// unaffected - a shared subscription receives what its group would, and a delivery settles either
-/// way - but an in-process run cannot stand in for the two things those options buy. A `QoS` 0
-/// subscription reports [`AckError::Unsupported`](ruststream::AckError::Unsupported) on the wire
-/// where the stand-in settles quietly, and a server hands each message of a shared group to one
-/// member where here every member gets a copy. The live suite is where both are checked.
+/// Every part of the descriptor that decides what a handler sees is honoured there: the filter
+/// selects the same topics, [`shared`](MqttTopic::shared) makes the subscription a competing
+/// consumer rather than another copy, and [`qos`](MqttTopic::qos) decides whether a delivery can
+/// be settled at all - [`Qos::AtMostOnce`] reports
+/// [`AckError::Unsupported`](ruststream::AckError::Unsupported) in process exactly as it does on
+/// the wire. What is left is the protocol itself: the handshake behind an acknowledged `QoS`, the
+/// retained message, the session that redelivers. Those need a server, and the live suite is where
+/// they are checked.
 #[cfg(feature = "testing")]
 impl SubscriptionSource<ConnectedMqttTestBroker> for MqttTopic {
     type Subscriber = MqttTestSubscriber;
@@ -175,10 +183,7 @@ impl SubscriptionSource<ConnectedMqttTestBroker> for MqttTopic {
         self,
         connected: &ConnectedMqttTestBroker,
     ) -> Result<MqttTestSubscriber, MqttError> {
-        // Validated on both transports: a descriptor a real broker would refuse must not pass its
-        // first test in process.
-        self.validate()?;
-        connected.subscribe(self.filter()).await
+        connected.subscribe_topic(self).await
     }
 }
 

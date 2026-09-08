@@ -5,11 +5,15 @@
 //! consumers are expressed at all.
 
 use rumqttc::v5::mqttbytes::valid_filter;
+#[cfg(feature = "testing")]
+use ruststream::Subscribe;
 use ruststream::SubscriptionSource;
 
 use crate::broker::ConnectedMqttBroker;
 use crate::error::MqttError;
 use crate::subscriber::MqttSubscriber;
+#[cfg(feature = "testing")]
+use crate::testing::{ConnectedMqttTestBroker, MqttTestSubscriber};
 
 /// Delivery quality of service for a subscription or a publish policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -56,7 +60,8 @@ impl Qos {
 /// A subscription descriptor for one MQTT topic filter.
 ///
 /// Implements [`SubscriptionSource`], so it can sit inline in the `#[subscriber(..)]`
-/// decorator:
+/// decorator - for the real broker and, under the `testing` feature, for the in-process one, so
+/// the declaration a service ships is the declaration its tests mount:
 ///
 /// ```
 /// use ruststream_rumqttc::{MqttTopic, Qos};
@@ -144,6 +149,36 @@ impl SubscriptionSource<ConnectedMqttBroker> for MqttTopic {
 
     async fn subscribe(self, connected: &ConnectedMqttBroker) -> Result<MqttSubscriber, MqttError> {
         connected.subscribe_topic(self).await
+    }
+}
+
+/// The same descriptor opens the subscription on the in-process broker, so what a service
+/// declares for production is what the harness mounts: no second descriptor type, and no name
+/// rewritten at the mount site.
+///
+/// The stand-in has no protocol, so it honours the filter and nothing else: [`qos`](MqttTopic::qos)
+/// and [`shared`](MqttTopic::shared) are dropped here. Which topics the subscription selects is
+/// unaffected - a shared subscription receives what its group would, and a delivery settles either
+/// way - but an in-process run cannot stand in for the two things those options buy. A `QoS` 0
+/// subscription reports [`AckError::Unsupported`](ruststream::AckError::Unsupported) on the wire
+/// where the stand-in settles quietly, and a server hands each message of a shared group to one
+/// member where here every member gets a copy. The live suite is where both are checked.
+#[cfg(feature = "testing")]
+impl SubscriptionSource<ConnectedMqttTestBroker> for MqttTopic {
+    type Subscriber = MqttTestSubscriber;
+
+    fn name(&self) -> &str {
+        self.filter()
+    }
+
+    async fn subscribe(
+        self,
+        connected: &ConnectedMqttTestBroker,
+    ) -> Result<MqttTestSubscriber, MqttError> {
+        // Validated on both transports: a descriptor a real broker would refuse must not pass its
+        // first test in process.
+        self.validate()?;
+        connected.subscribe(self.filter()).await
     }
 }
 

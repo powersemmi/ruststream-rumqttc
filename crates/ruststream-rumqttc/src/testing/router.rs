@@ -72,16 +72,13 @@ pub(crate) struct AddressRouter {
 
 impl AddressRouter {
     /// Registers a subscription on `filter`, in the share group `group` names, and returns the
-    /// channel pair the subscriber will use, together with the [`SubscriptionId`] needed to
+    /// receiving end of its delivery channel together with the [`SubscriptionId`] needed to
     /// unsubscribe.
-    ///
-    /// The returned [`DeliverySender`] is the same one fanout uses, so subscribers can re-send
-    /// a delivery into their own queue to implement `nack(requeue = true)`.
     pub(crate) fn subscribe(
         &self,
         filter: String,
         group: Option<String>,
-    ) -> (SubscriptionId, DeliverySender, DeliveryReceiver) {
+    ) -> (SubscriptionId, DeliveryReceiver) {
         let (tx, rx) = mpsc::unbounded_channel();
         let id = SubscriptionId(self.next_id.fetch_add(1, Ordering::Relaxed));
         self.state
@@ -93,10 +90,10 @@ impl AddressRouter {
                 Subscription {
                     filter,
                     group,
-                    sender: tx.clone(),
+                    sender: tx,
                 },
             );
-        (id, tx, rx)
+        (id, rx)
     }
 
     /// Removes a subscription. No-op if the id is unknown (double-drop of the subscriber).
@@ -212,7 +209,7 @@ mod tests {
     #[test]
     fn a_wildcard_filter_selects_the_topics_it_would_select_on_the_wire() {
         let router = AddressRouter::default();
-        let (_id, _requeue, mut rx) = router.subscribe("devices/+/telemetry".to_owned(), None);
+        let (_id, mut rx) = router.subscribe("devices/+/telemetry".to_owned(), None);
 
         publish(&router, "devices/dev42/telemetry");
         publish(&router, "devices/dev42/state");
@@ -228,7 +225,7 @@ mod tests {
     #[test]
     fn a_terminal_hash_covers_every_level_below_it() {
         let router = AddressRouter::default();
-        let (_id, _requeue, mut rx) = router.subscribe("devices/#".to_owned(), None);
+        let (_id, mut rx) = router.subscribe("devices/#".to_owned(), None);
 
         publish(&router, "devices/dev42/telemetry/raw");
         publish(&router, "sensors/dev42/telemetry");
@@ -240,7 +237,7 @@ mod tests {
     #[test]
     fn the_published_log_is_keyed_by_the_topic_not_the_filter() {
         let router = AddressRouter::default();
-        let (_id, _requeue, _rx) = router.subscribe("devices/+/telemetry".to_owned(), None);
+        let (_id, _rx) = router.subscribe("devices/+/telemetry".to_owned(), None);
 
         publish(&router, "devices/dev42/telemetry");
 
@@ -255,8 +252,8 @@ mod tests {
     fn one_share_group_takes_one_copy_between_its_members() {
         let router = AddressRouter::default();
         let group = Some("$share/workers/jobs".to_owned());
-        let (_a, _ra, mut first) = router.subscribe("jobs".to_owned(), group.clone());
-        let (_b, _rb, mut second) = router.subscribe("jobs".to_owned(), group);
+        let (_a, mut first) = router.subscribe("jobs".to_owned(), group.clone());
+        let (_b, mut second) = router.subscribe("jobs".to_owned(), group);
 
         for _ in 0..4 {
             publish(&router, "jobs");
@@ -278,9 +275,9 @@ mod tests {
     #[test]
     fn two_groups_on_one_filter_each_take_their_own_copy() {
         let router = AddressRouter::default();
-        let (_a, _ra, mut workers) =
+        let (_a, mut workers) =
             router.subscribe("jobs".to_owned(), Some("$share/workers/jobs".to_owned()));
-        let (_b, _rb, mut auditors) =
+        let (_b, mut auditors) =
             router.subscribe("jobs".to_owned(), Some("$share/auditors/jobs".to_owned()));
 
         publish(&router, "jobs");
@@ -295,8 +292,8 @@ mod tests {
     #[test]
     fn plain_subscriptions_on_one_filter_each_take_a_copy() {
         let router = AddressRouter::default();
-        let (_a, _ra, mut first) = router.subscribe("jobs".to_owned(), None);
-        let (_b, _rb, mut second) = router.subscribe("jobs".to_owned(), None);
+        let (_a, mut first) = router.subscribe("jobs".to_owned(), None);
+        let (_b, mut second) = router.subscribe("jobs".to_owned(), None);
 
         publish(&router, "jobs");
 

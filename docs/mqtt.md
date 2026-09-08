@@ -142,6 +142,27 @@ A fanned-out copy carries no acknowledgement either. When two overlapping filter
 message the wire acknowledgement belongs to exactly one delivery, and the copies report
 `AckError::Unsupported`.
 
+### What a handler's outcome does here
+
+`HandlerOutcome::retry()` asks the broker to redeliver, and on MQTT nothing can ask. The runtime
+logs the refused negative acknowledgement (`ack / nack failed`) and moves on, so the delivery is
+never acknowledged. At `QoS` 1 and 2 the message therefore comes back when a persistent session
+resumes - `clean_start(false)`, a session expiry long enough to outlive the gap, and a reconnect -
+and never inside the live connection: nothing is retried in the seconds after the handler returns.
+At `QoS` 0 there is nothing to redeliver and the message is gone. Read `retry()` here as "leave it
+for the next session", not as "try again shortly".
+
+`HandlerOutcome::retry_after(delay)` is the outcome that retries within the session, through the
+framework's own fallback rather than the protocol: give the mount site a retry publisher with
+`retry_via(..)` and the runtime acknowledges the original, waits, then re-publishes a copy to the
+same topic carrying the retry count in its headers. Acknowledging the original is that fallback's
+first step, so it needs an acknowledgeable delivery: at `QoS` 0 the step is refused and the
+deferred copy is never published, which drops the message. With no retry publisher configured the
+runtime warns and falls back to `retry()`, with the consequences above.
+
+`HandlerOutcome::drop()` acknowledges, because dropping is the protocol's only terminal answer.
+Dead-lettering is a publish the service makes, not something the broker does.
+
 Delivery back-pressure is the protocol's receive-maximum, set with
 `MqttBroker::receive_maximum`: the broker bounds how many unacknowledged `QoS` 1/2 deliveries it may
 have in flight, which is also what bounds an unread subscriber's queue. `QoS` 0 has no such bound.
@@ -314,3 +335,13 @@ drives `TestableBroker`, which no server implements - while the lifecycle ladder
 capability suite run twice, once against the stand-in and once against Mosquitto. Each scenario in
 `tests/stand_in_mqtt.rs` is the twin of a live one in `tests/integration_mqtt.rs`, so a behaviour
 asserted in process can be traced to the server run that backs it.
+
+One answer here is still not the wire's, and it is the routing suite that requires it:
+`nack(requeue = true)` redelivers in process, where the real message reports
+`AckError::Unsupported`. So a handler returning `HandlerOutcome::retry()` is handed its message
+again under the harness, while against a server the same handler leaves the message unacknowledged
+until the session resumes. Do not read an in-process retry as proof that a service retries in
+production - the section on [what a handler's outcome does here](#what-a-handlers-outcome-does-here)
+is what holds on a wire. The framework's routing contract demands redelivery of every in-process
+transport today; when that changes, this transport answers `Unsupported` like the real one and the
+paragraph goes away.

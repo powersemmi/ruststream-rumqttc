@@ -142,12 +142,15 @@ impl BatchSubscriber for MqttTestSubscriber {
 /// re-queues the delivery on the owning subscription's channel so the next handler invocation sees
 /// it again, and `nack(requeue = false)` drops it.
 ///
-/// The requeue is the framework's redelivery contract, which every in-process transport owes the
-/// core's routing suite (`conformance::harness::run_suite`) and the retry path built on it. It is
-/// the one place this transport answers where MQTT itself cannot: the protocol has no negative
-/// acknowledgement, so the real message reports [`AckError::Unsupported`] and an unacknowledged
-/// delivery comes back when the session resumes. A test that needs to see that answer needs the
-/// live suite.
+/// The requeue is the one answer here that is not the wire's, and it is the framework that asks
+/// for it: the core's routing suite (`conformance::harness::run_suite`) requires redelivery of
+/// every in-process transport. MQTT has no negative acknowledgement, so the real message reports
+/// [`AckError::Unsupported`] and leaves the delivery unacknowledged until a persistent session
+/// resumes. A handler returning `HandlerOutcome::retry()` is therefore handed its message again
+/// under the harness, while against a server the same handler retries nothing inside the live
+/// connection - do not read an in-process retry as proof that a service retries in production.
+/// When the routing contract stops requiring redelivery, this reports [`AckError::Unsupported`]
+/// like the real message and the difference is gone.
 pub struct MqttTestMessage {
     delivery: Option<Delivery>,
     requeue: DeliverySender,

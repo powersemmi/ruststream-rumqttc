@@ -22,6 +22,11 @@ use crate::publisher::{QOS_HEADER, RETAIN_HEADER};
 /// reports [`AckError::Unsupported`] as well - unacknowledged messages redeliver when the
 /// session resumes - and `nack(requeue = false)` acknowledges (dropping is the only terminal
 /// outcome the protocol offers).
+///
+/// A handler's `HandlerOutcome::retry()` settles through that refused negative acknowledgement, so
+/// it does not retry inside the live connection: the delivery stays unacknowledged and comes back
+/// only when a persistent session resumes. `retry_after` with a retry publisher is the outcome
+/// that retries within the session; the guide's acknowledgement section spells both out.
 pub struct MqttMessage {
     payload: Bytes,
     headers: HeaderMap,

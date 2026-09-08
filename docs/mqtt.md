@@ -281,17 +281,24 @@ connected form implements `ruststream::testing::TestableBroker`, so the same bro
 It batches the way the real subscriber does, with the same size from the mount site and the same
 deadline, so a batch handler is handed under the harness what a server would have produced.
 
-`MqttTopic` opens a subscription on it, so the handler a service ships is the handler the harness
-mounts - the one at the top of this page, wildcard, quality of service, shared group and all,
-with only the broker under it swapped. The test broker routes by topic-filter match, the rule the
-connection task demultiplexes deliveries with, so that filter selects in process the topics it
-selects on the wire and a device publishing `devices/dev42/telemetry` reaches the body. The
-descriptor is validated here as well: a filter a server would reject fails startup rather than
-passing its first test.
+A routes file mounts on it as written, both halves of it. `MqttTopic` opens a subscription on the
+test broker, so the handler a service ships is the handler the harness mounts - the one at the top
+of this page, wildcard, quality of service, shared group and all - and `MqttPublish` pairs against
+it, so `b.include(handle).out(Reply, Publish::default())` is the same line under both brokers.
+There is no in-process descriptor and no in-process policy to swap in; the only thing that changes
+is the broker the app is built with.
+
+The test broker routes by topic-filter match, the rule the connection task demultiplexes
+deliveries with, so that filter selects in process the topics it selects on the wire and a device
+publishing `devices/dev42/telemetry` reaches the body. The descriptor is validated here as well: a
+filter a server would reject fails startup rather than passing its first test.
 
 Everything past address selection is protocol behaviour, and the stand-in has no protocol. The
 quality of service is not handshaked, the retain flag is not applied, and a shared group is not
-distributed - in process each member holding the group's filter gets its own copy. So a test here
-says what a handler received and how it settled, never that a delivery was acknowledged or that
-work was shared. Those, with session redelivery, are covered by the live suite against Eclipse
-Mosquitto instead, gated behind `MQTT_TEST_URL`.
+distributed - in process each member holding the group's filter gets its own copy. A policy's `qos`
+and `retain` are dropped when it pairs here, and are not recorded as headers either, because on the
+wire the publisher consumes them: a delivery in process carries exactly what a subscriber would
+see. So a test here says what a handler received, how it settled, and what it published where -
+never that a delivery was acknowledged under the guarantee the policy names, that a message was
+retained, or that work was shared. Those, with session redelivery, are covered by the live suite
+against Eclipse Mosquitto instead, gated behind `MQTT_TEST_URL`.

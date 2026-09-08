@@ -12,6 +12,8 @@ use crate::broker::{ConnectedMqttBroker, CoreCell};
 use crate::error::MqttError;
 use crate::filter::Qos;
 use crate::message::to_wire_properties;
+#[cfg(feature = "testing")]
+use crate::testing::{ConnectedMqttTestBroker, MqttTestPublisher};
 
 /// The header the per-message quality of service rides, as the protocol's own numbering
 /// (`"0"`, `"1"`, `"2"`).
@@ -318,6 +320,28 @@ impl PublishPolicy<ConnectedMqttBroker> for MqttPublish {
         connected: &ConnectedMqttBroker,
     ) -> impl Future<Output = Result<Self::Live, PairError>> {
         ready(Ok(connected.publisher_with(self)))
+    }
+}
+
+/// The same policy pairs against the in-process broker, so a routes file mounts on both brokers as
+/// written - the destination, the codec and the slot it is attached to are the mount site's, and
+/// none of them changes with the transport underneath.
+///
+/// What the policy declares is dropped in pairing: the stand-in has no PUBLISH packet to carry a
+/// quality of service or a retain flag on. They are not recorded as headers either, because on the
+/// wire the publisher consumes them - a delivery in process therefore carries exactly what a
+/// subscriber would see. So a test here says a message was published, with which payload and
+/// headers, to which destination; that it was retained, or acknowledged under the guarantee the
+/// policy names, is the live suite's to check.
+#[cfg(feature = "testing")]
+impl PublishPolicy<ConnectedMqttTestBroker> for MqttPublish {
+    type Live = MqttTestPublisher;
+
+    fn pair(
+        self,
+        connected: &ConnectedMqttTestBroker,
+    ) -> impl Future<Output = Result<Self::Live, PairError>> {
+        ready(Ok(connected.publisher()))
     }
 }
 

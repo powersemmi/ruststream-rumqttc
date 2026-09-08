@@ -6,13 +6,12 @@ use std::sync::{Arc, OnceLock};
 use bytes::Bytes;
 use ruststream::testing::{Coordinator, TestableBroker};
 use ruststream::{
-    Broker, ConnectedBroker, DefaultPublish, OutgoingMessage, PairError, PublishPolicy, Publisher,
-    RawMessage, Subscribe,
+    Broker, ConnectedBroker, DefaultPublish, OutgoingMessage, Publisher, RawMessage, Subscribe,
 };
 
 use crate::error::MqttError;
 use crate::message::without_per_message;
-use crate::publisher::MqttPublishOptions;
+use crate::publisher::{MqttPublish, MqttPublishOptions};
 use crate::testing::router::AddressRouter;
 use crate::testing::subscriber::MqttTestSubscriber;
 
@@ -162,32 +161,9 @@ impl Publisher for MqttTestPublisher {
 // The same steps on the in-process transport, so a handler bound to them mounts on both brokers.
 impl MqttPublishOptions for MqttTestPublisher {}
 
-/// The publish policy for [`MqttTestPublisher`], mirroring
-/// [`MqttPublish`](crate::MqttPublish) on the real broker.
-///
-/// # Examples
-///
-/// ```
-/// use ruststream_rumqttc::testing::MqttTestPublish;
-///
-/// let policy = MqttTestPublish::default();
-/// # let _ = policy;
-/// ```
-#[derive(Debug, Clone, Copy, Default)]
-#[must_use]
-pub struct MqttTestPublish;
-
-impl PublishPolicy<ConnectedMqttTestBroker> for MqttTestPublish {
-    type Live = MqttTestPublisher;
-
-    fn pair(
-        self,
-        connected: &ConnectedMqttTestBroker,
-    ) -> impl Future<Output = Result<Self::Live, PairError>> {
-        ready(Ok(connected.publisher()))
-    }
-}
-
+// The policy a service declares is the one the runtime pairs here too (the impl lives next to the
+// real one, in `publisher`), so a `publish("dest")` handler mounted without an explicit publisher
+// gets its reply publisher from the same type on both brokers.
 impl DefaultPublish for ConnectedMqttTestBroker {
-    type Policy = MqttTestPublish;
+    type Policy = MqttPublish;
 }

@@ -7,7 +7,9 @@
 //! [`TestApp`](ruststream::testing::TestApp) harness. It routes by topic-filter match, the rule
 //! the connection task demultiplexes deliveries with, so a subscription declared with
 //! [`MqttTopic`](crate::MqttTopic) mounts here as it is written for the real broker, wildcards
-//! included.
+//! included. [`MqttPublish`](crate::MqttPublish) pairs against it in the same way, so a routes
+//! file is mounted here as written, both halves of it - there is no in-process descriptor and no
+//! in-process policy to swap in.
 //!
 //! What a descriptor asks for past address selection is protocol behaviour, and this transport
 //! has no protocol: the quality of service, the retain flag, and the broker-side distribution of
@@ -20,5 +22,5 @@ mod broker;
 mod router;
 mod subscriber;
 
-pub use broker::{ConnectedMqttTestBroker, MqttTestBroker, MqttTestPublish, MqttTestPublisher};
+pub use broker::{ConnectedMqttTestBroker, MqttTestBroker, MqttTestPublisher};
 pub use subscriber::{MqttTestMessage, MqttTestSubscriber};

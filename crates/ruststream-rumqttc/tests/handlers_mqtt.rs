@@ -1,7 +1,7 @@
 //! Handlers on this broker, driven through the framework's own surfaces rather than the broker
 //! SPI: a `#[subscriber]` body runs on the in-process transport under `TestApp`, the crate's
 //! per-message publish steps are reached through an injected `Out` slot, and the crate's own
-//! `MqttTopic` descriptor mounts on both brokers from one declaration.
+//! descriptor and publish policy mount on both brokers from one routes file.
 //!
 //! The live suite (`integration_mqtt.rs`) covers the transport; this file covers the seam
 //! between the crate and the framework's dispatch and injection paths, which needs no server.
@@ -10,7 +10,7 @@
 
 use ruststream::testing::TestApp;
 use ruststream_rumqttc::prelude::*;
-use ruststream_rumqttc::testing::{MqttTestBroker, MqttTestPublish};
+use ruststream_rumqttc::testing::MqttTestBroker;
 use ruststream_rumqttc::{QOS_HEADER, RETAIN_HEADER};
 use serde::{Deserialize, Serialize};
 
@@ -53,7 +53,7 @@ async fn a_handler_publishes_through_its_slot_on_the_in_process_broker() {
         MqttTestBroker::new(),
         |b| {
             b.include(raise_alert)
-                .out(DefaultSlot, MqttTestPublish)
+                .out(DefaultSlot, Publish::default())
                 .build();
         },
     );
@@ -128,7 +128,7 @@ async fn the_per_message_arguments_ride_the_slot_and_stop_at_the_transport() {
         MqttTestBroker::new(),
         |b| {
             b.include(announce_state)
-                .out(States, MqttTestPublish)
+                .out(States, Publish::default())
                 .build();
         },
     );
@@ -164,9 +164,9 @@ async fn the_per_message_arguments_ride_the_slot_and_stop_at_the_transport() {
     assert_eq!(delivered.get(RETAIN_HEADER), None);
 }
 
-/// The same body mounts on the real broker, which is where the two arguments reach a wire.
-/// Building the app is I/O-free, so the mount is what this checks; the wire effect is the live
-/// suite's.
+/// The same body, and the same policy attached the same way, mount on the real broker - which is
+/// where the two arguments reach a wire. Building the app is I/O-free, so the mount is what this
+/// checks; the wire effect is the live suite's.
 #[test]
 fn a_slot_bound_with_the_crate_capability_mounts_on_the_real_broker() {
     let _app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(
@@ -323,5 +323,66 @@ async fn a_descriptor_a_server_would_reject_does_not_start_here_either() {
     assert!(
         error.to_string().contains("devices/#/telemetry"),
         "the startup error names the filter it refused, not just the subscription: {error}"
+    );
+}
+
+const PING: &str = "devices/dev42/ping";
+const PONG: &str = "devices/dev42/pong";
+
+#[derive(Debug, PartialEq, Deserialize, Serialize, Outgoing)]
+struct Pong {
+    device: String,
+}
+
+/// A responder in the shape a service writes it: the subscription is the crate's descriptor and
+/// the attribute names where the answer goes, so the body returns the reply instead of publishing
+/// it by hand.
+#[subscriber(MqttTopic::new("devices/+/ping").qos(Qos::AtLeastOnce), publish("devices/dev42/pong"))]
+async fn answer_ping(ping: &Telemetry) -> Pong {
+    Pong {
+        device: ping.device.clone(),
+    }
+}
+
+/// The whole routes line, both halves of it, on the in-process broker: the descriptor names the
+/// subscription and the production policy is attached to the reply slot. This is the line a
+/// service ships, character for character, and the reply comes out where the attribute said.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_production_routes_line_mounts_whole_on_the_in_process_broker() {
+    let app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(
+        MqttTestBroker::new(),
+        |b| {
+            b.include(answer_ping).out(Reply, Publish::default());
+        },
+    );
+
+    let tb = TestApp::start(app).await.expect("the harness starts");
+    tb.broker::<MqttTestBroker>()
+        .message(&Telemetry {
+            device: "dev42".to_owned(),
+            temperature: 21.5,
+        })
+        .to(PING)
+        .publish()
+        .await
+        .expect("the injected ping is routed");
+
+    tb.broker::<MqttTestBroker>()
+        .published::<Pong>(PONG)
+        .assert_called_once()
+        .with(&Pong {
+            device: "dev42".to_owned(),
+        });
+}
+
+/// The same routes line on the real broker. The policy is the one that reaches a wire there, and
+/// nothing at the mount site had to change to get here.
+#[test]
+fn a_production_routes_line_mounts_on_the_real_broker() {
+    let _app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(
+        MqttBroker::new("mqtt://localhost:1883", "mqtt-handlers"),
+        |b| {
+            b.include(answer_ping).out(Reply, Publish::default());
+        },
     );
 }

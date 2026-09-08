@@ -226,3 +226,42 @@ async fn an_aliased_handle_cannot_subscribe_after_shutdown() {
         .await
         .expect_err("a subscription after shutdown must be refused");
 }
+
+/// The twin of `nack_reports_unsupported_and_dropping_acknowledges`, for the half of it this
+/// transport already answers the same way: declining redelivery acknowledges. The other half -
+/// `nack(requeue = true)` reporting `Unsupported` - is the one answer here that is still the
+/// framework's rather than the wire's, and it is stated on `MqttTestMessage`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn dropping_acknowledges_in_process() {
+    let connected = connected().await;
+
+    let mut subscriber = connected
+        .subscribe_topic(MqttTopic::new("orders").qos(Qos::AtLeastOnce))
+        .await
+        .expect("subscription opens");
+
+    connected
+        .publisher()
+        .publish(OutgoingMessage::new("orders", b"one".as_slice()))
+        .await
+        .expect("publish succeeds");
+
+    let mut stream = pin!(subscriber.stream());
+    let message = tokio::time::timeout(SETTLE, stream.next())
+        .await
+        .expect("delivery arrives")
+        .expect("stream is open")
+        .expect("delivery is ok");
+    message
+        .nack(false)
+        .await
+        .expect("declining redelivery acknowledges");
+
+    let redelivered = tokio::time::timeout(SETTLE, stream.next()).await;
+    assert!(
+        redelivered.is_err(),
+        "a dropped delivery is terminal, as an acknowledgement is"
+    );
+
+    connected.shutdown().await.expect("shutdown succeeds");
+}

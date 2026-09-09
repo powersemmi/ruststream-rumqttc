@@ -248,8 +248,10 @@ through an injected publisher.
 ## Testing
 
 The `testing` feature ships `MqttTestBroker`, an in-process broker that runs a service with no
-server and no network. A test mounts the application on it and drives the real handlers, codecs and
-middleware through the framework's `TestApp` harness. See
+server and no network. Import it from `ruststream_rumqttc::testing`: the prelude a routes file
+imports is the mount site's vocabulary and does not carry it. A test mounts the application on the
+broker and drives the real handlers, codecs and middleware through the framework's `TestApp`
+harness. See
 [Unit-testing a service with TestApp](https://powersemmi.github.io/ruststream/latest/guides/testing/#unit-testing-a-service-with-testapp).
 
 It fills batches the way the real subscriber does, with the same size from the mount site and the

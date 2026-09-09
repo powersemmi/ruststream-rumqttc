@@ -273,6 +273,68 @@ async fn an_unreadable_publish_argument_is_refused_before_the_wire() {
     connected.shutdown().await.expect("shutdown succeeds");
 }
 
+/// A persistent session outlives its connection: the broker keeps the subscription and queues
+/// matching messages while the subscriber is away, and the client that returns under the same id
+/// receives what it missed. This is what `clean_start(false)` plus `session_expiry` buy, and it is
+/// also what makes `nack(requeue = true)` report `Unsupported` rather than losing a message.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_persistent_session_replays_what_arrived_while_the_subscriber_was_away() {
+    let Some(url) = test_url() else { return };
+
+    let client_id = format!("it-session-{}", std::process::id());
+    let topic = unique("session");
+
+    let first = MqttBroker::new(url.clone(), client_id.clone())
+        .clean_start(false)
+        .session_expiry(Duration::from_secs(300))
+        .connect()
+        .await
+        .expect("the first connection is accepted");
+
+    // Only a QoS 1 subscription asks the broker to hold anything: QoS 0 has nothing to queue.
+    let subscriber = first
+        .subscribe_topic(MqttTopic::new(&topic).qos(Qos::AtLeastOnce))
+        .await
+        .expect("subscription opens");
+
+    // Dropping a subscriber unsubscribes its filter, which would take out of the session the
+    // very subscription under test. Shutting the connection first leaves the unsubscribe with
+    // no wire to travel on, so the session keeps the filter.
+    first.shutdown().await.expect("shutdown succeeds");
+    drop(subscriber);
+
+    // A different client publishes while nobody is connected under the session's id.
+    let sender = connect(&url, "session-sender").await;
+    sender
+        .publisher()
+        .publish(OutgoingMessage::new(&topic, b"missed".as_slice()))
+        .await
+        .expect("publish succeeds");
+    sender.shutdown().await.expect("shutdown succeeds");
+
+    let resumed = MqttBroker::new(url.clone(), client_id)
+        .clean_start(false)
+        .session_expiry(Duration::from_secs(300))
+        .connect()
+        .await
+        .expect("the session resumes");
+    let mut subscriber = resumed
+        .subscribe_topic(MqttTopic::new(&topic).qos(Qos::AtLeastOnce))
+        .await
+        .expect("subscription reopens");
+
+    let mut stream = pin!(subscriber.stream());
+    let message = tokio::time::timeout(RECV_TIMEOUT, stream.next())
+        .await
+        .expect("the queued delivery arrives on resume")
+        .expect("stream is open")
+        .expect("delivery is ok");
+    assert_eq!(message.payload(), b"missed");
+    message.ack().await.expect("ack succeeds");
+
+    resumed.shutdown().await.expect("shutdown succeeds");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn qos0_reports_ack_unsupported() {
     let Some(url) = test_url() else { return };

@@ -37,7 +37,7 @@ MQTT 5 is the primary target because two things the framework relies on exist on
 - **Sessions, wills, retained.** `clean_start`/`session_expiry` for persistent sessions, `last_will` on the broker, `retain` on the publish policy, TLS with client certificates (`tls_ca` + `tls_client_auth`) for managed MQTT services.
 - **Per-message QoS and retain.** `MqttPublishOptions` reopens the two arguments MQTT carries on every PUBLISH packet: `publisher.with_retain(true).message(&state).publish()`. The steps resolve on an `Out` slot entry too, so a handler that needs them binds `Out<impl MqttPublishOptions>` and its publish stays attributed to that slot.
 - **One glob per routes file.** `ruststream_rumqttc::prelude::*` carries the framework's prelude plus this crate's surface, with `MqttPublish` aliased to `Publish`, so a mount site reads the same whichever broker it runs on. A handler body imports `ruststream::prelude::*` alone and states a capability on its injected publisher, so it names no broker type at all.
-- **In-process test broker** (feature `testing`). `MqttTestBroker` reproduces the crate's core routing with no server; its connected form implements `ruststream::testing::TestableBroker`, so it drives the `TestApp` harness and passes the framework's conformance suite in process.
+- **In-process test broker** (feature `testing`). `MqttTestBroker` reproduces the crate's core routing with no server, a service mounts on it and runs under the `TestApp` harness, and it answers the way a real broker does, which the crate's own tests hold it to.
 
 ## Install
 

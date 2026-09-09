@@ -330,8 +330,8 @@ therefore says what a handler received, how it settled, and what it published wh
 against Eclipse Mosquitto, gated behind `MQTT_TEST_URL`, is what says the same answers hold on a
 wire.
 
-The framework's contract suites are run against both. The routing suite is in-process only - it
-drives `TestableBroker`, which no server implements - while the lifecycle ladder and the batch
+The framework's contract suites are run against both. The routing suite is in-process only, while
+the lifecycle ladder and the batch
 capability suite run twice, once against the stand-in and once against Mosquitto. Each scenario in
 `tests/stand_in_mqtt.rs` is the twin of a live one in `tests/integration_mqtt.rs`, so a behaviour
 asserted in process can be traced to the server run that backs it.

@@ -163,7 +163,12 @@ impl MqttBroker {
         MqttPublisher::new(Arc::clone(&self.cell), Qos::default(), false)
     }
 
-    fn options(&self) -> Result<MqttOptions, MqttError> {
+    /// The URL's authority: everything but the scheme, the userinfo and any path or query.
+    ///
+    /// An MQTT URL routinely carries `user:password@`, and that password must reach neither the
+    /// connection nor the generated document. The authority ends at the first `/`, `?` or `#`,
+    /// and the userinfo is cut at the **last** `@`, because a password may contain one.
+    fn authority(&self) -> (&str, bool) {
         let (tls_from_scheme, rest) = self.url.strip_prefix("mqtts://").map_or_else(
             || {
                 (
@@ -175,17 +180,36 @@ impl MqttBroker {
             },
             |rest| (true, rest),
         );
-        let (host, port) = match rest.rsplit_once(':') {
+        let authority = rest
+            .split_once(['/', '?', '#'])
+            .map_or(rest, |(authority, _)| authority);
+        let authority = authority
+            .rsplit_once('@')
+            .map_or(authority, |(_, host)| host);
+        (authority, tls_from_scheme)
+    }
+
+    /// The host and port a client connects to, and what the generated document reports.
+    fn endpoint(&self) -> Result<(&str, u16), MqttError> {
+        let (authority, tls_from_scheme) = self.authority();
+        let (host, port) = match authority.rsplit_once(':') {
             Some((host, port)) => (
-                host.to_owned(),
+                host,
                 port.parse::<u16>()
                     .map_err(|_| MqttError::Invalid(format!("'{port}' is not a valid port")))?,
             ),
-            None => (rest.to_owned(), if tls_from_scheme { 8883 } else { 1883 }),
+            None => (authority, if tls_from_scheme { 8883 } else { 1883 }),
         };
         if host.is_empty() {
             return Err(MqttError::Invalid("host must be non-empty".into()));
         }
+        Ok((host, port))
+    }
+
+    fn options(&self) -> Result<MqttOptions, MqttError> {
+        let (_, tls_from_scheme) = self.authority();
+        let (host, port) = self.endpoint()?;
+        let host = host.to_owned();
         if let Some(keep_alive) = self.keep_alive
             && keep_alive < Duration::from_secs(5)
         {
@@ -274,13 +298,19 @@ impl Broker for MqttBroker {
 }
 
 impl DescribeServer for MqttBroker {
+    /// Reports the host and port a client connects to, and nothing else. A URL's credentials
+    /// stay out of the generated document, which teams publish and share.
     fn describe_server(&self) -> ServerSpec {
-        ServerSpec::new(
-            self.url
-                .trim_start_matches("mqtts://")
-                .trim_start_matches("mqtt://"),
-            "mqtt",
-        )
+        // A URL `connect` will reject still must not carry a password into the document, so the
+        // fallback keeps the stripped authority and drops the unusable port.
+        let (host, port) = self.endpoint().unwrap_or_else(|_| {
+            let (authority, tls_from_scheme) = self.authority();
+            let host = authority
+                .rsplit_once(':')
+                .map_or(authority, |(host, _)| host);
+            (host, if tls_from_scheme { 8883 } else { 1883 })
+        });
+        ServerSpec::new(format!("{host}:{port}"), "mqtt")
     }
 }
 
@@ -380,4 +410,66 @@ impl Subscribe for ConnectedMqttBroker {
 
 impl DefaultPublish for ConnectedMqttBroker {
     type Policy = MqttPublish;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn broker(url: &str) -> MqttBroker {
+        MqttBroker::new(url, "describe")
+    }
+
+    #[test]
+    fn the_endpoint_is_the_host_and_port_whatever_else_the_url_carries() {
+        for (url, expected) in [
+            ("mqtt://broker.example.com", ("broker.example.com", 1883)),
+            ("mqtts://broker.example.com", ("broker.example.com", 8883)),
+            (
+                "mqtt://broker.example.com:1884",
+                ("broker.example.com", 1884),
+            ),
+            (
+                "mqtt://alice:s3cret@broker.example.com:1884",
+                ("broker.example.com", 1884),
+            ),
+            (
+                "mqtts://alice:s3cret@broker.example.com",
+                ("broker.example.com", 8883),
+            ),
+            // A password may contain the separator, so the split takes the last one.
+            (
+                "mqtt://alice:p@ss@broker.example.com:1884",
+                ("broker.example.com", 1884),
+            ),
+            (
+                "mqtt://broker.example.com:1884/ns",
+                ("broker.example.com", 1884),
+            ),
+            ("mqtt://broker.example.com/ns", ("broker.example.com", 1883)),
+            // The authority ends before the path, so an `@` after it is not a separator.
+            (
+                "mqtt://broker.example.com/a@b",
+                ("broker.example.com", 1883),
+            ),
+        ] {
+            let broker = broker(url);
+            let (host, port) = broker.endpoint().expect("the url parses");
+            assert_eq!((host, port), expected, "parsing {url}");
+        }
+    }
+
+    #[test]
+    fn a_url_with_credentials_describes_a_server_without_them() {
+        let spec = broker("mqtt://alice:s3cret@broker.example.com:1884").describe_server();
+        let host = spec.host.expect("a networked broker states its host");
+
+        assert_eq!(host, "broker.example.com:1884");
+        assert!(
+            !host.contains('@'),
+            "the userinfo separator is gone: {host}"
+        );
+        assert!(!host.contains("alice"), "the user name is gone: {host}");
+        assert!(!host.contains("s3cret"), "the password is gone: {host}");
+    }
 }

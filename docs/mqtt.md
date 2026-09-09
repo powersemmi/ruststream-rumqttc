@@ -27,7 +27,7 @@ acknowledgement lands:
 | `RequestReply` | No | The protocol carries the pieces (MQTT 5 has a response-topic property, which the crate maps to the `reply-to` header in both directions), but the correlated `request(msg, timeout)` call is not implemented. A responder is written today as an ordinary handler that publishes to `ctx.headers().reply_to()`. See [Headers](#headers). |
 | `Partitioned` | No | MQTT has no partitions or routing keys; ordering is per topic on a connection. |
 | `Seekable` / `Positioned` | No | The broker keeps no history to reposition into. It stores one retained message per topic and the unacknowledged messages of a persistent session, neither of which is a seekable log. |
-| `DescribeServer` | Yes | `MqttBroker` reports its host and the `mqtt` protocol, which is what the AsyncAPI schema records. |
+| `DescribeServer` | Yes | `MqttBroker` reports the host and port a client connects to, and the `mqtt` protocol, which is what the AsyncAPI schema records. Credentials in the URL are left out of it. |
 
 ## The lifecycle
 

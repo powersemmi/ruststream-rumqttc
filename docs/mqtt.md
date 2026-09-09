@@ -169,8 +169,8 @@ subscribed again. Dropping a subscriber unsubscribes its filter.
 A publisher is a policy plus the live connection. `MqttPublish` is pure declaration - a quality of
 service and the retain flag - so it is constructed anywhere, in a router, in configuration, at a
 mount site, and the runtime pairs it with the connected broker at startup. It is also the broker's
-default publish policy, so a `#[subscriber(.., publish("dest"))]` handler mounted without a policy
-of its own sends through it.
+default publish policy, so a `#[subscriber(.., publish)]` handler mounted without a policy of its
+own sends through it. A reply goes to the topic its own type declares.
 
 A mount site that does name one uses the framework's single publish verb, `.out(marker, policy)`:
 `.out(Reply, Publish::default().qos(Qos::ExactlyOnce))` for what the handler returns, and the same

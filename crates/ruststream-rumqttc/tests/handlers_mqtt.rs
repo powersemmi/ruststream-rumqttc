@@ -235,3 +235,109 @@ fn a_batch_handler_mounts_on_the_real_broker() {
         },
     );
 }
+
+const COMMANDS: &str = "devices/dev42/commands";
+const ACKS: &str = "devices/dev42/acks";
+const AUDITED: &str = "devices/dev42/audited";
+const RECEIPTS: &str = "devices/dev42/receipts";
+
+#[derive(Debug, PartialEq, Deserialize, Serialize, Outgoing)]
+struct Command {
+    id: u64,
+}
+
+/// A device acknowledgement is answered on one topic wherever the handler is mounted, so the type
+/// states it.
+#[derive(Debug, PartialEq, Deserialize, Serialize, Outgoing)]
+#[outgoing(name = "devices/dev42/acks")]
+struct Ack {
+    id: u64,
+}
+
+#[subscriber("devices/dev42/commands", publish)]
+async fn acknowledge(command: &Command) -> Ack {
+    Ack { id: command.id }
+}
+
+/// An audit receipt goes wherever the deployment collects them, so the type leaves the topic to
+/// the mount site.
+#[derive(Debug, PartialEq, Deserialize, Serialize, Outgoing)]
+struct Receipt {
+    id: u64,
+}
+
+#[subscriber("devices/dev42/audited", publish("devices/dev42/receipts"))]
+async fn issue_receipt(command: &Command) -> Receipt {
+    Receipt { id: command.id }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_reply_lands_on_the_topic_its_type_declares() {
+    let app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(
+        MqttTestBroker::new(),
+        |b| {
+            b.include(acknowledge);
+        },
+    );
+
+    let tb = TestApp::start(app).await.expect("the harness starts");
+    let command = Command { id: 7 };
+    tb.broker::<MqttTestBroker>()
+        .message(&command)
+        .to(COMMANDS)
+        .publish()
+        .await
+        .expect("the injected command is routed");
+
+    tb.broker::<MqttTestBroker>()
+        .subscriber(COMMANDS)
+        .assert_called_once()
+        .with(&command);
+    tb.broker::<MqttTestBroker>()
+        .published::<Ack>(ACKS)
+        .assert_called_once()
+        .with(&Ack { id: 7 });
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_reply_that_declares_no_topic_lands_on_the_mount_site_one() {
+    let app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(
+        MqttTestBroker::new(),
+        |b| {
+            b.include(issue_receipt).out(Reply, MqttTestPublish);
+        },
+    );
+
+    let tb = TestApp::start(app).await.expect("the harness starts");
+    let command = Command { id: 11 };
+    tb.broker::<MqttTestBroker>()
+        .message(&command)
+        .to(AUDITED)
+        .publish()
+        .await
+        .expect("the injected command is routed");
+
+    tb.broker::<MqttTestBroker>()
+        .subscriber(AUDITED)
+        .assert_called_once()
+        .with(&command);
+    tb.broker::<MqttTestBroker>()
+        .published::<Receipt>(RECEIPTS)
+        .assert_called_once()
+        .with(&Receipt { id: 11 });
+}
+
+/// A reply leaves through an ordinary publisher, so the two arguments MQTT carries on every
+/// PUBLISH packet stay the reply policy's: the topic the type declares says where the packet goes
+/// and nothing about how it is sent. The wire effect is the live suite's; the mount is what this
+/// checks.
+#[test]
+fn a_reply_on_a_declared_topic_takes_the_arguments_of_its_policy() {
+    let _app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(
+        MqttBroker::new("mqtt://localhost:1883", "mqtt-handlers"),
+        |b| {
+            b.include(acknowledge)
+                .out(Reply, Publish::default().qos(Qos::ExactlyOnce).retain(true));
+        },
+    );
+}

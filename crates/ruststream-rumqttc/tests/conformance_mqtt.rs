@@ -11,10 +11,21 @@ use ruststream::conformance::{capabilities, harness};
 use ruststream_rumqttc::testing::MqttTestBroker;
 use ruststream_rumqttc::{MqttBroker, MqttTopic};
 
+/// The live broker URL, or `None` when there is no stand to run against.
+///
+/// Without a stand the gated tests skip quietly, which is what keeps the suite usable while
+/// developing. `RUSTSTREAM_REQUIRE_LIVE` turns that skip into a failure: a job that means to run
+/// against a real broker sets it, so a renamed variable, a dropped `env:` block or a reordered
+/// step cannot leave the whole live suite reporting success without running a single assertion.
 fn test_url() -> Option<String> {
     match std::env::var("MQTT_TEST_URL") {
         Ok(url) if !url.is_empty() => Some(url),
         _ => {
+            assert!(
+                std::env::var_os("RUSTSTREAM_REQUIRE_LIVE").is_none(),
+                "RUSTSTREAM_REQUIRE_LIVE is set, so the live conformance check must run, \
+                 but MQTT_TEST_URL is missing or empty"
+            );
             eprintln!("MQTT_TEST_URL is not set; skipping the live conformance check");
             None
         }

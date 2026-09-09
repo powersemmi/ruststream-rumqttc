@@ -39,10 +39,21 @@ struct PendingSub {
     done: oneshot::Sender<Result<(), MqttError>>,
 }
 
+/// How many deliveries matching no subscription are held before the oldest is dropped.
+///
+/// A resumed session's backlog of `QoS` 1 and 2 messages is bounded by the receive-maximum this
+/// crate announces (1000 by default), so this holds a full one. `QoS` 0 has no such bound, and is
+/// what the eviction exists for.
+const HELD_DELIVERIES: usize = 1024;
+
 /// State shared between the connection task, the broker, and subscriber handles.
 pub(crate) struct Shared {
     pub(crate) subs: Mutex<Vec<SubEntry>>,
     pending: Mutex<VecDeque<PendingSub>>,
+    /// Deliveries no subscription matched yet. A session resumed with `clean_start(false)`
+    /// flushes what it queued immediately after `CONNACK`, before the application has opened a
+    /// single subscription, so they wait here for the filter they belong to.
+    held: Mutex<VecDeque<MqttMessage>>,
     pub(crate) closed: AtomicBool,
     next_id: AtomicU64,
     /// Rotates local delivery across entries sharing one wire filter (a shared group
@@ -55,10 +66,31 @@ impl Shared {
         Self {
             subs: Mutex::new(Vec::new()),
             pending: Mutex::new(VecDeque::new()),
+            held: Mutex::new(VecDeque::new()),
             closed: AtomicBool::new(false),
             next_id: AtomicU64::new(0),
             round_robin: AtomicU64::new(0),
         }
+    }
+
+    /// Holds a delivery no subscription matched, evicting the oldest when the buffer is full.
+    fn hold(&self, message: MqttMessage) {
+        let mut held = self.held.lock().expect("mqtt held mutex poisoned");
+        if held.len() >= HELD_DELIVERIES
+            && let Some(dropped) = held.pop_front()
+        {
+            tracing::warn!(
+                topic = %dropped.topic(),
+                capacity = HELD_DELIVERIES,
+                "mqtt delivery dropped: no subscription matches its topic and the hold buffer is full"
+            );
+        }
+        held.push_back(message);
+    }
+
+    /// How many deliveries are still waiting for a subscription to match them.
+    pub(crate) fn held(&self) -> usize {
+        self.held.lock().expect("mqtt held mutex poisoned").len()
     }
 
     pub(crate) fn ensure_open(&self) -> Result<(), MqttError> {
@@ -78,16 +110,30 @@ impl Shared {
         done: oneshot::Sender<Result<(), MqttError>>,
     ) -> u64 {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        self.subs
-            .lock()
-            .expect("mqtt registry mutex poisoned")
-            .push(SubEntry {
+        {
+            // The registry guard spans the handover: a live delivery needs the same guard, so
+            // it cannot overtake the backlog this filter is about to receive.
+            let mut subs = self.subs.lock().expect("mqtt registry mutex poisoned");
+            {
+                let mut held = self.held.lock().expect("mqtt held mutex poisoned");
+                let mut unclaimed = VecDeque::with_capacity(held.len());
+                while let Some(message) = held.pop_front() {
+                    if matches(message.topic(), &match_filter) {
+                        let _ = tx.send(Ok(message));
+                    } else {
+                        unclaimed.push_back(message);
+                    }
+                }
+                *held = unclaimed;
+            }
+            subs.push(SubEntry {
                 id,
                 wire_filter: wire_filter.clone(),
                 match_filter,
                 qos,
                 tx,
             });
+        }
         self.pending
             .lock()
             .expect("mqtt pending mutex poisoned")
@@ -280,6 +326,16 @@ fn handle_incoming(conn: &mut Conn, packet: Packet) {
                             None => groups.push((&entry.wire_filter, vec![entry])),
                         }
                     }
+                }
+                if groups.is_empty() {
+                    // Not an error: a resumed session flushes its backlog before the
+                    // application has opened the subscription that owns it, so the delivery
+                    // waits for that filter instead of being discarded.
+                    conn.shared.hold(MqttMessage::new(
+                        topic.clone(),
+                        &publish,
+                        Some(conn.client.clone()),
+                    ));
                 }
                 let rotation =
                     usize::try_from(conn.shared.round_robin.fetch_add(1, Ordering::Relaxed))

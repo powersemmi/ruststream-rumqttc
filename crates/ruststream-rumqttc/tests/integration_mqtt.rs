@@ -292,16 +292,15 @@ async fn a_persistent_session_replays_what_arrived_while_the_subscriber_was_away
         .expect("the first connection is accepted");
 
     // Only a QoS 1 subscription asks the broker to hold anything: QoS 0 has nothing to queue.
-    let subscriber = first
+    let away = first
         .subscribe_topic(MqttTopic::new(&topic).qos(Qos::AtLeastOnce))
         .await
         .expect("subscription opens");
 
     // Dropping a subscriber unsubscribes its filter, which would take out of the session the
-    // very subscription under test. Shutting the connection first leaves the unsubscribe with
-    // no wire to travel on, so the session keeps the filter.
+    // very subscription under test, so this one is held to the end of the test and never
+    // unsubscribes over a live connection.
     first.shutdown().await.expect("shutdown succeeds");
-    drop(subscriber);
 
     // A different client publishes while nobody is connected under the session's id.
     let sender = connect(&url, "session-sender").await;
@@ -333,6 +332,7 @@ async fn a_persistent_session_replays_what_arrived_while_the_subscriber_was_away
     message.ack().await.expect("ack succeeds");
 
     resumed.shutdown().await.expect("shutdown succeeds");
+    drop(away);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

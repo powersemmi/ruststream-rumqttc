@@ -10,8 +10,10 @@ on:
       - crates/ruststream-rumqttc/examples/**
       - scripts/lint_doc_fences.py
       - .github/workflows/docs.yml
+  # No base filter: a pull request stacked on another one has a branch for its base, and a filter
+  # naming `main` leaves it with no checks at all - which reads as a conflicting branch rather
+  # than as a workflow that declined to run.
   pull_request:
-    branches: [main]
     paths: *docs-paths
   workflow_dispatch:
 

@@ -14,7 +14,7 @@ use ruststream::{
 use crate::error::MqttError;
 use crate::subscriber::BATCH_MAX_WAIT;
 use crate::testing::broker::TestState;
-use crate::testing::router::{Delivery, DeliveryReceiver, DeliverySender, SubscriptionId};
+use crate::testing::router::{Delivery, DeliveryReceiver, SubscriptionId};
 
 /// The in-process counterpart of the real subscriber's wire half: one delivery at a time off
 /// the router's channel.
@@ -22,9 +22,8 @@ struct WireTestSubscriber {
     state: Arc<TestState>,
     id: SubscriptionId,
     rx: DeliveryReceiver,
-    requeue: DeliverySender,
     /// A clone of the broker's harness coordinator, threaded into each yielded message so a
-    /// requeue re-counts and a consumed delivery decrements. `None` outside a harness run.
+    /// consumed delivery decrements the in-flight count. `None` outside a harness run.
     coordinator: Option<Coordinator>,
 }
 
@@ -45,20 +44,13 @@ impl Subscriber for WireTestSubscriber {
     type Error = MqttError;
 
     fn stream(&mut self) -> impl Stream<Item = Result<Self::Message, Self::Error>> + Send + '_ {
-        let requeue = self.requeue.clone();
         let coordinator = self.coordinator.clone();
         // Poll the receiver in place rather than wrapping it in an owning stream, so `stream`
         // can be called again after the returned stream is dropped (the runtime and the
         // conformance helpers re-enter it per call).
         futures::stream::poll_fn(move |cx| {
             self.rx.poll_recv(cx).map(|next| {
-                next.map(|delivery| {
-                    Ok(MqttTestMessage::new(
-                        delivery,
-                        requeue.clone(),
-                        coordinator.clone(),
-                    ))
-                })
+                next.map(|delivery| Ok(MqttTestMessage::new(delivery, coordinator.clone())))
             })
         })
     }
@@ -84,7 +76,6 @@ impl MqttTestSubscriber {
         state: Arc<TestState>,
         id: SubscriptionId,
         rx: DeliveryReceiver,
-        requeue: DeliverySender,
         coordinator: Option<Coordinator>,
     ) -> Self {
         Self {
@@ -92,7 +83,6 @@ impl MqttTestSubscriber {
                 state,
                 id,
                 rx,
-                requeue,
                 coordinator,
             })
             .max_wait(BATCH_MAX_WAIT),
@@ -122,20 +112,19 @@ impl BatchSubscriber for MqttTestSubscriber {
 
 /// Message handed to handlers from an [`MqttTestSubscriber`].
 ///
-/// `ack` consumes the handle; `nack(requeue = true)` re-queues the delivery on the owning
-/// subscription's channel so the next handler invocation sees it again; `nack(requeue = false)`
-/// drops it, matching the real subscriber's reject path in effect.
+/// Settlement answers what the wire answers: `ack` consumes the handle, `nack(requeue = false)`
+/// acknowledges because dropping is the only terminal outcome MQTT offers, and
+/// `nack(requeue = true)` reports [`AckError::Unsupported`] without redelivering.
 pub struct MqttTestMessage {
     delivery: Option<Delivery>,
-    requeue: DeliverySender,
     /// A clone of the broker's harness coordinator. When set, this delivery is counted in
     /// flight and is decremented exactly once when the message is consumed or dropped.
     coordinator: Option<Coordinator>,
 }
 
 impl Drop for MqttTestMessage {
-    /// Counts this delivery consumed exactly once: on ack, nack, or an unsettled drop. A
-    /// requeue re-enqueues a fresh delivery first, so the in-flight count stays balanced.
+    /// Counts this delivery consumed exactly once: on ack, nack, or an unsettled drop. No
+    /// settlement puts one back, so nothing has to balance the count.
     fn drop(&mut self) {
         if let Some(coordinator) = &self.coordinator {
             coordinator.consumed();
@@ -150,14 +139,9 @@ impl std::fmt::Debug for MqttTestMessage {
 }
 
 impl MqttTestMessage {
-    pub(crate) fn new(
-        delivery: Delivery,
-        requeue: DeliverySender,
-        coordinator: Option<Coordinator>,
-    ) -> Self {
+    pub(crate) fn new(delivery: Delivery, coordinator: Option<Coordinator>) -> Self {
         Self {
             delivery: Some(delivery),
-            requeue,
             coordinator,
         }
     }
@@ -184,20 +168,73 @@ impl IncomingMessage for MqttTestMessage {
     }
 
     fn nack(mut self, requeue: bool) -> impl Future<Output = Result<(), AckError>> {
-        let delivery = self
-            .delivery
+        self.delivery
             .take()
             .expect("MqttTestMessage ack/nack invoked twice");
         if requeue {
-            let sent = self.requeue.send(delivery);
-            // The requeue bypasses fanout, so count the re-enqueue here to balance this
-            // message's `Drop` decrement. The redelivered copy is consumed in turn.
-            if sent.is_ok()
-                && let Some(coordinator) = &self.coordinator
-            {
-                coordinator.enqueued();
-            }
+            // MQTT has no negative acknowledgement, so the real message reports this and the
+            // delivery stays unacknowledged until the session resumes. A stand-in that
+            // redelivered instead would let a service prove a retry it does not get on a wire.
+            return ready(Err(AckError::Unsupported));
         }
         ready(Ok(()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bytes::Bytes;
+    use rumqttc::v5::mqttbytes::QoS;
+    use rumqttc::v5::mqttbytes::v5::Publish;
+    use rumqttc::v5::{AsyncClient, MqttOptions};
+
+    use super::*;
+    use crate::message::MqttMessage;
+
+    fn stand_in() -> MqttTestMessage {
+        MqttTestMessage::new(
+            Delivery {
+                payload: Bytes::from_static(b"{}"),
+                headers: HeaderMap::new(),
+            },
+            None,
+        )
+    }
+
+    /// The live counterpart of what the stand-in yields: a `QoS` 1 delivery holding an acker.
+    /// The client is never connected, which is enough - `nack` answers before reaching it, and
+    /// `ack` only has to hand its request to a live event loop.
+    fn on_the_wire() -> (MqttMessage, rumqttc::v5::EventLoop) {
+        let (client, eventloop) =
+            AsyncClient::new(MqttOptions::new("settlement", "localhost", 1883), 8);
+        let mut publish = Publish::new("orders", QoS::AtLeastOnce, b"{}".as_slice(), None);
+        publish.pkid = 1;
+        (
+            MqttMessage::new("orders".to_owned(), &publish, Some(client)),
+            eventloop,
+        )
+    }
+
+    /// The one place both transports are read together. A stand-in that answers differently
+    /// from the wire lets a green test stand for behaviour a service never gets.
+    #[tokio::test]
+    async fn the_stand_in_settles_the_way_the_wire_does() {
+        let (live, _eventloop) = on_the_wire();
+        assert!(
+            matches!(live.nack(true).await, Err(AckError::Unsupported)),
+            "the wire has no negative acknowledgement"
+        );
+        assert!(matches!(
+            stand_in().nack(true).await,
+            Err(AckError::Unsupported)
+        ));
+
+        let (live, _eventloop) = on_the_wire();
+        assert!(live.nack(false).await.is_ok(), "dropping is an acknowledge");
+        assert!(stand_in().nack(false).await.is_ok());
+
+        let (live, _eventloop) = on_the_wire();
+        assert!(live.ack().await.is_ok());
+        assert!(stand_in().ack().await.is_ok());
     }
 }

@@ -48,15 +48,9 @@ pub(crate) struct AddressRouter {
 }
 
 impl AddressRouter {
-    /// Registers a subscription on `address` and returns the channel pair the subscriber will
+    /// Registers a subscription on `address` and returns the receiving half the subscriber will
     /// use, together with the [`SubscriptionId`] needed to unsubscribe.
-    ///
-    /// The returned [`DeliverySender`] is the same one fanout uses, so subscribers can re-send
-    /// a delivery into their own queue to implement `nack(requeue = true)`.
-    pub(crate) fn subscribe(
-        &self,
-        address: String,
-    ) -> (SubscriptionId, DeliverySender, DeliveryReceiver) {
+    pub(crate) fn subscribe(&self, address: String) -> (SubscriptionId, DeliveryReceiver) {
         let (tx, rx) = mpsc::unbounded_channel();
         let id = SubscriptionId(self.next_id.fetch_add(1, Ordering::Relaxed));
         self.state
@@ -67,10 +61,10 @@ impl AddressRouter {
                 id,
                 Subscription {
                     address,
-                    sender: tx.clone(),
+                    sender: tx,
                 },
             );
-        (id, tx, rx)
+        (id, rx)
     }
 
     /// Removes a subscription. No-op if the id is unknown (double-drop of the subscriber).

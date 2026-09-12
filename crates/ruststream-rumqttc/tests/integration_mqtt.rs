@@ -373,3 +373,47 @@ async fn qos0_reports_ack_unsupported() {
 
     connected.shutdown().await.expect("shutdown succeeds");
 }
+
+/// The two negative answers, against a server: asking for redelivery is refused because the
+/// protocol cannot express it, and declining redelivery acknowledges, dropping being the only
+/// terminal outcome MQTT offers. This is the behaviour a handler's `retry()` and `drop()` settle
+/// through, and the stand-in twin of it is in `stand_in_mqtt.rs`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn nack_reports_unsupported_and_dropping_acknowledges() {
+    let Some(url) = test_url() else { return };
+    let connected = connect(&url, "nack").await;
+
+    let topic = unique("nack");
+    let mut subscriber = connected
+        .subscribe_topic(MqttTopic::new(&topic).qos(Qos::AtLeastOnce))
+        .await
+        .expect("subscription opens");
+
+    let publisher = connected.publisher();
+    for payload in [b"requeue".as_slice(), b"drop".as_slice()] {
+        publisher
+            .publish(OutgoingMessage::new(&topic, payload))
+            .await
+            .expect("publish succeeds");
+    }
+
+    let mut stream = pin!(subscriber.stream());
+    let first = tokio::time::timeout(RECV_TIMEOUT, stream.next())
+        .await
+        .expect("delivery arrives")
+        .expect("stream is open")
+        .expect("delivery is ok");
+    assert!(matches!(first.nack(true).await, Err(AckError::Unsupported)));
+
+    let second = tokio::time::timeout(RECV_TIMEOUT, stream.next())
+        .await
+        .expect("delivery arrives")
+        .expect("stream is open")
+        .expect("delivery is ok");
+    second
+        .nack(false)
+        .await
+        .expect("declining redelivery acknowledges");
+
+    connected.shutdown().await.expect("shutdown succeeds");
+}

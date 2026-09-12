@@ -142,6 +142,27 @@ A fanned-out copy carries no acknowledgement either. When two overlapping filter
 message the wire acknowledgement belongs to exactly one delivery, and the copies report
 `AckError::Unsupported`.
 
+### What a handler's outcome does here
+
+`HandlerOutcome::retry()` asks the broker to redeliver, and on MQTT nothing can ask. The runtime
+logs the refused negative acknowledgement (`ack / nack failed`) and moves on, so the delivery is
+never acknowledged. At `QoS` 1 and 2 the message therefore comes back when a persistent session
+resumes - `clean_start(false)`, a session expiry long enough to outlive the gap, and a reconnect -
+and never inside the live connection: nothing is retried in the seconds after the handler returns.
+At `QoS` 0 there is nothing to redeliver and the message is gone. Read `retry()` here as "leave it
+for the next session", not as "try again shortly".
+
+`HandlerOutcome::retry_after(delay)` is the outcome that retries within the session, through the
+framework's own fallback rather than the protocol: give the mount site a retry publisher with
+`retry_via(..)` and the runtime acknowledges the original, waits, then re-publishes a copy to the
+same topic carrying the retry count in its headers. Acknowledging the original is that fallback's
+first step, so it needs an acknowledgeable delivery: at `QoS` 0 the step is refused and the
+deferred copy is never published, which drops the message. With no retry publisher configured the
+runtime warns and falls back to `retry()`, with the consequences above.
+
+`HandlerOutcome::drop()` acknowledges, because dropping is the protocol's only terminal answer.
+Dead-lettering is a publish the service makes, not something the broker does.
+
 Delivery back-pressure is the protocol's receive-maximum, set with
 `MqttBroker::receive_maximum`: the broker bounds how many unacknowledged `QoS` 1/2 deliveries it may
 have in flight, which is also what bounds an unread subscriber's queue. `QoS` 0 has no such bound.
@@ -281,8 +302,43 @@ connected form implements `ruststream::testing::TestableBroker`, so the same bro
 It batches the way the real subscriber does, with the same size from the mount site and the same
 deadline, so a batch handler is handed under the harness what a server would have produced.
 
-The test broker routes by exact address match and does not simulate protocol behaviour. Quality of
-service handshakes, shared group distribution, retained messages, and wildcard demultiplexing are
-covered by the live suite against Eclipse Mosquitto instead, gated behind `MQTT_TEST_URL`. So is
-message replay on a persistent session: a subscriber that disconnects and returns under the same
-client id receives what was published to its topic while it was away.
+A routes file mounts on it as written, both halves of it. `MqttTopic` opens a subscription on the
+test broker, so the handler a service ships is the handler the harness mounts - the one at the top
+of this page, wildcard, quality of service, shared group and all - and `MqttPublish` pairs against
+it, so `b.include(handle).out(Reply, Publish::default())` is the same line under both brokers.
+There is no in-process descriptor and no in-process policy to swap in; the only thing that changes
+is the broker the app is built with.
+
+The test broker routes by topic-filter match, the rule the connection task demultiplexes
+deliveries with, so that filter selects in process the topics it selects on the wire and a device
+publishing `devices/dev42/telemetry` reaches the body. The descriptor is validated here as well: a
+filter a server would reject fails startup rather than passing its first test.
+
+The rest of the descriptor is honoured as far as an answer is observable without a server. A share
+group makes its members compete: four publishes are four deliveries across the group, not one per
+member, so a test can assert that work was shared rather than only that it happened. The quality of
+service decides whether a delivery can be settled - the lesser of the publish's and the
+subscription's, as on the wire - so a `QoS` 0 delivery reports `AckError::Unsupported` here exactly
+as it does against Mosquitto, and a handler cannot quietly prove a guarantee nobody asked for.
+
+What the stand-in leaves out is the protocol itself: the acknowledgement exchange behind an
+acknowledged `QoS`, retained messages, and the session that redelivers. A policy's `retain` stops
+at the pairing for the same reason - nothing in process keeps a last message per topic. A test on
+this transport therefore says what a handler received, how it settled, and what it published where;
+the live suite against Eclipse Mosquitto, gated behind `MQTT_TEST_URL`, is what says the same
+answers hold on a wire. Message replay on a persistent session is one of those: a subscriber that
+disconnects and returns under the same client id receives what was published to its topic while it
+was away, and only the server run proves it.
+
+The framework's contract suites are run against both. The routing suite is in-process only, while
+the lifecycle ladder and the batch
+capability suite run twice, once against the stand-in and once against Mosquitto. Each scenario in
+`tests/stand_in_mqtt.rs` is the twin of a live one in `tests/integration_mqtt.rs`, so a behaviour
+asserted in process can be traced to the server run that backs it.
+
+Settlement answers here what it answers on a wire, down to the refusals. `nack(requeue = true)`
+reports `AckError::Unsupported` in process exactly as the real message does, because MQTT has no
+negative acknowledgement: a handler returning `HandlerOutcome::retry()` gets no redelivery under
+the harness, and no test on this transport can claim a retry a service never receives. The section
+on [what a handler's outcome does here](#what-a-handlers-outcome-does-here) is the whole of it,
+both in process and against a server.

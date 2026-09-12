@@ -12,6 +12,8 @@ use crate::broker::{ConnectedMqttBroker, CoreCell};
 use crate::error::MqttError;
 use crate::filter::Qos;
 use crate::message::to_wire_properties;
+#[cfg(feature = "testing")]
+use crate::testing::{ConnectedMqttTestBroker, MqttTestPublisher};
 
 /// The header the per-message quality of service rides, as the protocol's own numbering
 /// (`"0"`, `"1"`, `"2"`).
@@ -308,6 +310,12 @@ impl MqttPublish {
     pub(crate) fn into_publisher(self, cell: CoreCell) -> MqttPublisher {
         MqttPublisher::new(cell, self.qos, self.retain)
     }
+
+    /// The quality of service this policy publishes at.
+    #[cfg(feature = "testing")]
+    pub(crate) const fn qos_value(self) -> Qos {
+        self.qos
+    }
 }
 
 impl PublishPolicy<ConnectedMqttBroker> for MqttPublish {
@@ -316,6 +324,30 @@ impl PublishPolicy<ConnectedMqttBroker> for MqttPublish {
     fn pair(
         self,
         connected: &ConnectedMqttBroker,
+    ) -> impl Future<Output = Result<Self::Live, PairError>> {
+        ready(Ok(connected.publisher_with(self)))
+    }
+}
+
+/// The same policy pairs against the in-process broker, so a routes file mounts on both brokers as
+/// written - the destination, the codec and the slot it is attached to are the mount site's, and
+/// none of them changes with the transport underneath.
+///
+/// The quality of service survives the pairing, because it is what says whether a subscriber can
+/// settle the delivery at all: publish at [`Qos::AtMostOnce`] in process and the handler meets the
+/// same [`AckError::Unsupported`](ruststream::AckError::Unsupported) a server would have produced.
+/// The retain flag stops here - nothing in process keeps a last message per topic - and neither
+/// argument is recorded as a header, because on the wire the publisher consumes them, so a
+/// delivery here carries exactly what a subscriber would see. A test on this transport therefore
+/// says what was published, where, and whether it could be acknowledged; that it was retained, or
+/// that the acknowledgement completed a protocol handshake, is the live suite's to check.
+#[cfg(feature = "testing")]
+impl PublishPolicy<ConnectedMqttTestBroker> for MqttPublish {
+    type Live = MqttTestPublisher;
+
+    fn pair(
+        self,
+        connected: &ConnectedMqttTestBroker,
     ) -> impl Future<Output = Result<Self::Live, PairError>> {
         ready(Ok(connected.publisher_with(self)))
     }

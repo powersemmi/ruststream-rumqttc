@@ -68,6 +68,10 @@ The app names the broker and includes the handler:
 --8<-- "crates/ruststream-rumqttc/examples/mqtt_service.rs:app"
 ```
 
+A handler whose filter belongs to the deployment rather than to the code writes
+`#[subscriber(MqttTopic)]` instead and takes the filter from `.name(..)` at the mount site; the
+quality of service and the share group are then the defaults.
+
 Dropping a subscriber unsubscribes its filter.
 
 ### Wildcards
@@ -153,6 +157,15 @@ first step, so it needs an acknowledgeable delivery: at `QoS` 0 the step is refu
 deferred copy is never published, which drops the message. With no retry publisher configured the
 runtime warns and falls back to `retry()`, with the consequences above.
 
+That copy needs a topic, and a subscription can only name one if its filter is a topic. A
+subscription on `devices/dev42/telemetry` is reached by publishing there, shared groups included -
+the group takes the copy between its members. A subscription on a wildcard filter is not reachable
+that way at all, because `+` and `#` are subscribe-only, so the crate says it cannot name an
+address rather than naming one that reaches nothing. A scope that wires `retry_via(..)` over a
+wildcard subscription then refuses to start, naming the subscription: the service learns at startup
+that `retry_after` has no fallback there, instead of losing every delayed message to a publish that
+went nowhere.
+
 `HandlerOutcome::drop()` acknowledges, because dropping is the protocol's only terminal answer.
 Dead-lettering is a publish the service makes, not something the broker does.
 
@@ -189,11 +202,11 @@ arguments in both places, so a slot and a reply are written alike.
 
 Which name a file writes follows from the prelude it imports. A handler file imports
 `ruststream::prelude::*` and bounds its injected publisher with a capability trait,
-`Out<impl Publisher>` or this crate's `Out<impl MqttPublishOptions>`, so the body names no broker
-type at all. A routes file imports `ruststream_rumqttc::prelude::*`, where the policy answers to
-`Publish`: a mount site then reads the same whichever broker it runs on, and porting a service
-changes the import rather than the call. `MqttPublish` stays at the crate root, for a file that
-mixes two brokers and has to say which one it means.
+`Out<impl Publisher>`, so the body names no broker type at all. A routes file imports
+`ruststream_rumqttc::prelude::*`, where the policy answers to `Publish`: a mount site then reads
+the same whichever broker it runs on, and porting a service changes the import rather than the
+call. `MqttPublish` stays at the crate root, for a file that mixes two brokers and has to say which
+one it means.
 
 A publish returns once the client session owns the message, not once the broker has confirmed it.
 For `QoS` 1 and 2 the session retransmits until the broker acknowledges, across reconnects.
@@ -209,35 +222,47 @@ still names the topic. A `{placeholder}` in that name becomes a setter the call 
 
 ### Per-message arguments
 
-`MqttPublishOptions` sets, for one message, the two arguments MQTT carries on every PUBLISH packet:
+Both arguments MQTT carries on a PUBLISH packet are steps on the publish, taken in any order:
 
-| Step | Overrides |
+| Step | Sets for this one message |
 | --- | --- |
-| `with_qos(qos)` | The delivery quality of service of this message. |
-| `with_retain(retain)` | Whether the broker keeps this message as the topic's retained one. |
+| `qos(qos)` | The delivery quality of service. |
+| `retain(retain)` | Whether the broker keeps the message as the topic's retained one. |
 
-You can take either step on a publisher, in either order, and then continue with the publish as
-usual. An argument the call does not name keeps the publisher's policy value:
+An argument the call does not name is the one the mount site's policy declared, so
+`Publish::default().qos(Qos::ExactlyOnce)` is the default for every publish through that publisher
+and a step is how one message differs:
 
 ```rust
 --8<-- "crates/ruststream-rumqttc/examples/mqtt_retained.rs:per_publish"
 ```
 
-The trait is implemented for the live publisher, for the in-process broker's publisher and for the
-`Out` slot entry a handler body holds, so the same call works in a handler
-(`Out<impl MqttPublishOptions>`), in a startup hook, and under the `TestApp` harness. A slot publish
-stays attributed to its slot: `tb.out::<Marker>()` records it like any other.
+The steps sit on the publish itself rather than on a publisher of their own, so a stepped publish
+is an ordinary publish in every other respect: it encodes with the codec its include site named,
+and a slot publish stays attributed to its slot, which `tb.out::<Marker>()` records like any other.
+They are there wherever a publish is built - in a handler body, in a startup hook, in a test.
 
-The step yields a plain publisher, so a publish built on it uses the crate's default codec rather
-than the one named at the include site. A slot publish that needs the include site's codec goes
-through the slot's own `message(..)` and names the arguments in its headers instead.
+The values reach the client as the protocol fields they are, so nothing about them is sent as a
+user property and a subscriber sees a plain message. A publish with no call site of its own - a
+reply, or the copy the runtime publishes for a deferred retry - takes the policy whole.
 
-The two arguments reach the send path as headers, `mqtt-qos` (the protocol's own `0`, `1`, `2`) and
-`mqtt-retain` (`true` or `false`), both exported as `QOS_HEADER` and `RETAIN_HEADER`. The publisher
-consumes them, so neither is sent as a user property.
+A handler body that adjusts one is the single place a body names this broker. It imports
+`ruststream_rumqttc::prelude::*` for the steps and bounds its slot with `MqttPublishOptions`, so
+the signature says which broker the body is written for:
 
-A value outside those vocabularies returns `MqttError::InvalidPublishArgument`, naming the header
-and quoting what arrived, and nothing is sent. The in-process broker refuses it on the same terms.
+```rust
+--8<-- "crates/ruststream-rumqttc/examples/mqtt_retained.rs:stepped_handler"
+```
+
+Its mount site declares the defaults, and the step is what one message changes:
+
+```rust
+--8<-- "crates/ruststream-rumqttc/examples/mqtt_retained.rs:stepped_mount"
+```
+
+A test names the same type to assert what a publish carried:
+`tb.out::<States>().assert_called_once().with_options(&MqttPublishOptions::default().retain(true))`,
+and `assert_options_default()` is the assertion that a publish took no step at all.
 
 ### Retained messages
 
@@ -246,7 +271,7 @@ and hands it to each new subscriber on a matching filter. A service that starts 
 published its state still receives that state. Retained messages do not reach shared subscriptions.
 
 A publisher that retains everything it sends declares the flag once on its policy; a single
-announcement takes it per message with `with_retain(true)`. Either way, the scope's `after_startup`
+announcement takes it per message with `retain(true)`. Either way, the scope's `after_startup`
 hook runs the publish once the broker is connected:
 
 ```rust
@@ -307,10 +332,10 @@ disconnects and returns under the same client id receives what was published to 
 was away, and only the server run proves it.
 
 The framework's contract suites are run against both. The routing suite is in-process only, while
-the lifecycle ladder and the batch
-capability suite run twice, once against the stand-in and once against Mosquitto. Each scenario in
-`tests/stand_in_mqtt.rs` is the twin of a live one in `tests/integration_mqtt.rs`, so a behaviour
-asserted in process can be traced to the server run that backs it.
+the lifecycle ladder and the batch capability suite run twice, once against the stand-in and once
+against Mosquitto. Each scenario in `tests/stand_in_mqtt.rs` is the twin of a live one in
+`tests/integration_mqtt.rs`, so a behaviour asserted in process can be traced to the server run
+that backs it.
 
 Settlement answers here what it answers on a wire, down to the refusals. `nack(requeue = true)`
 reports `AckError::Unsupported` in process exactly as the real message does, because MQTT has no

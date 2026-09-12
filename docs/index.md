@@ -5,9 +5,10 @@ service to MQTT 5 topics and publishes to them, over [`rumqttc`](https://docs.rs
 are sent as MQTT 5 user properties, so non-Rust peers see plain MQTT messages.
 
 You can subscribe to topic filters with wildcards, choose the quality of service, publish retained
-messages, and set up sessions and last wills. A shared subscription splits a topic's messages
-between competing consumers. With the `testing` feature you can run a service's handlers against an
-in-process broker, with no server.
+messages, and set up sessions and last wills. The quality of service and the retain flag are
+declared once for a publisher, and changed on a single publish where one message needs to differ. A
+shared subscription splits a topic's messages between competing consumers. With the `testing`
+feature you can run a service's handlers against an in-process broker, with no server.
 
 ```toml
 ruststream = { version = "0.7", features = ["macros", "json"] }

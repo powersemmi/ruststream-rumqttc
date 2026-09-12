@@ -7,9 +7,8 @@
 //! A handler file usually needs none of it: a body binds its injected publisher with a capability
 //! trait and names no broker type, so it imports the framework's prelude alone. This glob is the
 //! mount site's, and importing it is the statement of which broker the routes run on. The one
-//! exception is a body that adjusts a per-message setting: it names
-//! [`MqttPublishOptions`](crate::MqttPublishOptions) in its slot bound and takes a step from
-//! [`MqttPublishSteps`](crate::MqttPublishSteps), both of which arrive here.
+//! exception is a body that adjusts a per-message setting: it names [`MqttPublishOptions`] in its
+//! slot bound and takes a step from [`MqttPublishSteps`], both of which arrive here.
 //!
 //! A file that mixes two brokers imports the prefixed [`MqttPublish`](crate::MqttPublish) from
 //! the crate root instead.

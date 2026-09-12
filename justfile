@@ -10,6 +10,9 @@ check:
     cargo clippy --workspace --all-targets --all-features -- -D warnings
     cargo check --workspace --all-targets --all-features
     cargo check --workspace --no-default-features
+    # CI denies rustdoc warnings, so a broken intra-doc link fails the build. Running it here is
+    # what keeps that a local finding rather than a red pull request.
+    RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps
 
 test:
     cargo test --workspace --all-features

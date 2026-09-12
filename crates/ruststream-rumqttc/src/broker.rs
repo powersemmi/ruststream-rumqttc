@@ -393,6 +393,15 @@ impl ConnectedBroker for ConnectedMqttBroker {
 
     async fn shutdown(self) -> Result<(), Self::Error> {
         self.shared.closed.store(true, Ordering::Release);
+        let held = self.shared.held();
+        if held > 0 {
+            // Unacknowledged, so the broker redelivers them when the session resumes; they are
+            // lost only if the session is not persistent.
+            tracing::warn!(
+                held,
+                "mqtt shutdown with deliveries no subscription ever matched"
+            );
+        }
         // A clean DISCONNECT lets the broker publish no last will and expire the session per
         // policy; the connection task sees the closed flag and exits.
         let _ = self.client.disconnect().await;

@@ -282,6 +282,7 @@ It batches the way the real subscriber does, with the same size from the mount s
 deadline, so a batch handler is handed under the harness what a server would have produced.
 
 The test broker routes by exact address match and does not simulate protocol behaviour. Quality of
-service handshakes, shared group distribution, session redelivery, retained messages, and wildcard
-demultiplexing are covered by the live suite against Eclipse Mosquitto instead, gated behind
-`MQTT_TEST_URL`.
+service handshakes, shared group distribution, retained messages, and wildcard demultiplexing are
+covered by the live suite against Eclipse Mosquitto instead, gated behind `MQTT_TEST_URL`. So is
+message replay on a persistent session: a subscriber that disconnects and returns under the same
+client id receives what was published to its topic while it was away.

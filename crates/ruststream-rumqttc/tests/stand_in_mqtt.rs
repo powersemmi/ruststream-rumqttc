@@ -22,6 +22,11 @@ use ruststream_rumqttc::{MqttPublishOptions, MqttTopic, Qos};
 /// nothing here waits on a network.
 const SETTLE: Duration = Duration::from_millis(100);
 
+/// The one per-message argument these tests take: publish at `qos`, whatever the policy declares.
+fn at(qos: Qos) -> MqttPublishOptions {
+    MqttPublishOptions::default().qos(qos)
+}
+
 async fn connected() -> ConnectedMqttTestBroker {
     MqttTestBroker::new()
         .connect()
@@ -48,7 +53,7 @@ async fn shared_subscriptions_split_the_stream_in_process() {
     let publisher = connected.publisher();
     for i in 0..4u8 {
         publisher
-            .publish(OutgoingMessage::new("jobs", [i].as_slice()))
+            .publish(OutgoingMessage::new("jobs", [i].as_slice()), None)
             .await
             .expect("publish succeeds");
     }
@@ -103,7 +108,7 @@ async fn separate_groups_each_take_their_own_copy_in_process() {
 
     connected
         .publisher()
-        .publish(OutgoingMessage::new("jobs", b"one".as_slice()))
+        .publish(OutgoingMessage::new("jobs", b"one".as_slice()), None)
         .await
         .expect("publish succeeds");
 
@@ -135,7 +140,7 @@ async fn qos0_reports_ack_unsupported_in_process() {
 
     connected
         .publisher()
-        .publish(OutgoingMessage::new("fire", b"fire".as_slice()))
+        .publish(OutgoingMessage::new("fire", b"fire".as_slice()), None)
         .await
         .expect("publish succeeds");
 
@@ -164,8 +169,10 @@ async fn the_publish_side_qos_caps_the_delivery_in_process() {
 
     connected
         .publisher()
-        .with_qos(Qos::AtMostOnce)
-        .publish(OutgoingMessage::new("mixed", b"fire".as_slice()))
+        .publish(
+            OutgoingMessage::new("mixed", b"fire".as_slice()),
+            Some(&at(Qos::AtMostOnce)),
+        )
         .await
         .expect("publish succeeds");
 
@@ -193,7 +200,7 @@ async fn an_acknowledged_subscription_settles_in_process() {
 
     connected
         .publisher()
-        .publish(OutgoingMessage::new("orders", b"one".as_slice()))
+        .publish(OutgoingMessage::new("orders", b"one".as_slice()), None)
         .await
         .expect("publish succeeds");
 
@@ -242,7 +249,7 @@ async fn dropping_acknowledges_in_process() {
 
     connected
         .publisher()
-        .publish(OutgoingMessage::new("orders", b"one".as_slice()))
+        .publish(OutgoingMessage::new("orders", b"one".as_slice()), None)
         .await
         .expect("publish succeeds");
 

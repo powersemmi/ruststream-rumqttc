@@ -20,7 +20,8 @@
 //!   that mount site says which side of the wire filled them.
 //! - Retained messages, last will, session persistence, and TLS with client certificates are
 //!   configuration on the broker and the publish policy. Quality of service and the retain flag
-//!   are also settable per message through [`MqttPublishOptions`].
+//!   are also settable per message, through [the steps](MqttPublishSteps) this crate adds to the
+//!   publish builder.
 
 #![forbid(unsafe_code)]
 
@@ -39,7 +40,5 @@ pub use broker::{ConnectedMqttBroker, MqttBroker};
 pub use error::MqttError;
 pub use filter::{MqttTopic, Qos};
 pub use message::MqttMessage;
-pub use publisher::{
-    MqttPublish, MqttPublishOptions, MqttPublishOverride, MqttPublisher, QOS_HEADER, RETAIN_HEADER,
-};
+pub use publisher::{MqttPublish, MqttPublishOptions, MqttPublishSteps, MqttPublisher};
 pub use subscriber::MqttSubscriber;

@@ -7,12 +7,12 @@ use std::sync::{Arc, OnceLock};
 use bytes::Bytes;
 use ruststream::testing::{Coordinator, TestableBroker};
 use ruststream::{
-    Broker, ConnectedBroker, DefaultPublish, OutgoingMessage, Publisher, RawMessage, Subscribe,
+    Broker, ConnectedBroker, DefaultPublish, OutgoingMessage, Publisher, RawMessage,
+    RedeliveryAddress, Subscribe,
 };
 
 use crate::error::MqttError;
-use crate::filter::{MqttTopic, Qos};
-use crate::message::take_per_message;
+use crate::filter::{MqttTopic, Qos, redelivery_topic};
 use crate::publisher::{MqttPublish, MqttPublishOptions};
 use crate::testing::router::AddressRouter;
 use crate::testing::subscriber::MqttTestSubscriber;
@@ -79,6 +79,7 @@ impl MqttTestBroker {
         MqttTestPublisher {
             state: Arc::clone(&self.state),
             qos: Qos::default(),
+            retain: false,
         }
     }
 }
@@ -107,18 +108,20 @@ impl ConnectedMqttTestBroker {
         MqttTestPublisher {
             state: Arc::clone(&self.state),
             qos: Qos::default(),
+            retain: false,
         }
     }
 
     /// A publisher carrying `policy`, mirroring
-    /// [`ConnectedMqttBroker::publisher_with`](crate::ConnectedMqttBroker). The policy's quality
-    /// of service travels with each delivery, because it is what decides whether a subscriber can
-    /// settle one; its retain flag stops here, since nothing in process retains.
+    /// [`ConnectedMqttBroker::publisher_with`](crate::ConnectedMqttBroker). Both defaults travel,
+    /// because a call that names neither has to resolve against the same values here as on the
+    /// wire; what the resolved retain flag then does is the protocol's, and stops here.
     #[must_use]
     pub(crate) fn publisher_with(&self, policy: MqttPublish) -> MqttTestPublisher {
         MqttTestPublisher {
             state: Arc::clone(&self.state),
             qos: policy.qos_value(),
+            retain: policy.retain_value(),
         }
     }
 
@@ -175,6 +178,11 @@ impl Subscribe for ConnectedMqttTestBroker {
     fn subscribe(&self, name: &str) -> impl Future<Output = Result<Self::Subscriber, Self::Error>> {
         self.subscribe_topic(MqttTopic::new(name))
     }
+
+    /// The real broker's answer, so `retry_via` composes the same way here.
+    fn redelivery_address(&self, name: &str) -> Option<RedeliveryAddress> {
+        redelivery_topic(name)
+    }
 }
 
 impl TestableBroker for ConnectedMqttTestBroker {
@@ -203,36 +211,43 @@ ruststream::register_testable_broker!(ConnectedMqttTestBroker);
 
 /// Publisher for the in-process broker: what [`MqttPublish`](crate::MqttPublish) pairs into here,
 /// and what [`publisher`](ConnectedMqttTestBroker::publisher) hands out directly.
+///
+/// It declares the crate's own [`MqttPublishOptions`], so a handler bound to
+/// `Out<impl Publisher<Options = MqttPublishOptions>, Marker>` mounts here as it mounts on the
+/// real broker, and the steps a body takes are the same steps.
 #[derive(Debug, Clone)]
 pub struct MqttTestPublisher {
     state: Arc<TestState>,
     qos: Qos,
+    retain: bool,
 }
 
 impl Publisher for MqttTestPublisher {
     type Error = MqttError;
+    type Options = MqttPublishOptions;
 
-    fn publish(&self, msg: OutgoingMessage<'_>) -> impl Future<Output = Result<(), Self::Error>> {
-        // The per-message arguments are consumed here as the real publisher consumes them, so a
-        // delivery carries what a subscriber would see and an unreadable one is refused on the
-        // same terms. Applying them is protocol behaviour this transport does not reproduce,
-        // which is what the live suite covers.
-        let outcome = self.state.ensure_open().and_then(|()| {
-            take_per_message(msg.headers().clone()).map(|(per_message, headers)| {
-                self.state.publish(
-                    msg.name(),
-                    Bytes::copy_from_slice(msg.payload()),
-                    headers,
-                    per_message.qos.unwrap_or(self.qos),
-                );
-            })
+    fn publish(
+        &self,
+        msg: OutgoingMessage<'_>,
+        options: Option<&Self::Options>,
+    ) -> impl Future<Output = Result<(), Self::Error>> {
+        // The call's arguments are resolved over the policy's here exactly as the real publisher
+        // resolves them, so the quality of service a delivery is settled under is the one a
+        // server would have delivered it at. The retain flag resolves and stops: keeping a last
+        // message per topic is protocol behaviour this transport does not reproduce, and the live
+        // suite is what covers it.
+        let (qos, _retain) = MqttPublishOptions::resolve(options, self.qos, self.retain);
+        let outcome = self.state.ensure_open().map(|()| {
+            self.state.publish(
+                msg.name(),
+                Bytes::copy_from_slice(msg.payload()),
+                msg.headers().clone(),
+                qos,
+            );
         });
         ready(outcome)
     }
 }
-
-// The same steps on the in-process transport, so a handler bound to them mounts on both brokers.
-impl MqttPublishOptions for MqttTestPublisher {}
 
 // The policy a service declares is the one the runtime pairs here too (the impl lives next to the
 // real one, in `publisher`), so a `publish("dest")` handler mounted without an explicit publisher

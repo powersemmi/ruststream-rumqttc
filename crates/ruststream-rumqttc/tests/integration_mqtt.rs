@@ -7,12 +7,13 @@ use std::pin::pin;
 use std::time::Duration;
 
 use futures::StreamExt;
+use ruststream::runtime::PublishExt;
 use ruststream::{
-    AckError, Broker, ConnectedBroker, HeaderMap, IncomingMessage, OutgoingMessage, Publisher,
-    Subscriber,
+    AckError, Broker, ConnectedBroker, HeaderMap, IncomingMessage, Outgoing, OutgoingMessage,
+    PublishPolicy, Publisher, Serialized, Subscriber,
 };
 use ruststream_rumqttc::{
-    ConnectedMqttBroker, MqttBroker, MqttError, MqttPublishOptions, MqttTopic, QOS_HEADER, Qos,
+    ConnectedMqttBroker, MqttBroker, MqttPublish, MqttPublishSteps, MqttTopic, Qos,
 };
 
 const RECV_TIMEOUT: Duration = Duration::from_secs(15);
@@ -49,6 +50,18 @@ fn unique(name: &str) -> String {
     format!("it/{name}/{}", std::process::id())
 }
 
+/// A payload that carries its own bytes, so a publish through the builder reaches the wire with
+/// no codec in the picture: what these tests read back is the packet, not an encoding. It
+/// declares no name, because every topic here is unique to the run and named at the call.
+#[derive(Outgoing, Serialized)]
+struct State(Vec<u8>);
+
+impl State {
+    fn new(bytes: &[u8]) -> Self {
+        Self(bytes.to_vec())
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn roundtrip_preserves_payload_and_headers() {
     let Some(url) = test_url() else { return };
@@ -66,7 +79,10 @@ async fn roundtrip_preserves_payload_and_headers() {
     headers.insert("correlation-id", "corr-1");
     let publisher = connected.publisher();
     publisher
-        .publish(OutgoingMessage::new(&topic, b"{\"id\":1}".as_slice()).with_headers(headers))
+        .publish(
+            OutgoingMessage::new(&topic, b"{\"id\":1}".as_slice()).with_headers(headers),
+            None,
+        )
         .await
         .expect("publish succeeds");
 
@@ -103,7 +119,7 @@ async fn wildcard_filters_match_and_report_the_real_topic() {
     let publisher = connected.publisher();
     let concrete = format!("{base}/dev42/telemetry");
     publisher
-        .publish(OutgoingMessage::new(&concrete, b"21.5".as_slice()))
+        .publish(OutgoingMessage::new(&concrete, b"21.5".as_slice()), None)
         .await
         .expect("publish succeeds");
 
@@ -137,7 +153,7 @@ async fn shared_subscriptions_split_the_stream() {
     let publisher = connected.publisher();
     for i in 0..4u8 {
         publisher
-            .publish(OutgoingMessage::new(&topic, [i].as_slice()))
+            .publish(OutgoingMessage::new(&topic, [i].as_slice()), None)
             .await
             .expect("publish succeeds");
     }
@@ -165,18 +181,22 @@ async fn shared_subscriptions_split_the_stream() {
     connected.shutdown().await.expect("shutdown succeeds");
 }
 
+/// The retain step is only a field of a value until a packet carries it, and only the broker can
+/// say it did: a retained message is one a subscriber that was not there yet still receives.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_per_publish_retain_override_reaches_a_later_subscriber() {
+async fn the_retain_step_reaches_the_broker() {
     let Some(url) = test_url() else { return };
     let connected = connect(&url, "retain").await;
 
     let topic = unique("state");
-    // The publisher's own policy does not retain: the flag on this one packet is what makes the
+    // The publisher's own policy does not retain: the step on this one packet is what makes the
     // broker keep it for a subscriber that is not there yet.
     let publisher = connected.publisher();
     publisher
-        .with_retain(true)
-        .publish(OutgoingMessage::new(&topic, b"online".as_slice()))
+        .message(&State::new(b"online"))
+        .to(&topic)
+        .retain(true)
+        .publish()
         .await
         .expect("publish succeeds");
 
@@ -195,76 +215,44 @@ async fn a_per_publish_retain_override_reaches_a_later_subscriber() {
 
     // An empty retained payload clears the broker's stored message for the topic.
     publisher
-        .with_retain(true)
-        .publish(OutgoingMessage::new(&topic, b"".as_slice()))
+        .message(&State::new(b""))
+        .to(&topic)
+        .retain(true)
+        .publish()
         .await
         .expect("the retained message is cleared");
 
     connected.shutdown().await.expect("shutdown succeeds");
 }
 
+/// A publish that takes no step is the mirror: the policy's own retain flag is what reaches the
+/// packet, so a subscriber arriving afterwards finds nothing kept for it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_per_publish_qos_override_settles_through_the_protocol() {
+async fn a_publish_with_no_step_retains_nothing() {
     let Some(url) = test_url() else { return };
-    let connected = connect(&url, "qos-override").await;
+    let connected = connect(&url, "no-retain").await;
 
-    let topic = unique("exactly");
-    let mut subscriber = connected
-        .subscribe_topic(MqttTopic::new(&topic).qos(Qos::ExactlyOnce))
-        .await
-        .expect("subscription opens");
-
-    // The publisher's policy is QoS 1; the override raises this packet to the QoS 2 handshake.
+    let topic = unique("plain");
     connected
         .publisher()
-        .with_qos(Qos::ExactlyOnce)
-        .publish(OutgoingMessage::new(&topic, b"once".as_slice()))
+        .message(&State::new(b"online"))
+        .to(&topic)
+        .publish()
         .await
         .expect("publish succeeds");
 
-    let mut stream = pin!(subscriber.stream());
-    let message = tokio::time::timeout(RECV_TIMEOUT, stream.next())
-        .await
-        .expect("delivery arrives")
-        .expect("stream is open")
-        .expect("delivery is ok");
-    assert_eq!(message.payload(), b"once");
-    message.ack().await.expect("ack succeeds");
-
-    connected.shutdown().await.expect("shutdown succeeds");
-}
-
-/// A publish naming a delivery guarantee this crate cannot read is refused against a live
-/// connection too, and the subscription that would have received it sees nothing.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn an_unreadable_publish_argument_is_refused_before_the_wire() {
-    let Some(url) = test_url() else { return };
-    let connected = connect(&url, "bad-argument").await;
-
-    let topic = unique("refused");
     let mut subscriber = connected
         .subscribe_topic(MqttTopic::new(&topic))
         .await
         .expect("subscription opens");
 
-    let mut headers = HeaderMap::new();
-    headers.insert(QOS_HEADER, "sometimes");
-    let error = connected
-        .publisher()
-        .publish(OutgoingMessage::new(&topic, b"never sent".as_slice()).with_headers(headers))
-        .await
-        .expect_err("the argument is outside the vocabulary");
-    assert!(matches!(
-        &error,
-        MqttError::InvalidPublishArgument { header, value, .. }
-            if *header == QOS_HEADER && value == "sometimes"
-    ));
-
-    // A publish that did happen proves the subscription is live, so the silence above is the
-    // refusal rather than a delivery still in flight.
+    // A publish that did happen afterwards proves the subscription is live, so what arrives
+    // first tells retained from not retained rather than slow from silent.
     connected
         .publisher()
-        .publish(OutgoingMessage::new(&topic, b"sent".as_slice()))
+        .message(&State::new(b"live"))
+        .to(&topic)
+        .publish()
         .await
         .expect("publish succeeds");
 
@@ -276,10 +264,53 @@ async fn an_unreadable_publish_argument_is_refused_before_the_wire() {
         .expect("delivery is ok");
     assert_eq!(
         message.payload(),
-        b"sent",
-        "the refused message never reached the broker"
+        b"live",
+        "nothing was retained, so the first delivery is the one published after the subscribe"
     );
     message.ack().await.expect("ack succeeds");
+
+    connected.shutdown().await.expect("shutdown succeeds");
+}
+
+/// The quality of service a step names is the one the packet is delivered under, which the
+/// settlement is the proof of: a `QoS` 0 delivery could not be acknowledged at all.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_quality_of_service_step_reaches_the_broker() {
+    let Some(url) = test_url() else { return };
+    let connected = connect(&url, "qos-step").await;
+
+    let topic = unique("exactly");
+    let mut subscriber = connected
+        .subscribe_topic(MqttTopic::new(&topic).qos(Qos::ExactlyOnce))
+        .await
+        .expect("subscription opens");
+
+    // This publisher's policy publishes at QoS 0, where nothing settles; the step raises this one
+    // packet to the QoS 2 handshake.
+    let publisher = MqttPublish::default()
+        .qos(Qos::AtMostOnce)
+        .pair(&connected)
+        .await
+        .expect("the policy pairs with the connected broker");
+    publisher
+        .message(&State::new(b"once"))
+        .to(&topic)
+        .qos(Qos::ExactlyOnce)
+        .publish()
+        .await
+        .expect("publish succeeds");
+
+    let mut stream = pin!(subscriber.stream());
+    let message = tokio::time::timeout(RECV_TIMEOUT, stream.next())
+        .await
+        .expect("delivery arrives")
+        .expect("stream is open")
+        .expect("delivery is ok");
+    assert_eq!(message.payload(), b"once");
+    message
+        .ack()
+        .await
+        .expect("the delivery carries an acknowledgement, so the step outranked the policy");
 
     connected.shutdown().await.expect("shutdown succeeds");
 }
@@ -317,7 +348,7 @@ async fn a_persistent_session_replays_what_arrived_while_the_subscriber_was_away
     let sender = connect(&url, "session-sender").await;
     sender
         .publisher()
-        .publish(OutgoingMessage::new(&topic, b"missed".as_slice()))
+        .publish(OutgoingMessage::new(&topic, b"missed".as_slice()), None)
         .await
         .expect("publish succeeds");
     sender.shutdown().await.expect("shutdown succeeds");
@@ -359,7 +390,7 @@ async fn qos0_reports_ack_unsupported() {
 
     let publisher = connected.publisher();
     publisher
-        .publish(OutgoingMessage::new(&topic, b"fire".as_slice()))
+        .publish(OutgoingMessage::new(&topic, b"fire".as_slice()), None)
         .await
         .expect("publish succeeds");
 
@@ -392,7 +423,7 @@ async fn nack_reports_unsupported_and_dropping_acknowledges() {
     let publisher = connected.publisher();
     for payload in [b"requeue".as_slice(), b"drop".as_slice()] {
         publisher
-            .publish(OutgoingMessage::new(&topic, payload))
+            .publish(OutgoingMessage::new(&topic, payload), None)
             .await
             .expect("publish succeeds");
     }

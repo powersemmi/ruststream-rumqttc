@@ -12,12 +12,15 @@ use std::time::Duration;
 use rumqttc::Transport;
 use rumqttc::v5::mqttbytes::v5::LastWill;
 use rumqttc::v5::{AsyncClient, MqttOptions};
-use ruststream::{Broker, ConnectedBroker, DefaultPublish, DescribeServer, ServerSpec, Subscribe};
+use ruststream::{
+    Broker, ConnectedBroker, DefaultPublish, DescribeServer, RedeliveryAddress, ServerSpec,
+    Subscribe,
+};
 use tokio::sync::{OnceCell, mpsc, oneshot};
 
 use crate::conn::{Conn, Shared, run};
 use crate::error::MqttError;
-use crate::filter::{MqttTopic, Qos};
+use crate::filter::{MqttTopic, Qos, redelivery_topic};
 use crate::publisher::{MqttPublish, MqttPublisher};
 use crate::subscriber::MqttSubscriber;
 
@@ -163,42 +166,34 @@ impl MqttBroker {
         MqttPublisher::new(Arc::clone(&self.cell), Qos::default(), false)
     }
 
-    /// The URL's authority: everything but the scheme, the userinfo and any path or query.
+    /// Whether the URL's scheme selects TLS.
+    fn tls_from_scheme(&self) -> bool {
+        self.url.starts_with("mqtts://")
+    }
+
+    /// The URL's authority: the host and port, without the scheme, the userinfo or anything after
+    /// the host.
     ///
     /// An MQTT URL routinely carries `user:password@`, and that password must reach neither the
-    /// connection nor the generated document. The authority ends at the first `/`, `?` or `#`,
-    /// and the userinfo is cut at the **last** `@`, because a password may contain one.
-    fn authority(&self) -> (&str, bool) {
-        let (tls_from_scheme, rest) = self.url.strip_prefix("mqtts://").map_or_else(
-            || {
-                (
-                    false,
-                    self.url
-                        .strip_prefix("mqtt://")
-                        .unwrap_or(self.url.as_str()),
-                )
-            },
-            |rest| (true, rest),
-        );
-        let authority = rest
-            .split_once(['/', '?', '#'])
-            .map_or(rest, |(authority, _)| authority);
-        let authority = authority
-            .rsplit_once('@')
-            .map_or(authority, |(_, host)| host);
-        (authority, tls_from_scheme)
+    /// connection nor the generated document. The framework owns that trimming, so the rule is
+    /// the same one every broker crate applies.
+    fn authority(&self) -> String {
+        ServerSpec::host_from_url(&self.url)
     }
 
     /// The host and port a client connects to, and what the generated document reports.
-    fn endpoint(&self) -> Result<(&str, u16), MqttError> {
-        let (authority, tls_from_scheme) = self.authority();
+    fn endpoint(&self) -> Result<(String, u16), MqttError> {
+        let authority = self.authority();
         let (host, port) = match authority.rsplit_once(':') {
             Some((host, port)) => (
-                host,
+                host.to_owned(),
                 port.parse::<u16>()
                     .map_err(|_| MqttError::Invalid(format!("'{port}' is not a valid port")))?,
             ),
-            None => (authority, if tls_from_scheme { 8883 } else { 1883 }),
+            None => (
+                authority.clone(),
+                if self.tls_from_scheme() { 8883 } else { 1883 },
+            ),
         };
         if host.is_empty() {
             return Err(MqttError::Invalid("host must be non-empty".into()));
@@ -207,9 +202,8 @@ impl MqttBroker {
     }
 
     fn options(&self) -> Result<MqttOptions, MqttError> {
-        let (_, tls_from_scheme) = self.authority();
+        let tls_from_scheme = self.tls_from_scheme();
         let (host, port) = self.endpoint()?;
-        let host = host.to_owned();
         if let Some(keep_alive) = self.keep_alive
             && keep_alive < Duration::from_secs(5)
         {
@@ -300,17 +294,16 @@ impl Broker for MqttBroker {
 impl DescribeServer for MqttBroker {
     /// Reports the host and port a client connects to, and nothing else. A URL's credentials
     /// stay out of the generated document, which teams publish and share.
+    ///
+    /// The port is stated even where the URL leaves it out, because the protocol's default is
+    /// what a reader of the document would otherwise have to know.
     fn describe_server(&self) -> ServerSpec {
-        // A URL `connect` will reject still must not carry a password into the document, so the
-        // fallback keeps the stripped authority and drops the unusable port.
-        let (host, port) = self.endpoint().unwrap_or_else(|_| {
-            let (authority, tls_from_scheme) = self.authority();
-            let host = authority
-                .rsplit_once(':')
-                .map_or(authority, |(host, _)| host);
-            (host, if tls_from_scheme { 8883 } else { 1883 })
-        });
-        ServerSpec::new(format!("{host}:{port}"), "mqtt")
+        // A URL `connect` will reject still must not hold up the document, so the fallback keeps
+        // the framework's stripped authority and drops the unusable port.
+        self.endpoint().map_or_else(
+            |_| ServerSpec::from_url(&self.url, "mqtt"),
+            |(host, port)| ServerSpec::new(format!("{host}:{port}"), "mqtt"),
+        )
     }
 }
 
@@ -415,6 +408,12 @@ impl Subscribe for ConnectedMqttBroker {
     async fn subscribe(&self, name: &str) -> Result<Self::Subscriber, Self::Error> {
         self.subscribe_topic(MqttTopic::new(name)).await
     }
+
+    /// A concrete topic filter is also the topic a publisher names, so a deferred retry reaches
+    /// the subscription that reported it. A wildcard filter is subscribe-only and reports none.
+    fn redelivery_address(&self, name: &str) -> Option<RedeliveryAddress> {
+        redelivery_topic(name)
+    }
 }
 
 impl DefaultPublish for ConnectedMqttBroker {
@@ -464,7 +463,7 @@ mod tests {
         ] {
             let broker = broker(url);
             let (host, port) = broker.endpoint().expect("the url parses");
-            assert_eq!((host, port), expected, "parsing {url}");
+            assert_eq!((host.as_str(), port), expected, "parsing {url}");
         }
     }
 

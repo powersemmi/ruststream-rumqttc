@@ -4,8 +4,11 @@
 //! into an MQTT 5 shared subscription (`$share/<group>/<filter>`), which is how competing
 //! consumers are expressed at all.
 
-use rumqttc::v5::mqttbytes::valid_filter;
-use ruststream::SubscriptionSource;
+use std::borrow::Cow;
+use std::future::{Future, ready};
+
+use rumqttc::v5::mqttbytes::{valid_filter, valid_topic};
+use ruststream::{FromName, RedeliveryAddress, SubscriptionSource};
 
 use crate::broker::ConnectedMqttBroker;
 use crate::error::MqttError;
@@ -32,25 +35,6 @@ impl Qos {
             Self::AtMostOnce => rumqttc::v5::mqttbytes::QoS::AtMostOnce,
             Self::AtLeastOnce => rumqttc::v5::mqttbytes::QoS::AtLeastOnce,
             Self::ExactlyOnce => rumqttc::v5::mqttbytes::QoS::ExactlyOnce,
-        }
-    }
-
-    /// The protocol's own numbering, which is what the value travels as on
-    /// [`QOS_HEADER`](crate::QOS_HEADER).
-    pub(crate) const fn as_header(self) -> &'static str {
-        match self {
-            Self::AtMostOnce => "0",
-            Self::AtLeastOnce => "1",
-            Self::ExactlyOnce => "2",
-        }
-    }
-
-    pub(crate) fn from_header(value: &[u8]) -> Option<Self> {
-        match value {
-            b"0" => Some(Self::AtMostOnce),
-            b"1" => Some(Self::AtLeastOnce),
-            b"2" => Some(Self::ExactlyOnce),
-            _ => None,
         }
     }
 }
@@ -147,6 +131,26 @@ impl MqttTopic {
     }
 }
 
+/// A topic filter is all this descriptor needs to exist, so the mount site may supply it: a
+/// definition written `#[subscriber(MqttTopic)]` takes its filter from `name(..)` there, and the
+/// quality of service and share group stay the defaults.
+impl FromName for MqttTopic {
+    fn from_name(name: impl Into<Cow<'static, str>>) -> Self {
+        Self::new(name.into().into_owned())
+    }
+}
+
+/// The topic a publisher reaches the subscription on `filter` with, when there is one.
+///
+/// A concrete filter is a topic, so publishing to it reaches the subscription - including a shared
+/// one, where the group takes the copy between its members, which is what a redelivered message
+/// should meet. A wildcard filter is not a topic at all: `+` and `#` are subscribe-only, and a
+/// publish naming one is refused rather than delivered anywhere. The broker says so instead of
+/// naming an address that reaches nothing.
+pub(crate) fn redelivery_topic(filter: &str) -> Option<RedeliveryAddress> {
+    (!filter.is_empty() && valid_topic(filter)).then(|| RedeliveryAddress::new(filter.to_owned()))
+}
+
 impl SubscriptionSource<ConnectedMqttBroker> for MqttTopic {
     type Subscriber = MqttSubscriber;
 
@@ -156,6 +160,16 @@ impl SubscriptionSource<ConnectedMqttBroker> for MqttTopic {
 
     async fn subscribe(self, connected: &ConnectedMqttBroker) -> Result<MqttSubscriber, MqttError> {
         connected.subscribe_topic(self).await
+    }
+
+    /// The plain filter, never the share group's wire form: `$share/<group>/<filter>` is a
+    /// subscribe-side name, and a publish to it would reach a topic of that literal spelling.
+    fn redelivery_address(
+        &self,
+        connected: &ConnectedMqttBroker,
+    ) -> impl Future<Output = Result<Option<RedeliveryAddress>, MqttError>> + Send {
+        let _ = connected;
+        ready(Ok(redelivery_topic(self.filter())))
     }
 }
 
@@ -185,6 +199,16 @@ impl SubscriptionSource<ConnectedMqttTestBroker> for MqttTopic {
     ) -> Result<MqttTestSubscriber, MqttError> {
         connected.subscribe_topic(self).await
     }
+
+    /// The same answer as against a server, so a scope wired with `retry_via` either starts on
+    /// both brokers or on neither.
+    fn redelivery_address(
+        &self,
+        connected: &ConnectedMqttTestBroker,
+    ) -> impl Future<Output = Result<Option<RedeliveryAddress>, MqttError>> + Send {
+        let _ = connected;
+        ready(Ok(redelivery_topic(self.filter())))
+    }
 }
 
 #[cfg(test)]
@@ -208,5 +232,39 @@ mod tests {
         let topic = MqttTopic::new("orders/+").shared("workers");
         assert_eq!(topic.filter(), "orders/+");
         assert_eq!(topic.wire_filter(), "$share/workers/orders/+");
+    }
+
+    /// A deferred retry is published under the reported address, so the address has to be a topic
+    /// a publisher can name. A concrete filter is one; a wildcard is not, and saying so costs the
+    /// fallback rather than losing the message to a publish that reaches nothing.
+    #[test]
+    fn a_concrete_filter_is_the_topic_a_retry_is_published_to() {
+        assert_eq!(
+            redelivery_topic("devices/dev42/telemetry"),
+            Some(RedeliveryAddress::new("devices/dev42/telemetry"))
+        );
+        assert_eq!(redelivery_topic("devices/+/telemetry"), None);
+        assert_eq!(redelivery_topic("devices/#"), None);
+        assert_eq!(redelivery_topic(""), None);
+    }
+
+    /// A share group is subscribe-side spelling. The address is the plain filter, where a publish
+    /// reaches the group and one member takes it.
+    #[test]
+    fn a_shared_subscription_is_reached_through_its_plain_filter() {
+        assert_eq!(
+            redelivery_topic(MqttTopic::new("jobs").shared("workers").filter()),
+            Some(RedeliveryAddress::new("jobs"))
+        );
+    }
+
+    /// A filter the mount site names builds the same descriptor a service writes inline, so
+    /// `#[subscriber(MqttTopic)]` and `MqttTopic::new(..)` reach one subscription.
+    #[test]
+    fn a_descriptor_built_from_a_name_alone_is_the_plain_one() {
+        assert_eq!(
+            MqttTopic::from_name("devices/+/telemetry"),
+            MqttTopic::new("devices/+/telemetry")
+        );
     }
 }

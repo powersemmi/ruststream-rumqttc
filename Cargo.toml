@@ -14,10 +14,11 @@ authors = ["RustStream contributors"]
 [workspace.dependencies]
 ruststream-rumqttc = { path = "crates/ruststream-rumqttc" }
 # The lower bound names the pre-release so cargo admits it: a range that mentions no pre-release
-# excludes every pre-release, so `>=0.7.0` would skip 0.7.0-rc.2. The final 0.7.0 satisfies this
-# range too, so the requirement does not need revisiting once the core line settles. rc.2 is the
-# floor because the reply destination now comes from the reply type, which rc.1 cannot express.
-ruststream = { version = ">=0.7.0-rc.2, <0.8.0", default-features = false }
+# excludes every pre-release, so `>=0.7.0` would skip 0.7.0-rc.3. The final 0.7.0 satisfies this
+# range too, so the requirement does not need revisiting once the core line settles. rc.3 is the
+# floor because a per-message setting is now a typed option the publisher declares, which rc.2
+# has no place to carry.
+ruststream = { version = ">=0.7.0-rc.3, <0.8.0", default-features = false }
 
 rumqttc = "0.25"
 bytes = "1"

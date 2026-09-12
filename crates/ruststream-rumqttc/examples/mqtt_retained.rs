@@ -46,8 +46,8 @@ fn app() -> impl App {
                 Publish::default(),
                 async move |publisher| -> Result<(), PublishError<MqttError>> {
                     publisher
-                        .with_retain(true)
                         .message(&DeviceState(b"online".to_vec()))
+                        .retain(true)
                         .to()
                         .device("dev43")
                         .publish()

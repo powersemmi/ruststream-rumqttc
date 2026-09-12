@@ -11,7 +11,6 @@
 use ruststream::testing::TestApp;
 use ruststream_rumqttc::prelude::*;
 use ruststream_rumqttc::testing::MqttTestBroker;
-use ruststream_rumqttc::{QOS_HEADER, RETAIN_HEADER};
 use serde::{Deserialize, Serialize};
 
 // The topic a device publishes to. The handlers below name it as a literal and assert on the same
@@ -84,6 +83,7 @@ async fn a_handler_publishes_through_its_slot_on_the_in_process_broker() {
 }
 
 const STATE: &str = "devices/dev42/state";
+const HEARTBEAT: &str = "devices/dev42/heartbeat";
 
 /// A device state is bytes on the wire rather than an encoded model, so the type carries its own
 /// bytes and no codec runs on them.
@@ -95,14 +95,13 @@ struct DeviceState(Vec<u8>);
 #[publishes(DeviceState)]
 struct States;
 
-/// A body that needs the two arguments MQTT carries on every PUBLISH packet bounds its slot with
-/// this crate's own [`MqttPublishOptions`] instead. The step resolves on the slot entry the body
-/// holds, so the publish stays the slot's; resolving one layer down would reach the same wire and
-/// lose the attribution.
+/// A body that adjusts the two arguments MQTT carries on every PUBLISH packet names this crate's
+/// options type in its slot bound. The steps sit on the publish builder, so the publish is still
+/// the slot's own - attributed to `States`, and encoded with the codec the include site named.
 #[subscriber("devices/dev42/telemetry")]
 async fn announce_state(
     telemetry: &Telemetry,
-    Out(out): Out<impl MqttPublishOptions, States>,
+    Out(out): Out<impl Publisher<Options = MqttPublishOptions>, States>,
 ) -> HandlerOutcome {
     let state = if telemetry.temperature > 30.0 {
         "hot"
@@ -110,9 +109,9 @@ async fn announce_state(
         "ok"
     };
     if out
-        .with_retain(true)
-        .with_qos(Qos::ExactlyOnce)
         .message(&DeviceState(state.as_bytes().to_vec()))
+        .retain(true)
+        .qos(Qos::ExactlyOnce)
         .publish()
         .await
         .is_err()
@@ -144,31 +143,82 @@ async fn the_per_message_arguments_ride_the_slot_and_stop_at_the_transport() {
         .await
         .expect("the injected reading is routed");
 
-    // The slot saw it, which is what says the step resolved on the entry rather than past it.
-    let states = tb.out::<States>().assert_called_once().with_raw(b"hot");
-    let attributed = &states.messages()[0];
-    assert_eq!(attributed.name(), STATE);
-    assert_eq!(
-        attributed.headers().get_str(QOS_HEADER),
-        Some("2"),
-        "the arguments travel with the message to the publisher"
-    );
-    assert_eq!(attributed.headers().get_str(RETAIN_HEADER), Some("true"));
+    // The slot saw the publish and the arguments it carried, which is what says the steps
+    // resolved on the slot's own entry rather than past it.
+    let states = tb
+        .out::<States>()
+        .assert_called_once()
+        .with_raw(b"hot")
+        .with_options(
+            &MqttPublishOptions::default()
+                .retain(true)
+                .qos(Qos::ExactlyOnce),
+        );
+    assert_eq!(states.messages()[0].name(), STATE);
 
-    // The transport consumed them, so a subscriber sees a plain message.
+    // They are protocol fields, so the publisher hands them to the client rather than to the
+    // message: a subscriber sees a plain delivery.
     let delivered = tb.broker::<MqttTestBroker>().published::<()>(STATE);
-    let delivered = delivered.assert_called_once().messages()[0]
-        .headers()
-        .clone();
-    assert_eq!(delivered.get(QOS_HEADER), None);
-    assert_eq!(delivered.get(RETAIN_HEADER), None);
+    assert!(
+        delivered.assert_called_once().messages()[0]
+            .headers()
+            .is_empty(),
+        "nothing about the arguments reaches a subscriber as a header"
+    );
+}
+
+/// The mirror case: a body that takes no step publishes entirely under the policy the mount site
+/// named, and the slot view says so rather than reporting an empty options value.
+#[subscriber("devices/dev42/heartbeat")]
+async fn announce_plainly(
+    telemetry: &Telemetry,
+    Out(out): Out<impl Publisher<Options = MqttPublishOptions>, States>,
+) -> HandlerOutcome {
+    let _ = telemetry.temperature;
+    if out
+        .message(&DeviceState(b"alive".to_vec()))
+        .publish()
+        .await
+        .is_err()
+    {
+        return HandlerOutcome::retry();
+    }
+    HandlerOutcome::ack()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_publish_that_takes_no_step_carries_the_policy_alone() {
+    let app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(
+        MqttTestBroker::new(),
+        |b| {
+            b.include(announce_plainly)
+                .out(States, Publish::default().qos(Qos::ExactlyOnce))
+                .build();
+        },
+    );
+
+    let tb = TestApp::start(app).await.expect("the harness starts");
+    tb.broker::<MqttTestBroker>()
+        .message(&Telemetry {
+            device: "dev42".to_owned(),
+            temperature: 21.5,
+        })
+        .to(HEARTBEAT)
+        .publish()
+        .await
+        .expect("the injected reading is routed");
+
+    tb.out::<States>()
+        .assert_called_once()
+        .with_raw(b"alive")
+        .assert_options_default();
 }
 
 /// The same body, and the same policy attached the same way, mount on the real broker - which is
 /// where the two arguments reach a wire. Building the app is I/O-free, so the mount is what this
 /// checks; the wire effect is the live suite's.
 #[test]
-fn a_slot_bound_with_the_crate_capability_mounts_on_the_real_broker() {
+fn a_slot_bound_with_the_crate_options_mounts_on_the_real_broker() {
     let _app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(
         MqttBroker::new("mqtt://localhost:1883", "mqtt-handlers"),
         |b| {

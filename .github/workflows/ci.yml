@@ -3,8 +3,10 @@ name: CI
 on:
   push:
     branches: [main]
+  # No base filter: a pull request stacked on another one has a branch for its base, and a filter
+  # naming `main` leaves it with no checks at all - which reads as a conflicting branch rather
+  # than as a workflow that declined to run.
   pull_request:
-    branches: [main]
 
 permissions:
   contents: read
@@ -94,7 +96,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Install cargo-hack
-        uses: taiki-e/install-action@v2.87.6
+        uses: taiki-e/install-action@v2.87.7
         with:
           tool: cargo-hack
 
@@ -185,6 +187,10 @@ jobs:
       - name: Run integration + conformance against mosquitto
         env:
           MQTT_TEST_URL: mqtt://127.0.0.1:1883
+          # The gated tests skip themselves without the URL, so a renamed variable or a dropped
+          # env block would leave this job green having asserted nothing. With this set, a
+          # missing URL fails the suite instead of skipping it.
+          RUSTSTREAM_REQUIRE_LIVE: "1"
         run: >-
           cargo test --locked -p ruststream-rumqttc --all-features
           --test integration_mqtt
@@ -207,7 +213,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install cargo-deny
-        uses: taiki-e/install-action@v2.87.6
+        uses: taiki-e/install-action@v2.87.7
         with:
           tool: cargo-deny
 

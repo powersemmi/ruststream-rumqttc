@@ -10,6 +10,9 @@ check:
     cargo clippy --workspace --all-targets --all-features -- -D warnings
     cargo check --workspace --all-targets --all-features
     cargo check --workspace --no-default-features
+    # CI denies rustdoc warnings, so a broken intra-doc link fails the build. Running it here is
+    # what keeps that a local finding rather than a red pull request.
+    RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps
 
 test:
     cargo test --workspace --all-features
@@ -24,7 +27,10 @@ test-brokers: brokers-up
     #!/usr/bin/env bash
     set -euo pipefail
     trap 'just brokers-down' EXIT
+    # This recipe starts the stand, so a gated test that skips itself here is a fault, not a
+    # developer without a broker.
     MQTT_TEST_URL=mqtt://127.0.0.1:1883 \
+    RUSTSTREAM_REQUIRE_LIVE=1 \
         cargo test --workspace --all-features -- --test-threads=1
 
 fmt:

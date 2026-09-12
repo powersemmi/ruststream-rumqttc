@@ -1,34 +1,19 @@
-//! [`MqttPublisher`], its [`MqttPublish`] policy, and the per-publish overrides.
+//! [`MqttPublisher`], its [`MqttPublish`] policy, and the per-message settings.
 
 use std::fmt;
 use std::future::{Future, ready};
 
 use bytes::Bytes;
 use rumqttc::v5::mqttbytes::valid_topic;
-use ruststream::runtime::{OutPipeline, OutSlot, Slot};
-use ruststream::{HeaderMap, OutgoingMessage, PairError, PublishPolicy, Publisher};
+use ruststream::runtime::{PublishBuilder, PublishSink};
+use ruststream::{OutgoingMessage, PairError, PublishPolicy, Publisher};
 
 use crate::broker::{ConnectedMqttBroker, CoreCell};
 use crate::error::MqttError;
 use crate::filter::Qos;
 use crate::message::to_wire_properties;
-
-/// The header the per-message quality of service rides, as the protocol's own numbering
-/// (`"0"`, `"1"`, `"2"`).
-///
-/// [`Publisher::publish`] takes a message and nothing else, so a per-message transport argument
-/// reaches the send path as a header - the mechanism the framework names for a delivery option a
-/// broker expresses that way. The publisher consumes it: it never travels as a user property.
-///
-/// Any other value fails the publish with
-/// [`MqttError::InvalidPublishArgument`](crate::MqttError::InvalidPublishArgument), naming the
-/// header and quoting what arrived. Nothing reaches the wire: a call that asked for a delivery
-/// guarantee is not quietly served with the publisher's own.
-pub const QOS_HEADER: &str = "mqtt-qos";
-
-/// The header the per-message retain flag rides (`"true"` or `"false"`), consumed - and, on any
-/// other value, refused - by the publisher exactly as [`QOS_HEADER`] is.
-pub const RETAIN_HEADER: &str = "mqtt-retain";
+#[cfg(feature = "testing")]
+use crate::testing::{ConnectedMqttTestBroker, MqttTestPublisher};
 
 /// The single send path: every publishing form resolves to a `QoS` and a retain flag, and the
 /// wire work happens here once.
@@ -48,11 +33,7 @@ async fn send(
             reason: "not a valid MQTT topic (wildcards are subscribe-only)".to_owned(),
         });
     }
-    // Read before anything is built, so a publish naming an argument this crate cannot read is
-    // refused rather than sent under the publisher's own guarantee.
-    let (per_message, properties) = to_wire_properties(&msg)?;
-    let qos = per_message.qos.unwrap_or(qos);
-    let retain = per_message.retain.unwrap_or(retain);
+    let properties = to_wire_properties(&msg);
     let payload = Bytes::copy_from_slice(msg.payload());
     let outcome = match properties {
         Some(properties) => {
@@ -108,85 +89,87 @@ impl MqttPublisher {
 
 impl Publisher for MqttPublisher {
     type Error = MqttError;
+    type Options = MqttPublishOptions;
 
-    async fn publish(&self, msg: OutgoingMessage<'_>) -> Result<(), Self::Error> {
-        send(&self.cell, self.qos, self.retain, msg).await
+    async fn publish(
+        &self,
+        msg: OutgoingMessage<'_>,
+        options: Option<&Self::Options>,
+    ) -> Result<(), Self::Error> {
+        let (qos, retain) = MqttPublishOptions::resolve(options, self.qos, self.retain);
+        send(&self.cell, qos, retain, msg).await
     }
 }
 
-/// The two arguments MQTT carries on every PUBLISH packet, reopened at the call site.
+/// The two arguments MQTT carries on every PUBLISH packet, as one message asked for them.
 ///
-/// Each method returns an [`MqttPublishOverride`] adapter carrying the value, and the publish
-/// continues from there: `publisher.with_retain(true).message(&state).publish()`. An argument
-/// the call does not name keeps the publisher's policy value, and the adapter's own methods of
-/// the same names refine it further, so the two compose in either order.
+/// This is [`Publisher::Options`] for every publisher this crate hands out. An argument left
+/// unset keeps what the [`MqttPublish`] policy fixed at the mount site, so a call carries only
+/// what it changed, and a path with no call site at all - a reply, the runtime's deferred
+/// redelivery - carries nothing and publishes entirely under the policy.
 ///
-/// Implemented for the live publisher, the in-process test publisher and the `Out` slot entry, so
-/// the same call works in a handler, in a startup hook and under the test harness. Resolving on
-/// the entry is what keeps a slot publish attributed to its slot.
-///
-/// The step yields a plain publisher, so a publish built on it resolves the crate's default codec
-/// rather than the include site's; a slot publish that needs the include site's codec goes through
-/// the slot's own `message(..)` and names the arguments in its headers ([`QOS_HEADER`],
-/// [`RETAIN_HEADER`]).
+/// A service writes [the steps](MqttPublishSteps) rather than this type; it is named in a test
+/// asserting what a publish carried (`with_options`) and in the
+/// `Out<impl Publisher<Options = MqttPublishOptions>, Marker>` bound of a handler body that takes
+/// one.
 ///
 /// # Examples
 ///
 /// ```
-/// use ruststream::Publisher;
-/// use ruststream::OutgoingMessage;
-/// use ruststream_rumqttc::{MqttBroker, MqttPublishOptions};
+/// use ruststream_rumqttc::{MqttPublishOptions, Qos};
 ///
-/// # async fn demo() -> Result<(), Box<dyn std::error::Error>> {
-/// let publisher = MqttBroker::new("mqtt://localhost:1883", "states").publisher();
-/// let msg = OutgoingMessage::new("devices/dev42/state", b"online".as_slice());
-/// publisher.with_retain(true).publish(msg).await?;
-/// # Ok(())
-/// # }
+/// let options = MqttPublishOptions::default().qos(Qos::ExactlyOnce).retain(true);
+/// # let _ = options;
 /// ```
-pub trait MqttPublishOptions: Publisher {
-    /// Sends with `qos` instead of the publisher's own.
-    fn with_qos(&self, qos: Qos) -> MqttPublishOverride<'_, Self> {
-        MqttPublishOverride::new(self).with_qos(qos)
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[must_use]
+pub struct MqttPublishOptions {
+    qos: Option<Qos>,
+    retain: Option<bool>,
+}
+
+impl MqttPublishOptions {
+    /// Sends this one message at `qos` instead of the policy's.
+    pub const fn qos(mut self, qos: Qos) -> Self {
+        self.qos = Some(qos);
+        self
     }
 
-    /// Sends retained (or explicitly not retained), whatever the publisher's policy declares.
+    /// Sends this one message retained (or explicitly not retained), whatever the policy declares.
     ///
     /// A retained message is the last one the broker keeps per topic and hands to each new
     /// subscriber on a matching filter; publishing an empty payload retained clears it.
-    fn with_retain(&self, retain: bool) -> MqttPublishOverride<'_, Self> {
-        MqttPublishOverride::new(self).with_retain(retain)
+    pub const fn retain(mut self, retain: bool) -> Self {
+        self.retain = Some(retain);
+        self
+    }
+
+    /// Resolves one call's arguments over the defaults its publisher was paired with.
+    pub(crate) fn resolve(options: Option<&Self>, qos: Qos, retain: bool) -> (Qos, bool) {
+        let options = options.copied().unwrap_or_default();
+        (options.qos.unwrap_or(qos), options.retain.unwrap_or(retain))
     }
 }
 
-impl MqttPublishOptions for MqttPublisher {}
-
-// Grafted onto the slot entry a handler body actually holds, next to the framework's own
-// capability delegations on it. Resolving the step there keeps the publish attributed to its
-// slot; an impl one layer down is reached by autoderef past the entry instead, and a publish
-// built on it leaves through the unwrapped publisher, where the harness's per-slot capture never
-// sees it.
-impl<M: OutSlot, W: MqttPublishOptions, E: Send + Sync, Pipe: OutPipeline, Body> MqttPublishOptions
-    for Slot<M, W, E, Pipe, Body>
-{
-}
-
-/// A borrowed view of a publisher that sends with per-message `QoS` and retain values instead of
-/// the ones its policy fixed, returned by [`MqttPublishOptions`].
+/// The per-message steps of an MQTT publish, on the publish builder itself.
 ///
-/// The two arguments ride as the adapter's [base headers](Publisher::base_headers) ([`QOS_HEADER`]
-/// and [`RETAIN_HEADER`]), which the publisher consumes on the way to the wire, so they reach the
-/// send path without the adapter having to be the publisher itself - which is what lets it wrap a
-/// slot entry and keep the publish attributed. A message handed to [`Publisher::publish`] directly
-/// has not been through the builder that merges those headers, so the adapter applies them there
-/// too, under anything the caller set.
+/// Both arguments MQTT carries on a PUBLISH packet are reopened at the call site:
+/// `out.message(&state).retain(true).publish()`. The steps sit on the builder rather than
+/// wrapping the publisher, so the publish still leaves through the mount site's own entry - with
+/// the codec that entry named, and attributed to the slot it belongs to.
+///
+/// The bound is on the sink's [options type](Publisher::Options), so these steps appear on a
+/// builder over an MQTT publisher and on no other broker's. A handler body that takes one imports
+/// this crate's prelude and bounds its slot with
+/// `Out<impl Publisher<Options = MqttPublishOptions>, Marker>`; everywhere else - a startup hook,
+/// a test - the steps are already there on the builder the publisher hands out.
 ///
 /// # Examples
 ///
 /// ```
 /// use ruststream::runtime::PublishExt;
 /// use ruststream::{Outgoing, Serialized};
-/// use ruststream_rumqttc::{MqttBroker, MqttPublishOptions, Qos};
+/// use ruststream_rumqttc::prelude::*;
 ///
 /// // An MQTT state is bytes on the wire rather than an encoded model, so the type carries its
 /// // own bytes and no codec runs on them.
@@ -197,77 +180,41 @@ impl<M: OutSlot, W: MqttPublishOptions, E: Send + Sync, Pipe: OutPipeline, Body>
 /// # async fn demo() -> Result<(), Box<dyn std::error::Error>> {
 /// let publisher = MqttBroker::new("mqtt://localhost:1883", "states").publisher();
 /// publisher
-///     .with_retain(true)
-///     .with_qos(Qos::ExactlyOnce)
 ///     .message(&DeviceState(b"online".to_vec()))
+///     .retain(true)
+///     .qos(Qos::ExactlyOnce)
 ///     .publish()
 ///     .await?;
 /// # Ok(())
 /// # }
 /// ```
-#[must_use]
-pub struct MqttPublishOverride<'a, P: ?Sized> {
-    inner: &'a P,
-    base: HeaderMap,
+pub trait MqttPublishSteps {
+    /// Sends this one message at `qos` instead of the publisher's own.
+    #[must_use]
+    fn qos(self, qos: Qos) -> Self;
+
+    /// Sends this one message retained (or explicitly not retained), whatever the publisher's
+    /// policy declares.
+    #[must_use]
+    fn retain(self, retain: bool) -> Self;
 }
 
-impl<'a, P: Publisher + ?Sized> MqttPublishOverride<'a, P> {
-    fn new(inner: &'a P) -> Self {
-        // Seeded from the wrapped handle so its own base survives the adapter.
-        Self {
-            inner,
-            base: inner.base_headers().cloned().unwrap_or_default(),
-        }
-    }
-}
-
-// Refining an adapter consumes it rather than borrowing it, so the two arguments compose into a
-// value that outlives the expression: the borrow it carries is still the publisher's own.
-impl<P: ?Sized> MqttPublishOverride<'_, P> {
-    /// Also sends with `qos` instead of the publisher's own.
-    pub fn with_qos(mut self, qos: Qos) -> Self {
-        self.base.insert(QOS_HEADER, qos.as_header());
+impl<Sink, Body, Enc, Hdrs, Dest> MqttPublishSteps for PublishBuilder<Sink, Body, Enc, Hdrs, Dest>
+where
+    Sink: PublishSink<Options = MqttPublishOptions>,
+{
+    fn qos(mut self, qos: Qos) -> Self {
+        self.options_mut()
+            .get_or_insert_with(MqttPublishOptions::default)
+            .qos = Some(qos);
         self
     }
 
-    /// Also sends retained (or explicitly not retained).
-    pub fn with_retain(mut self, retain: bool) -> Self {
-        self.base
-            .insert(RETAIN_HEADER, if retain { "true" } else { "false" });
+    fn retain(mut self, retain: bool) -> Self {
+        self.options_mut()
+            .get_or_insert_with(MqttPublishOptions::default)
+            .retain = Some(retain);
         self
-    }
-}
-
-impl<P: ?Sized> fmt::Debug for MqttPublishOverride<'_, P> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("MqttPublishOverride")
-            .field("base_headers", &self.base)
-            .finish_non_exhaustive()
-    }
-}
-
-impl<P: Publisher + ?Sized> Publisher for MqttPublishOverride<'_, P> {
-    type Error = P::Error;
-
-    async fn publish(&self, msg: OutgoingMessage<'_>) -> Result<(), Self::Error> {
-        let missing: Vec<(&str, &[u8])> = self
-            .base
-            .iter()
-            .filter(|(name, _)| !msg.headers().contains(name))
-            .collect();
-        if missing.is_empty() {
-            // The builder already merged the base in; nothing to add and nothing to copy.
-            return self.inner.publish(msg).await;
-        }
-        let mut headers = msg.headers().clone();
-        for (name, value) in missing {
-            headers.insert(name, Bytes::copy_from_slice(value));
-        }
-        self.inner.publish(msg.with_headers(headers)).await
-    }
-
-    fn base_headers(&self) -> Option<&HeaderMap> {
-        Some(&self.base)
     }
 }
 
@@ -308,6 +255,18 @@ impl MqttPublish {
     pub(crate) fn into_publisher(self, cell: CoreCell) -> MqttPublisher {
         MqttPublisher::new(cell, self.qos, self.retain)
     }
+
+    /// The quality of service this policy publishes at.
+    #[cfg(feature = "testing")]
+    pub(crate) const fn qos_value(self) -> Qos {
+        self.qos
+    }
+
+    /// Whether this policy publishes retained.
+    #[cfg(feature = "testing")]
+    pub(crate) const fn retain_value(self) -> bool {
+        self.retain
+    }
 }
 
 impl PublishPolicy<ConnectedMqttBroker> for MqttPublish {
@@ -321,109 +280,104 @@ impl PublishPolicy<ConnectedMqttBroker> for MqttPublish {
     }
 }
 
+/// The same policy pairs against the in-process broker, so a routes file mounts on both brokers as
+/// written - the destination, the codec and the slot it is attached to are the mount site's, and
+/// none of them changes with the transport underneath.
+///
+/// The quality of service survives the pairing, because it is what says whether a subscriber can
+/// settle the delivery at all: publish at [`Qos::AtMostOnce`] in process and the handler meets the
+/// same [`AckError::Unsupported`](ruststream::AckError::Unsupported) a server would have produced.
+/// The retain flag stops here - nothing in process keeps a last message per topic - and neither
+/// argument is recorded as a header, because on the wire the publisher consumes them, so a
+/// delivery here carries exactly what a subscriber would see. A test on this transport therefore
+/// says what was published, where, and whether it could be acknowledged; that it was retained, or
+/// that the acknowledgement completed a protocol handshake, is the live suite's to check.
+#[cfg(feature = "testing")]
+impl PublishPolicy<ConnectedMqttTestBroker> for MqttPublish {
+    type Live = MqttTestPublisher;
+
+    fn pair(
+        self,
+        connected: &ConnectedMqttTestBroker,
+    ) -> impl Future<Output = Result<Self::Live, PairError>> {
+        ready(Ok(connected.publisher_with(self)))
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use ruststream::runtime::PublishExt;
+    use ruststream::{Outgoing, Serialized};
+
     use super::*;
     use crate::broker::MqttBroker;
 
     fn publisher() -> MqttPublisher {
-        MqttBroker::new("mqtt://localhost:1883", "overrides").publisher()
+        MqttBroker::new("mqtt://localhost:1883", "arguments").publisher()
     }
 
-    /// What the adapter carries is what its base headers say, since that is the whole of what
-    /// reaches the send path.
-    fn carried<'a, P: Publisher + ?Sized>(
-        adapter: &'a MqttPublishOverride<'_, P>,
-    ) -> (Option<&'a str>, Option<&'a str>) {
-        let base = adapter.base_headers().expect("the adapter states a base");
-        (base.get_str(QOS_HEADER), base.get_str(RETAIN_HEADER))
-    }
+    /// A payload that carries its own bytes, so a builder can be assembled without a codec in
+    /// the picture: what these tests read is the options the steps wrote, not an encoding.
+    #[derive(Outgoing, Serialized)]
+    #[outgoing(name = "devices/dev42/state")]
+    struct DeviceState(Vec<u8>);
 
-    #[test]
-    fn an_override_starts_from_the_publisher_and_composes_in_either_order() {
-        let publisher = publisher();
-
-        let retained = publisher.with_retain(true);
-        assert_eq!(carried(&retained), (None, Some("true")));
-
-        let both = retained.with_qos(Qos::ExactlyOnce);
-        assert_eq!(
-            carried(&both),
-            (Some("2"), Some("true")),
-            "the earlier argument survives the later one"
-        );
-
-        let reversed = publisher.with_qos(Qos::ExactlyOnce).with_retain(true);
-        assert_eq!(carried(&reversed), (Some("2"), Some("true")));
+    fn state() -> DeviceState {
+        DeviceState(b"online".to_vec())
     }
 
     #[test]
-    fn an_untouched_argument_is_left_for_the_publisher_policy() {
-        let publisher = publisher();
+    fn a_call_that_names_nothing_publishes_entirely_under_the_policy() {
         assert_eq!(
-            carried(&publisher.with_qos(Qos::AtMostOnce)),
-            (Some("0"), None),
-            "an argument the call does not name is not stated at all"
+            MqttPublishOptions::resolve(None, Qos::AtLeastOnce, false),
+            (Qos::AtLeastOnce, false),
+            "a reply and a deferred redelivery arrive here with no call site at all"
         );
     }
 
-    /// Stands in for the wrapped publisher so a test can read the message the adapter handed on.
-    #[derive(Default)]
-    struct Recorder(std::sync::Mutex<Option<HeaderMap>>);
-
-    impl Recorder {
-        fn seen(&self) -> HeaderMap {
-            self.0
-                .lock()
-                .expect("recorder mutex poisoned")
-                .clone()
-                .expect("a message reached the publisher")
-        }
-    }
-
-    impl Publisher for Recorder {
-        type Error = MqttError;
-
-        fn publish(&self, msg: OutgoingMessage<'_>) -> impl Future<Output = Result<(), MqttError>> {
-            *self.0.lock().expect("recorder mutex poisoned") = Some(msg.headers().clone());
-            ready(Ok(()))
-        }
-    }
-
-    impl MqttPublishOptions for Recorder {}
-
-    #[tokio::test]
-    async fn an_override_applies_its_arguments_to_a_message_built_outside_the_builder() {
-        let recorder = Recorder::default();
-        let mut headers = HeaderMap::new();
-        headers.insert("x-tenant", "acme");
-        let msg =
-            OutgoingMessage::new("devices/dev42/state", b"online".as_slice()).with_headers(headers);
-
-        recorder
-            .with_retain(true)
-            .with_qos(Qos::ExactlyOnce)
-            .publish(msg)
-            .await
-            .expect("the recorder accepts everything");
-
-        let seen = recorder.seen();
-        assert_eq!(seen.get_str(QOS_HEADER), Some("2"));
-        assert_eq!(seen.get_str(RETAIN_HEADER), Some("true"));
+    #[test]
+    fn a_named_argument_wins_and_an_unnamed_one_keeps_the_policy_value() {
+        let options = MqttPublishOptions::default().retain(true);
         assert_eq!(
-            seen.get_str("x-tenant"),
-            Some("acme"),
-            "the caller's own headers survive"
+            MqttPublishOptions::resolve(Some(&options), Qos::ExactlyOnce, false),
+            (Qos::ExactlyOnce, true),
+            "the quality of service the call left alone is still the policy's"
+        );
+    }
+
+    #[test]
+    fn the_steps_compose_in_either_order() {
+        let publisher = publisher();
+        let state = state();
+        let expected = MqttPublishOptions::default()
+            .qos(Qos::ExactlyOnce)
+            .retain(true);
+
+        let mut forward = publisher.message(&state).qos(Qos::ExactlyOnce).retain(true);
+        assert_eq!(*forward.options_mut(), Some(expected));
+
+        let mut reversed = publisher.message(&state).retain(true).qos(Qos::ExactlyOnce);
+        assert_eq!(*reversed.options_mut(), Some(expected));
+    }
+
+    #[test]
+    fn a_builder_no_step_touched_carries_no_options() {
+        let publisher = publisher();
+        let state = state();
+        let mut plain = publisher.message(&state);
+        assert_eq!(
+            *plain.options_mut(),
+            None,
+            "nothing to resolve means the policy is the whole answer"
         );
     }
 
     #[tokio::test]
-    async fn an_override_reports_the_missing_connection_like_the_publisher() {
+    async fn a_publish_before_connect_reports_the_missing_connection() {
         let publisher = publisher();
         let msg = OutgoingMessage::new("devices/dev42/state", b"online".as_slice());
         let error = publisher
-            .with_retain(true)
-            .publish(msg)
+            .publish(msg, Some(&MqttPublishOptions::default().retain(true)))
             .await
             .expect_err("nothing is connected yet");
         assert!(matches!(error, MqttError::NotConnected));

@@ -1,12 +1,14 @@
 //! The imports a routes file on MQTT writes every time, in one glob.
 //!
 //! Carries the framework's own prelude plus this crate's surface: the broker, the subscription
-//! descriptor and its quality of service, the publish policy as [`Publish`], and the per-publish
-//! steps.
+//! descriptor and its quality of service, the publish policy as [`Publish`], and the per-message
+//! publish steps.
 //!
-//! A handler file needs none of it: a body binds its injected publisher with a capability trait
-//! and names no broker type, so it imports the framework's prelude alone. This glob is the mount
-//! site's, and importing it is the statement of which broker the routes run on.
+//! A handler file usually needs none of it: a body binds its injected publisher with a capability
+//! trait and names no broker type, so it imports the framework's prelude alone. This glob is the
+//! mount site's, and importing it is the statement of which broker the routes run on. The one
+//! exception is a body that adjusts a per-message setting: it names [`MqttPublishOptions`] in its
+//! slot bound and takes a step from [`MqttPublishSteps`], both of which arrive here.
 //!
 //! A file that mixes two brokers imports the prefixed [`MqttPublish`](crate::MqttPublish) from
 //! the crate root instead.
@@ -31,7 +33,9 @@ pub use ruststream::prelude::*;
 // Policies are re-exported under their broker-agnostic concept name; keep the alias when adding
 // one. The name is this glob's to give: a handler bounds its slot with a capability trait through
 // the framework's prelude, and never sees this one.
-pub use crate::{MqttBroker, MqttPublish as Publish, MqttPublishOptions, MqttTopic, Qos};
+pub use crate::{
+    MqttBroker, MqttPublish as Publish, MqttPublishOptions, MqttPublishSteps, MqttTopic, Qos,
+};
 
 // Capability manifest deliberately empty. Of the framework's optional capabilities MQTT
 // implements only `BatchSubscriber` (see the capability table in docs/mqtt.md), and the manifest
@@ -40,8 +44,8 @@ pub use crate::{MqttBroker, MqttPublish as Publish, MqttPublishOptions, MqttTopi
 
 // Deliberately absent, do not add:
 // - `testing`: feature-gated broker-author tooling, imported by the tests that use it.
-// - `MqttMessage`, `MqttSubscriber`, `MqttPublisher`, `MqttPublishOverride`,
-//   `ConnectedMqttBroker`: a service reaches these through the framework's own surfaces.
+// - `MqttMessage`, `MqttSubscriber`, `MqttPublisher`, `ConnectedMqttBroker`: a service reaches
+//   these through the framework's own surfaces.
 // - `MqttError`: named where it is handled.
 
 #[cfg(test)]

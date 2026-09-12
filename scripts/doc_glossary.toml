@@ -1,0 +1,352 @@
+# Locked renderings for the documentation's terms of art.
+#
+# A machine translation of technical prose does not fail by producing unreadable text; it
+# fails by rendering a term of art with a dictionary synonym, so that two pages of the same
+# site name the same concept differently and the reader cannot tell whether a distinction is
+# meant. Each term below therefore has exactly one rendering per language, and
+# `scripts/check_doc_i18n.py` enforces it: where the English page uses a listed term, the
+# translated page has to use the locked equivalent.
+#
+# Fields:
+#   en        the English term, matched case-insensitively on word boundaries
+#   en_match  optional regex replacing that default match (for irregular plurals or spellings)
+#   ru, zh    the locked rendering, and what a translator must write
+#   ru_match  optional regex accepting inflected forms of the Russian rendering
+#   zh_match  optional regex, same purpose, rarely needed
+#
+# A pattern for a term of two or more words writes `\s+` between them rather than a space:
+# pages are hard-wrapped, so the phrase the check is looking for is regularly split across two
+# lines, and a literal space reports a page that renders the term correctly.
+#
+# A term kept in Latin script in a target language is a deliberate choice, not an oversight:
+# `ack`, `trait` and `crate` are what Russian and Chinese Rust texts actually write, and
+# replacing them with a translated coinage would make the page harder to read, not easier.
+#
+# Adding a term here is cheap and retroactive: the check reports every existing translated
+# page that does not yet honour it, so add terms only once their rendering is settled.
+#
+# Which word a concept gets is decided by whose concept it is. A concept that belongs to MQTT
+# is named with the term the MQTT 5 specification and its Russian and Chinese literature use,
+# because the reader arrives here from a broker's own documentation and has to recognize what
+# is being described. A concept that belongs to the framework keeps the core's term, taken
+# from the core's glossary and its translated guides, because the same concept is explained
+# there once for every broker. The first block below is the core's list, copied unchanged; the
+# second is this crate's own.
+#
+# Where the two collide, the broker keeps the plain word and the framework's concept is
+# qualified rather than renamed: in Russian a `batch` is «пакет» and an MQTT packet is
+# «пакет протокола». Chinese has no collision to settle, 报文 and 批次 being separate words.
+
+[[term]]
+en = "ack"
+ru = "ack"
+zh = "ack"
+
+[[term]]
+en = "nack"
+ru = "nack"
+zh = "nack"
+
+[[term]]
+en = "broker"
+en_match = "brokers?"
+ru = "брокер"
+ru_match = "брокер"
+zh = "Broker"
+zh_match = "(?i)broker"
+
+[[term]]
+en = "subscriber"
+en_match = "subscribers?"
+ru = "подписчик"
+ru_match = "подписчик"
+zh = "订阅者"
+
+[[term]]
+en = "publisher"
+en_match = "publishers?"
+ru = "издатель"
+ru_match = "издател"
+zh = "发布者"
+
+[[term]]
+en = "capability"
+en_match = "capabilit(y|ies)"
+ru = "совместимость"
+ru_match = "совместимост"
+zh = "能力"
+
+[[term]]
+en = "batch"
+en_match = "batch(es|ed|ing)?"
+ru = "пакет"
+ru_match = "пакет"
+zh = "批"
+
+[[term]]
+en = "subscription"
+en_match = "subscriptions?"
+ru = "подписка"
+ru_match = "подписк"
+zh = "订阅"
+
+[[term]]
+en = "handler"
+en_match = "handlers?"
+ru = "обработчик"
+ru_match = "обработчик"
+zh = "处理器"
+
+[[term]]
+en = "message"
+en_match = "messages?"
+ru = "сообщение"
+ru_match = "сообщени"
+zh = "消息"
+
+[[term]]
+en = "middleware"
+ru = "middleware"
+zh = "中间件"
+
+[[term]]
+en = "router"
+en_match = "routers?"
+ru = "роутер"
+ru_match = "роутер"
+zh = "路由器"
+
+[[term]]
+en = "codec"
+en_match = "codecs?"
+ru = "кодек"
+ru_match = "кодек"
+zh = "编解码器"
+
+[[term]]
+en = "back-pressure"
+en_match = "back[- ]?pressure"
+ru = "обратное давление"
+ru_match = "обратн\\w* давлени"
+zh = "背压"
+
+[[term]]
+en = "at-least-once"
+ru = "at-least-once"
+zh = "至少一次"
+
+[[term]]
+en = "at-most-once"
+ru = "at-most-once"
+zh = "至多一次"
+
+[[term]]
+en = "cancel safety"
+en_match = "cancel[- ]safe(ty)?"
+ru = "безопасность при отмене"
+ru_match = "безопасн\\w* при отмене"
+zh = "取消安全"
+
+[[term]]
+en = "compile time"
+en_match = "compile[- ]time"
+ru = "время компиляции"
+ru_match = "компиляци"
+zh = "编译期"
+zh_match = "编译(期|时)"
+
+[[term]]
+en = "zero-cost"
+ru = "zero-cost"
+zh = "零成本"
+
+[[term]]
+en = "trait"
+en_match = "traits?"
+ru = "трейт"
+ru_match = "трейт"
+zh = "trait"
+
+[[term]]
+en = "crate"
+en_match = "crates?"
+ru = "крейт"
+ru_match = "крейт"
+zh = "crate"
+
+[[term]]
+en = "typestate"
+ru = "typestate"
+zh = "typestate"
+
+# This crate's own list starts here: MQTT's concepts in the word its specification and its
+# Russian and Chinese literature use, then the framework terms these pages lean on that the
+# core's list above does not carry yet.
+
+[[term]]
+en = "topic"
+en_match = "topics?"
+ru = "тема"
+ru_match = "тем[аыуео]"
+zh = "主题"
+
+[[term]]
+en = "topic filter"
+en_match = "topic\\s+filters?"
+ru = "фильтр темы"
+ru_match = "фильтр\\w*\\s+тем"
+zh = "主题过滤器"
+
+[[term]]
+en = "wildcard"
+en_match = "wildcards?"
+ru = "подстановочный знак"
+ru_match = "подстановочн"
+zh = "通配符"
+
+[[term]]
+en = "quality of service"
+en_match = "quality\\s+of\\s+service"
+ru = "качество обслуживания"
+ru_match = "качеств\\w*\\s+обслуживания"
+zh = "服务质量"
+
+[[term]]
+en = "retained message"
+en_match = "retained"
+ru = "сохранённое сообщение"
+ru_match = "сохран"
+zh = "保留消息"
+zh_match = "保留"
+
+[[term]]
+en = "will message"
+en_match = "last\\s+wills?|will\\s+messages?"
+ru = "последняя воля"
+ru_match = "последн\\w*\\s+вол"
+zh = "遗嘱消息"
+zh_match = "遗嘱"
+
+[[term]]
+en = "persistent session"
+en_match = "persistent\\s+sessions?"
+ru = "постоянная сессия"
+ru_match = "постоянн\\w*\\s+сесси"
+zh = "持久会话"
+
+[[term]]
+en = "shared subscription"
+en_match = "shared\\s+subscriptions?"
+ru = "совместная подписка"
+ru_match = "совместн\\w*\\s+подписк"
+zh = "共享订阅"
+
+[[term]]
+en = "share group"
+en_match = "shared?\\s+groups?"
+ru = "группа совместной подписки"
+ru_match = "групп"
+zh = "共享组"
+zh_match = "共享组|组"
+
+# The collision the header names: a `batch` is «пакет», so the packet gets the qualifier.
+[[term]]
+en = "packet"
+en_match = "packets?"
+ru = "пакет протокола"
+ru_match = "пакет\\w*\\s+протокола"
+zh = "报文"
+
+[[term]]
+en = "keep-alive"
+en_match = "keep[-\\s]alive"
+ru = "keep-alive"
+zh = "keep-alive"
+
+[[term]]
+en = "flow control"
+en_match = "flow\\s+control"
+ru = "управление потоком"
+ru_match = "управлени\\w*\\s+потоком"
+zh = "流量控制"
+
+[[term]]
+en = "acknowledgement"
+en_match = "acknowledge\\w*"
+ru = "подтверждение"
+ru_match = "подтвержд"
+zh = "确认"
+
+[[term]]
+en = "settle"
+en_match = "settl(e|es|ed|ing|ement)"
+ru = "завершение доставки"
+ru_match = "заверш"
+zh = "结算"
+
+[[term]]
+en = "mount site"
+en_match = "mount\\s+sites?"
+ru = "точка монтирования"
+ru_match = "точк\\w*\\s+монтирования"
+zh = "挂载点"
+
+[[term]]
+en = "harness"
+ru = "обвязка"
+ru_match = "обвязк"
+zh = "测试套件"
+
+[[term]]
+en = "partition"
+en_match = "partitions?"
+ru = "партиция"
+ru_match = "партиц"
+zh = "分区"
+
+[[term]]
+en = "slot"
+en_match = "slots?"
+ru = "слот"
+zh = "槽位"
+
+[[term]]
+en = "redelivery"
+en_match = "redeliver\\w*"
+ru = "повторная доставка"
+ru_match = "повторн"
+zh = "重新投递"
+
+[[term]]
+en = "descriptor"
+en_match = "descriptors?"
+ru = "дескриптор"
+zh = "描述符"
+
+[[term]]
+en = "scope"
+en_match = "scopes?"
+ru = "область"
+ru_match = "област"
+zh = "作用域"
+
+[[term]]
+en = "policy"
+en_match = "polic(y|ies)"
+ru = "политика"
+ru_match = "политик"
+zh = "策略"
+
+[[term]]
+en = "prelude"
+en_match = "preludes?"
+ru = "прелюдия"
+ru_match = "прелюди"
+zh = "prelude"
+
+[[term]]
+en = "in-process"
+en_match = "in[-\\s]process"
+ru = "внутрипроцессный"
+ru_match = "внутрипроцессн"
+zh = "进程内"

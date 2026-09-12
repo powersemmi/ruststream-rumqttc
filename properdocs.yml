@@ -63,6 +63,7 @@ markdown_extensions:
 
 hooks:
   - docs/hooks/snippet_titles.py
+  - docs/hooks/i18n_banner.py
 
 plugins:
   - search

@@ -72,7 +72,8 @@ plugins:
   #
   # English is normative; a page with no translation yet falls back to the English text inside
   # the localized site rather than disappearing from it, which is what lets translations land
-  # page by page. Nothing is translated yet, so today every locale serves the English pages.
+  # page by page. Both pages are translated into both locales, so the fallback carries nothing
+  # today; it is what keeps a new English page visible in `ru` and `zh` before it is translated.
   - i18n:
       docs_structure: folder
       fallback_to_default: true

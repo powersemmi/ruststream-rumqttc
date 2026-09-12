@@ -283,9 +283,9 @@ hook runs the publish once the broker is connected:
 Headers are sent as MQTT 5 user properties, so the crate invents no envelope format and non-Rust
 peers see plain MQTT messages. The well-known `content-type`, `reply-to` and `correlation-id`
 headers take the matching first-class properties instead (content type, response topic, correlation
-data), in both directions. A message with no headers is published with no properties at all, and
-the publisher consumes the two [per-message argument](#per-message-arguments) headers rather than
-sending them, so they do not count as headers for that rule.
+data), in both directions. A message with no headers is published with no properties at all: the
+[per-message arguments](#per-message-arguments) are not headers but fields of the PUBLISH packet,
+resolved over the policy's defaults before the packet is built.
 
 A responder is a plain handler: the incoming request carries its response topic in the `reply-to`
 header, and the handler reads `ctx.headers().reply_to()` and publishes the answer to that topic
@@ -323,11 +323,11 @@ subscription's, as on the wire - so a `QoS` 0 delivery reports `AckError::Unsupp
 as it does against Mosquitto, and a handler cannot quietly prove a guarantee nobody asked for.
 
 What the stand-in leaves out is the protocol itself: the acknowledgement exchange behind an
-acknowledged `QoS`, retained messages, and the session that redelivers. A policy's `retain` stops
-at the pairing for the same reason - nothing in process keeps a last message per topic. A test on
-this transport therefore says what a handler received, how it settled, and what it published where;
-the live suite against Eclipse Mosquitto, gated behind `MQTT_TEST_URL`, is what says the same
-answers hold on a wire. Message replay on a persistent session is one of those: a subscriber that
+acknowledged `QoS`, retained messages, and the session that redelivers. A `retain` flag resolves
+here and stops for the same reason: a test can still assert what a publish asked for, but nothing
+in process keeps a last message per topic. A test on this transport therefore says what a handler
+received, how it settled, and what it published where; the live suite against Eclipse Mosquitto,
+gated behind `MQTT_TEST_URL`, is what says the same answers hold on a wire. Message replay on a persistent session is one of those: a subscriber that
 disconnects and returns under the same client id receives what was published to its topic while it
 was away, and only the server run proves it.
 

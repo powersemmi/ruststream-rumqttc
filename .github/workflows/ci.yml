@@ -185,6 +185,10 @@ jobs:
       - name: Run integration + conformance against mosquitto
         env:
           MQTT_TEST_URL: mqtt://127.0.0.1:1883
+          # The gated tests skip themselves without the URL, so a renamed variable or a dropped
+          # env block would leave this job green having asserted nothing. With this set, a
+          # missing URL fails the suite instead of skipping it.
+          RUSTSTREAM_REQUIRE_LIVE: "1"
         run: >-
           cargo test --locked -p ruststream-rumqttc --all-features
           --test integration_mqtt

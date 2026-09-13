@@ -1,8 +1,8 @@
 //! The imports a routes file on MQTT writes every time, in one glob.
 //!
 //! Carries the framework's own prelude plus this crate's surface: the broker, the two
-//! subscription descriptors and their quality of service, the publish policy as [`Publish`], and
-//! the per-message publish steps.
+//! subscription descriptors and their quality of service, the publish policy as [`Publish`], the
+//! per-message publish steps, and the per-delivery context with its key.
 //!
 //! A handler file usually needs none of it: a body binds its injected publisher with a capability
 //! trait and names no broker type, so it imports the framework's prelude alone. This glob is the
@@ -34,8 +34,8 @@ pub use ruststream::prelude::*;
 // one. The name is this glob's to give: a handler bounds its slot with a capability trait through
 // the framework's prelude, and never sees this one.
 pub use crate::{
-    MqttBroker, MqttFilter, MqttPublish as Publish, MqttPublishOptions, MqttPublishSteps,
-    MqttTopic, Qos,
+    DeliveryTopic, MqttBroker, MqttContext, MqttFilter, MqttPublish as Publish, MqttPublishOptions,
+    MqttPublishSteps, MqttTopic, Qos,
 };
 
 // Capability manifest deliberately empty. Of the framework's optional capabilities MQTT

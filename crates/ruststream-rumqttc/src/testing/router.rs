@@ -37,6 +37,9 @@ pub(crate) struct SubscriptionId(u64);
 /// Single delivery handed to a matching subscriber.
 #[derive(Debug, Clone)]
 pub(crate) struct Delivery {
+    /// The topic the publish named, never the filter that matched it: a handler and a publish
+    /// transform read the concrete topic here exactly as they do on the wire.
+    pub(crate) topic: String,
     pub(crate) payload: Bytes,
     pub(crate) headers: HeaderMap,
     /// The quality of service the publish asked for. The subscription's own caps it, the way the
@@ -150,6 +153,7 @@ impl AddressRouter {
         }
 
         let delivery = Delivery {
+            topic: address.to_owned(),
             payload,
             headers,
             qos,

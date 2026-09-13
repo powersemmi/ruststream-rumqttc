@@ -29,6 +29,7 @@
 mod asyncapi;
 mod broker;
 mod conn;
+mod context;
 mod error;
 mod filter;
 mod message;
@@ -39,6 +40,7 @@ mod subscriber;
 pub mod testing;
 
 pub use broker::{ConnectedMqttBroker, MqttBroker};
+pub use context::{DeliveryTopic, MqttContext};
 pub use error::MqttError;
 pub use filter::{MqttFilter, MqttTopic, Qos};
 pub use message::MqttMessage;

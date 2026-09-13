@@ -834,3 +834,87 @@ async fn a_capped_registration_on_a_filter_dead_letters_the_spent_delivery() {
         .published::<Telemetry>(DEAD)
         .assert_called_once();
 }
+
+const FLEET: &str = "devices/+/deferred";
+const DEVICE_42: &str = "devices/42/deferred";
+const DEVICE_43: &str = "devices/43/deferred";
+
+/// Sends every copy back to the topic its delivery arrived on, which is what a filter
+/// subscription needs: its many topics have no single answer, and each message belongs to one.
+struct ToDeliveryTopic;
+
+impl<Options> PublishTransform<ForReply<MqttContext>, Options> for ToDeliveryTopic {
+    type Destination = Names;
+
+    fn apply(
+        &self,
+        out: &mut Outgoing<'_>,
+        _options: &mut Option<Options>,
+        cx: &PublishContext<'_, MqttContext>,
+    ) {
+        out.set_name(cx.context(DeliveryTopic).to_owned());
+    }
+}
+
+/// Defers the first delivery and settles the copy, reading the topic it arrived on so the
+/// registration's context type is the crate's.
+#[subscriber(MqttFilter::new("devices/+/deferred"))]
+async fn reconcile_per_device(
+    telemetry: &Telemetry,
+    ctx: &mut Context<'_, MqttContext>,
+) -> HandlerOutcome {
+    let _ = telemetry.temperature;
+    let attempt = ctx
+        .headers()
+        .get_str(RETRY_COUNT_HEADER)
+        .and_then(|count| count.parse::<u64>().ok())
+        .unwrap_or(0);
+    if attempt == 0 {
+        HandlerOutcome::retry_after(RETRY_DELAY)
+    } else {
+        HandlerOutcome::ack()
+    }
+}
+
+/// A filter reads many topics, so naming one at the mount site would send every copy to the same
+/// device. The transform names the destination per delivery instead, and the copy of a message
+/// published to one device's topic comes back on that device's topic.
+#[tokio::test(start_paused = true)]
+async fn a_naming_transform_returns_a_copy_to_the_topic_it_arrived_on() {
+    let app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(
+        MqttTestBroker::new(),
+        |b| {
+            b.include(reconcile_per_device)
+                .out_retry(Publish::default())
+                .transform(ToDeliveryTopic);
+        },
+    );
+
+    let tb = TestApp::start(app).await.expect("the harness starts");
+    tb.broker::<MqttTestBroker>()
+        .message(&Telemetry {
+            device: "42".to_owned(),
+            temperature: 21.5,
+        })
+        .to(DEVICE_42)
+        .publish()
+        .await
+        .expect("the injected reading is routed");
+    tb.advance(RETRY_DELAY)
+        .await
+        .expect("the deferred copy is published and handled");
+
+    tb.broker::<MqttTestBroker>()
+        .published::<Telemetry>(DEVICE_42)
+        .with_header(RETRY_COUNT_HEADER, "1");
+    tb.broker::<MqttTestBroker>()
+        .published::<Telemetry>(DEVICE_43)
+        .assert_not_called();
+    tb.broker::<MqttTestBroker>()
+        .published::<Telemetry>(FLEET)
+        .assert_not_called();
+    tb.broker::<MqttTestBroker>()
+        .subscriber(FLEET)
+        .assert_called(2)
+        .settled(HandlerOutcome::ack());
+}

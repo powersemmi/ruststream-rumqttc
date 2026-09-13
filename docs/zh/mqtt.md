@@ -172,6 +172,23 @@ glob 就够一个服务文件用：
 并点名那条订阅：服务在启动时就知道 `retry_after` 在这里无处可去，而不是让每一条延迟消息都丢在
 一次发往虚空的发布里。
 
+另一种做法是每次投递各点各的名。过滤器读许多主题，而每条消息只属于其中一个，所以把副本送回它自己
+那次投递到达的主题，它就回到那台设备，而不是回到为整个设备群选定的一个主题。这个主题在这个 Broker
+的投递上下文里，键是 `DeliveryTopic`：
+
+```rust
+--8<-- "crates/ruststream-rumqttc/examples/mqtt_retries.rs:naming_transform"
+```
+
+发布变换读的是这个上下文，所以处理器也要把它写出来：像上面那样用 `Ctx<DeliveryTopic>`，或者写一个
+`ctx: &mut Context<'_, MqttContext>` 参数。挂载点这时挂上这个发布变换，而不是点名主题：
+
+```rust
+--8<-- "crates/ruststream-rumqttc/examples/mqtt_retries.rs:naming_mount"
+```
+
+两种做法互斥：一条注册要么点名主题，要么挂一个命名发布变换，两个都写编译不过。
+
 `out_retry(policy)` 同时替换副本出去的那个发布者 - 否则用的是这个 Broker 的默认策略。这个位置
 就是一个普通槽位，所以它后面接的是槽位的那几步：`.codec(..)`、`.transform(..)` 和
 `.map_publisher(..)`。延迟副本带的是投递本身的字节，所以这里点名的编解码器只把位置解析出来，

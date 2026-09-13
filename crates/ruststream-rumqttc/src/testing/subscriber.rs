@@ -164,6 +164,12 @@ impl std::fmt::Debug for MqttTestMessage {
 }
 
 impl MqttTestMessage {
+    /// The topic this message was published to, never the filter that matched it.
+    #[must_use]
+    pub fn topic(&self) -> &str {
+        self.delivery.as_ref().map_or("", |d| d.topic.as_str())
+    }
+
     pub(crate) fn new(
         delivery: Delivery,
         acknowledges: bool,
@@ -235,6 +241,7 @@ mod tests {
     fn stand_in() -> MqttTestMessage {
         MqttTestMessage::new(
             Delivery {
+                topic: "conformance/settling".to_owned(),
                 payload: Bytes::from_static(b"{}"),
                 headers: HeaderMap::new(),
                 qos: Qos::AtLeastOnce,

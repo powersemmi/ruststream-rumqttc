@@ -194,6 +194,26 @@ that names neither a topic nor a publish transform refuses to start, naming the 
 service learns at startup that `retry_after` has nowhere to go, instead of losing every delayed
 message to a publish that went nowhere.
 
+The other way names the destination per delivery. A filter reads many topics and every message
+belongs to one of them, so a copy that goes back to the topic its own delivery arrived on returns
+to that device rather than to one topic chosen for the whole fleet. The topic is on the broker's
+per-delivery context, under the `DeliveryTopic` key:
+
+```rust
+--8<-- "crates/ruststream-rumqttc/examples/mqtt_retries.rs:naming_transform"
+```
+
+The transform reads that context, so the handler names it too: `Ctx<DeliveryTopic>` as above, or a
+`ctx: &mut Context<'_, MqttContext>` parameter. The mount site then composes the transform instead
+of naming a topic:
+
+```rust
+--8<-- "crates/ruststream-rumqttc/examples/mqtt_retries.rs:naming_mount"
+```
+
+The two forms are mutually exclusive: a registration names a topic or composes a naming transform,
+and doing both does not compile.
+
 `out_retry(policy)` also replaces the publisher the copies leave through, which is otherwise this
 broker's default policy. The position is an ordinary slot, so the steps after it are a slot's:
 `.codec(..)`, `.transform(..)` and `.map_publisher(..)`. The deferred copy carries the delivery's

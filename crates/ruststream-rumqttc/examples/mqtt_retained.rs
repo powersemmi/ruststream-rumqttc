@@ -42,7 +42,7 @@ struct States;
 ///
 /// Naming a per-message setting is the one thing that ties a body to a broker, and its signature
 /// says so - the options type is this crate's, and so is the prelude the file imports.
-#[subscriber(MqttTopic::new("devices/+/telemetry").qos(Qos::AtLeastOnce))]
+#[subscriber(MqttFilter::new("devices/+/telemetry").qos(Qos::AtLeastOnce))]
 async fn announce_state(
     telemetry: &Telemetry,
     Out(states): Out<impl Publisher<Options = MqttPublishOptions>, States>,
@@ -106,6 +106,8 @@ fn app() -> impl App {
             // is what one message changes.
             b.include(announce_state)
                 .out(States, Publish::default().qos(Qos::AtLeastOnce))
+                .out_retry(Publish::default())
+                .to("devices/retry/telemetry")
                 .build();
             // --8<-- [end:stepped_mount]
         },

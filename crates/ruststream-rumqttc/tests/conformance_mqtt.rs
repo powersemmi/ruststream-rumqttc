@@ -72,6 +72,33 @@ async fn mqtt_broker_passes_lifecycle() {
     .await;
 }
 
+/// What a descriptor that addresses its own copies promises: a publish to the address it reports
+/// reaches the subscription that reported it. `MqttTopic` reports the topic, share group and all,
+/// and this is what holds it to that.
+#[allow(clippy::redundant_closure, clippy::redundant_closure_for_method_calls)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_in_process_broker_passes_the_redelivery_address_suite() {
+    harness::redelivery_address(
+        MqttTestBroker::new,
+        |name| MqttTopic::new(name),
+        |connected| connected.publisher(),
+    )
+    .await;
+}
+
+/// The same promise against a server, which is where a retry copy actually travels.
+#[allow(clippy::redundant_closure, clippy::redundant_closure_for_method_calls)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mqtt_broker_passes_the_redelivery_address_suite() {
+    let Some(url) = test_url() else { return };
+    harness::redelivery_address(
+        || MqttBroker::new(url.clone(), format!("redelivery-{}", std::process::id())),
+        |name| MqttTopic::new(name),
+        |connected| connected.publisher(),
+    )
+    .await;
+}
+
 /// MQTT has no batch fetch, so the batches come off the client-side buffer. The suite is what says
 /// the delegation honours the size it is opened with, on the in-process transport - through the
 /// crate's own descriptor, the same one the live leg below opens with.

@@ -20,7 +20,7 @@ struct Reading {
 
 /// One call per batch, and the batch is exactly what the subscription delivered: the runtime
 /// never splits or merges one.
-#[subscriber(MqttTopic::new("devices/+/telemetry").qos(Qos::AtLeastOnce).shared("workers"))]
+#[subscriber(MqttFilter::new("devices/+/telemetry").qos(Qos::AtLeastOnce).shared("workers"))]
 async fn ingest(readings: &[Reading]) -> HandlerOutcome {
     for reading in readings {
         println!("{}: {}", reading.device, reading.temperature);
@@ -35,7 +35,9 @@ fn app() -> impl App {
         |b| {
             // The size is the one number a batch mount names. What closes a batch that never
             // reaches it - here, 20 milliseconds after its first delivery - is the crate's.
-            b.include(ingest.batch(nonzero!(64)));
+            b.include(ingest.batch(nonzero!(64)))
+                .out_retry(Publish::default())
+                .to("devices/retry/telemetry");
         },
     )
 }

@@ -7,12 +7,12 @@ use std::sync::{Arc, OnceLock};
 use bytes::Bytes;
 use ruststream::testing::{Coordinator, TestableBroker};
 use ruststream::{
-    Broker, ConnectedBroker, DefaultPublish, OutgoingMessage, Publisher, RawMessage,
-    RedeliveryAddress, Subscribe,
+    AddressedCopies, Broker, ConnectedBroker, DefaultPublish, OutgoingMessage, Publisher,
+    RawMessage, Subscribe,
 };
 
 use crate::error::MqttError;
-use crate::filter::{MqttTopic, Qos, redelivery_topic};
+use crate::filter::{MqttFilter, MqttTopic, Qos};
 use crate::publisher::{MqttPublish, MqttPublishOptions};
 use crate::testing::router::AddressRouter;
 use crate::testing::subscriber::MqttTestSubscriber;
@@ -141,11 +141,28 @@ impl ConnectedMqttTestBroker {
     ) -> impl Future<Output = Result<MqttTestSubscriber, MqttError>> {
         // Registering is a lock and a channel, so there is nothing to await here. The signature
         // stays the real one's, which waits for the broker's SUBACK.
-        ready(self.register(topic))
+        ready(
+            topic
+                .validate()
+                .and_then(|()| self.register(topic.into_filter())),
+        )
     }
 
-    fn register(&self, topic: MqttTopic) -> Result<MqttTestSubscriber, MqttError> {
-        topic.validate()?;
+    /// Opens a subscription for `filter`, mirroring
+    /// [`ConnectedMqttBroker::subscribe_filter`](crate::ConnectedMqttBroker::subscribe_filter).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MqttError::Invalid`] for a descriptor no broker would accept, and
+    /// [`MqttError::NotConnected`] once this broker has shut down.
+    pub fn subscribe_filter(
+        &self,
+        filter: MqttFilter,
+    ) -> impl Future<Output = Result<MqttTestSubscriber, MqttError>> {
+        ready(filter.validate().and_then(|()| self.register(filter)))
+    }
+
+    fn register(&self, topic: MqttFilter) -> Result<MqttTestSubscriber, MqttError> {
         self.state.ensure_open()?;
         let (filter, group, qos) = topic.into_parts();
         let (id, rx) = self.state.router.subscribe(filter, group);
@@ -174,15 +191,11 @@ impl ConnectedBroker for ConnectedMqttTestBroker {
 
 impl Subscribe for ConnectedMqttTestBroker {
     type Subscriber = MqttTestSubscriber;
+    /// The real broker's answer, so a registration composes the same way here.
+    type Copies = AddressedCopies;
 
     fn subscribe(&self, name: &str) -> impl Future<Output = Result<Self::Subscriber, Self::Error>> {
         self.subscribe_topic(MqttTopic::new(name))
-    }
-
-    /// The real broker's answer, so a registration bound with `out_retry` composes the same
-    /// way here.
-    fn redelivery_address(&self, name: &str) -> Option<RedeliveryAddress> {
-        redelivery_topic(name)
     }
 }
 

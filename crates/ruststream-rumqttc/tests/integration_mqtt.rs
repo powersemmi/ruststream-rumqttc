@@ -13,7 +13,7 @@ use ruststream::{
     PublishPolicy, Publisher, Serialized, Subscriber,
 };
 use ruststream_rumqttc::{
-    ConnectedMqttBroker, MqttBroker, MqttPublish, MqttPublishSteps, MqttTopic, Qos,
+    ConnectedMqttBroker, MqttBroker, MqttFilter, MqttPublish, MqttPublishSteps, MqttTopic, Qos,
 };
 
 const RECV_TIMEOUT: Duration = Duration::from_secs(15);
@@ -112,7 +112,7 @@ async fn wildcard_filters_match_and_report_the_real_topic() {
 
     let base = unique("devices");
     let mut subscriber = connected
-        .subscribe_topic(MqttTopic::new(format!("{base}/+/telemetry")))
+        .subscribe_filter(MqttFilter::new(format!("{base}/+/telemetry")))
         .await
         .expect("subscription opens");
 

@@ -13,14 +13,13 @@ use rumqttc::Transport;
 use rumqttc::v5::mqttbytes::v5::LastWill;
 use rumqttc::v5::{AsyncClient, MqttOptions};
 use ruststream::{
-    Broker, ConnectedBroker, DefaultPublish, DescribeServer, RedeliveryAddress, ServerSpec,
-    Subscribe,
+    AddressedCopies, Broker, ConnectedBroker, DefaultPublish, DescribeServer, ServerSpec, Subscribe,
 };
 use tokio::sync::{OnceCell, mpsc, oneshot};
 
 use crate::conn::{Conn, Shared, run};
 use crate::error::MqttError;
-use crate::filter::{MqttTopic, Qos, redelivery_topic};
+use crate::filter::{MqttFilter, MqttTopic, Qos};
 use crate::publisher::{MqttPublish, MqttPublisher};
 use crate::subscriber::MqttSubscriber;
 
@@ -337,10 +336,26 @@ impl ConnectedMqttBroker {
     ///
     /// # Errors
     ///
-    /// Returns [`MqttError`] when the descriptor is invalid, the broker rejects the filter,
-    /// or the broker is shut down.
+    /// Returns [`MqttError`] when the value is not a topic, the broker rejects it, or the broker
+    /// is shut down.
     pub async fn subscribe_topic(&self, topic: MqttTopic) -> Result<MqttSubscriber, MqttError> {
         topic.validate()?;
+        self.open(topic.into_filter()).await
+    }
+
+    /// Opens the subscription described by `filter` and waits for the broker's `SUBACK`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MqttError`] when the descriptor is invalid, the broker rejects the filter,
+    /// or the broker is shut down.
+    pub async fn subscribe_filter(&self, filter: MqttFilter) -> Result<MqttSubscriber, MqttError> {
+        filter.validate()?;
+        self.open(filter).await
+    }
+
+    /// The wire half both descriptors share, with validation already done.
+    async fn open(&self, topic: MqttFilter) -> Result<MqttSubscriber, MqttError> {
         self.shared.ensure_open()?;
 
         let wire_filter = topic.wire_filter();
@@ -404,15 +419,13 @@ impl ConnectedBroker for ConnectedMqttBroker {
 
 impl Subscribe for ConnectedMqttBroker {
     type Subscriber = MqttSubscriber;
+    /// A name written at the mount site is a topic, which is also the topic a publisher names, so
+    /// a deferred retry reaches the subscription that took it. A filter with `+` or `#` is
+    /// subscribe-only, and subscribing to one is what [`MqttFilter`] is for.
+    type Copies = AddressedCopies;
 
     async fn subscribe(&self, name: &str) -> Result<Self::Subscriber, Self::Error> {
         self.subscribe_topic(MqttTopic::new(name)).await
-    }
-
-    /// A concrete topic filter is also the topic a publisher names, so a deferred retry reaches
-    /// the subscription that reported it. A wildcard filter is subscribe-only and reports none.
-    fn redelivery_address(&self, name: &str) -> Option<RedeliveryAddress> {
-        redelivery_topic(name)
     }
 }
 

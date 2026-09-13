@@ -38,7 +38,7 @@ pub mod testing;
 
 pub use broker::{ConnectedMqttBroker, MqttBroker};
 pub use error::MqttError;
-pub use filter::{MqttTopic, Qos};
+pub use filter::{MqttFilter, MqttTopic, Qos};
 pub use message::MqttMessage;
 pub use publisher::{MqttPublish, MqttPublishOptions, MqttPublishSteps, MqttPublisher};
 pub use subscriber::MqttSubscriber;

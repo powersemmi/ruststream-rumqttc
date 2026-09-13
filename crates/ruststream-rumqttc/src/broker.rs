@@ -17,6 +17,8 @@ use ruststream::{
 };
 use tokio::sync::{OnceCell, mpsc, oneshot};
 
+#[cfg(feature = "asyncapi")]
+use crate::asyncapi::{self, MqttLastWill, MqttServer};
 use crate::conn::{Conn, Shared, run};
 use crate::error::MqttError;
 use crate::filter::{MqttFilter, MqttTopic, Qos};
@@ -290,19 +292,52 @@ impl Broker for MqttBroker {
     }
 }
 
+impl MqttBroker {
+    /// The session this broker opens, as the `mqtt` server binding describes it.
+    ///
+    /// Credentials are absent by construction: the binding carries the client identity and the
+    /// session settings, never the user name or the password. The last will contributes its
+    /// coordinates and not its payload, which is content rather than a coordinate.
+    #[cfg(feature = "asyncapi")]
+    fn server_binding(&self) -> ruststream::asyncapi::Bindings {
+        asyncapi::server(&MqttServer {
+            client_id: self.client_id.clone(),
+            clean_session: self.clean_start,
+            last_will: self
+                .last_will
+                .as_ref()
+                .map(|(topic, _payload, qos, retain)| MqttLastWill {
+                    topic: topic.clone(),
+                    qos: qos.level(),
+                    retain: *retain,
+                }),
+            keep_alive: self.keep_alive.map(|interval| interval.as_secs()),
+            session_expiry_interval: self.session_expiry,
+            maximum_packet_size: self.max_packet_size,
+        })
+    }
+}
+
 impl DescribeServer for MqttBroker {
-    /// Reports the host and port a client connects to, and nothing else. A URL's credentials
-    /// stay out of the generated document, which teams publish and share.
+    /// Reports the host and port a client connects to, the protocol version it speaks, and the
+    /// session settings the `mqtt` binding has room for. A URL's credentials stay out of the
+    /// generated document, which teams publish and share.
     ///
     /// The port is stated even where the URL leaves it out, because the protocol's default is
     /// what a reader of the document would otherwise have to know.
     fn describe_server(&self) -> ServerSpec {
         // A URL `connect` will reject still must not hold up the document, so the fallback keeps
         // the framework's stripped authority and drops the unusable port.
-        self.endpoint().map_or_else(
+        let spec = self.endpoint().map_or_else(
             |_| ServerSpec::from_url(&self.url, "mqtt"),
             |(host, port)| ServerSpec::new(format!("{host}:{port}"), "mqtt"),
-        )
+        );
+        // The crate speaks MQTT 5 and nothing else: user properties and shared subscriptions
+        // exist only there.
+        let spec = spec.protocol_version("5");
+        #[cfg(feature = "asyncapi")]
+        let spec = spec.bindings(self.server_binding());
+        spec
     }
 }
 

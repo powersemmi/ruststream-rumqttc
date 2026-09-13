@@ -13,11 +13,15 @@ use std::fmt;
 use std::future::{Future, ready};
 
 use rumqttc::v5::mqttbytes::{valid_filter, valid_topic};
+#[cfg(feature = "asyncapi")]
+use ruststream::asyncapi::Bindings;
 use ruststream::{
     AddressedCopies, FromName, NamedCopies, RedeliveryAddress, RedeliveryAddressed,
     SubscriptionSource,
 };
 
+#[cfg(feature = "asyncapi")]
+use crate::asyncapi;
 use crate::broker::ConnectedMqttBroker;
 use crate::error::MqttError;
 use crate::subscriber::MqttSubscriber;
@@ -43,6 +47,16 @@ impl Qos {
             Self::AtMostOnce => rumqttc::v5::mqttbytes::QoS::AtMostOnce,
             Self::AtLeastOnce => rumqttc::v5::mqttbytes::QoS::AtLeastOnce,
             Self::ExactlyOnce => rumqttc::v5::mqttbytes::QoS::ExactlyOnce,
+        }
+    }
+
+    /// The number the protocol and the `mqtt` binding both use for this guarantee.
+    #[cfg(feature = "asyncapi")]
+    pub(crate) const fn level(self) -> u8 {
+        match self {
+            Self::AtMostOnce => 0,
+            Self::AtLeastOnce => 1,
+            Self::ExactlyOnce => 2,
         }
     }
 }
@@ -208,6 +222,11 @@ impl MqttTopic {
         self.0.filter()
     }
 
+    #[cfg(feature = "asyncapi")]
+    pub(crate) const fn qos_value(&self) -> Qos {
+        self.0.qos_value()
+    }
+
     /// The descriptor as a filter, which is the form a subscription opens with on the wire.
     pub(crate) fn into_filter(self) -> MqttFilter {
         self.0
@@ -264,6 +283,19 @@ impl SubscriptionSource<ConnectedMqttBroker> for MqttTopic {
     async fn subscribe(self, connected: &ConnectedMqttBroker) -> Result<MqttSubscriber, MqttError> {
         connected.subscribe_topic(self).await
     }
+
+    /// The quality of service this subscription receives at, which is the consumer's own setting
+    /// and belongs to the operation rather than the channel.
+    #[cfg(feature = "asyncapi")]
+    fn operation_bindings(&self) -> Bindings {
+        asyncapi::receive_operation(self.qos_value())
+    }
+
+    /// The MQTT 5 properties every delivery on this subscription is mapped through.
+    #[cfg(feature = "asyncapi")]
+    fn message_bindings(&self) -> Bindings {
+        asyncapi::message()
+    }
 }
 
 /// The plain topic, never the share group's wire form: `$share/<group>/<topic>` is a
@@ -289,6 +321,19 @@ impl SubscriptionSource<ConnectedMqttBroker> for MqttFilter {
 
     async fn subscribe(self, connected: &ConnectedMqttBroker) -> Result<MqttSubscriber, MqttError> {
         connected.subscribe_filter(self).await
+    }
+
+    /// The quality of service this subscription receives at, which is the consumer's own setting
+    /// and belongs to the operation rather than the channel.
+    #[cfg(feature = "asyncapi")]
+    fn operation_bindings(&self) -> Bindings {
+        asyncapi::receive_operation(self.qos_value())
+    }
+
+    /// The MQTT 5 properties every delivery on this subscription is mapped through.
+    #[cfg(feature = "asyncapi")]
+    fn message_bindings(&self) -> Bindings {
+        asyncapi::message()
     }
 }
 
@@ -319,6 +364,19 @@ impl SubscriptionSource<ConnectedMqttTestBroker> for MqttTopic {
     ) -> Result<MqttTestSubscriber, MqttError> {
         connected.subscribe_topic(self).await
     }
+
+    /// The quality of service this subscription receives at, which is the consumer's own setting
+    /// and belongs to the operation rather than the channel.
+    #[cfg(feature = "asyncapi")]
+    fn operation_bindings(&self) -> Bindings {
+        asyncapi::receive_operation(self.qos_value())
+    }
+
+    /// The MQTT 5 properties every delivery on this subscription is mapped through.
+    #[cfg(feature = "asyncapi")]
+    fn message_bindings(&self) -> Bindings {
+        asyncapi::message()
+    }
 }
 
 /// The same answer as against a server, so a registration starts on both brokers or on neither.
@@ -346,6 +404,19 @@ impl SubscriptionSource<ConnectedMqttTestBroker> for MqttFilter {
         connected: &ConnectedMqttTestBroker,
     ) -> Result<MqttTestSubscriber, MqttError> {
         connected.subscribe_filter(self).await
+    }
+
+    /// The quality of service this subscription receives at, which is the consumer's own setting
+    /// and belongs to the operation rather than the channel.
+    #[cfg(feature = "asyncapi")]
+    fn operation_bindings(&self) -> Bindings {
+        asyncapi::receive_operation(self.qos_value())
+    }
+
+    /// The MQTT 5 properties every delivery on this subscription is mapped through.
+    #[cfg(feature = "asyncapi")]
+    fn message_bindings(&self) -> Bindings {
+        asyncapi::message()
     }
 }
 

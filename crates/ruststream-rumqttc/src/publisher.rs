@@ -5,9 +5,13 @@ use std::future::{Future, ready};
 
 use bytes::Bytes;
 use rumqttc::v5::mqttbytes::valid_topic;
+#[cfg(feature = "asyncapi")]
+use ruststream::asyncapi::Bindings;
 use ruststream::runtime::{PublishBuilder, PublishSink};
 use ruststream::{OutgoingMessage, PairError, PublishPolicy, Publisher};
 
+#[cfg(feature = "asyncapi")]
+use crate::asyncapi;
 use crate::broker::{ConnectedMqttBroker, CoreCell};
 use crate::error::MqttError;
 use crate::filter::Qos;
@@ -278,6 +282,26 @@ impl PublishPolicy<ConnectedMqttBroker> for MqttPublish {
     ) -> impl Future<Output = Result<Self::Live, PairError>> {
         ready(Ok(connected.publisher_with(self)))
     }
+
+    /// What every packet this policy sends carries: the quality of service and the retain flag,
+    /// which the `mqtt` binding puts on the operation.
+    #[cfg(feature = "asyncapi")]
+    fn operation_bindings(&self) -> Bindings {
+        asyncapi::send_operation(self.qos, self.retain)
+    }
+
+    /// The MQTT 5 properties every message this policy sends is mapped through.
+    #[cfg(feature = "asyncapi")]
+    fn message_bindings(&self) -> Bindings {
+        asyncapi::message()
+    }
+
+    /// The crate answers a request through the Response Topic property, which arrives as the
+    /// `reply-to` header, so that is where a client reads the address of its answer.
+    #[cfg(feature = "asyncapi")]
+    fn reply_address_location(&self) -> Option<&'static str> {
+        Some(asyncapi::REPLY_ADDRESS_LOCATION)
+    }
 }
 
 /// The same policy pairs against the in-process broker, so a routes file mounts on both brokers as
@@ -301,6 +325,26 @@ impl PublishPolicy<ConnectedMqttTestBroker> for MqttPublish {
         connected: &ConnectedMqttTestBroker,
     ) -> impl Future<Output = Result<Self::Live, PairError>> {
         ready(Ok(connected.publisher_with(self)))
+    }
+
+    /// What every packet this policy sends carries: the quality of service and the retain flag,
+    /// which the `mqtt` binding puts on the operation.
+    #[cfg(feature = "asyncapi")]
+    fn operation_bindings(&self) -> Bindings {
+        asyncapi::send_operation(self.qos, self.retain)
+    }
+
+    /// The MQTT 5 properties every message this policy sends is mapped through.
+    #[cfg(feature = "asyncapi")]
+    fn message_bindings(&self) -> Bindings {
+        asyncapi::message()
+    }
+
+    /// The crate answers a request through the Response Topic property, which arrives as the
+    /// `reply-to` header, so that is where a client reads the address of its answer.
+    #[cfg(feature = "asyncapi")]
+    fn reply_address_location(&self) -> Option<&'static str> {
+        Some(asyncapi::REPLY_ADDRESS_LOCATION)
     }
 }
 

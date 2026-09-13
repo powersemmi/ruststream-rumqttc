@@ -25,6 +25,8 @@
 
 #![forbid(unsafe_code)]
 
+#[cfg(feature = "asyncapi")]
+mod asyncapi;
 mod broker;
 mod conn;
 mod error;

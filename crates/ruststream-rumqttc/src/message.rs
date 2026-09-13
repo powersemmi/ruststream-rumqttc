@@ -111,12 +111,34 @@ impl IncomingMessage for MqttMessage {
     }
 }
 
+/// Whether a media type names text on the wire.
+///
+/// The MQTT 5 payload format indicator is a two-valued answer - unspecified bytes or UTF-8 - so
+/// the question is only whether the media type is a textual one. JSON is, whatever vendor prefix
+/// it carries, and so is every `text/` subtype; everything else is bytes as far as the protocol
+/// is concerned. Parameters after `;` (a charset) say nothing about that and are dropped.
+fn is_text_media_type(content_type: &str) -> bool {
+    let media = content_type
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    media.starts_with("text/") || media == "application/json" || media.ends_with("+json")
+}
+
 /// Builds the wire properties of an outgoing message from its headers.
 ///
 /// `None` when the message carries no headers at all, so a plain message stays property-free on
-/// the wire. The quality of service and the retain flag are not here: they are protocol fields of
-/// the PUBLISH packet, carried as
+/// the wire and takes the protocol's own defaults. The quality of service and the retain flag are
+/// not here: they are protocol fields of the PUBLISH packet, carried as
 /// [`MqttPublishOptions`](crate::MqttPublishOptions) and resolved before the packet is built.
+///
+/// The payload format indicator is decided here rather than declared anywhere, because it follows
+/// the media type of this message, which the codec of the publish position produced and wrote into
+/// the `content-type` header. A message whose media type is textual is published as UTF-8 (`1`),
+/// every other one as unspecified bytes (`0`), and the same header fills the MQTT 5 content type
+/// property, so a non-Rust peer reads both from the packet.
 pub(crate) fn to_wire_properties(msg: &OutgoingMessage<'_>) -> Option<PublishProperties> {
     let mut properties = PublishProperties::default();
     let mut carries_properties = false;
@@ -124,7 +146,10 @@ pub(crate) fn to_wire_properties(msg: &OutgoingMessage<'_>) -> Option<PublishPro
         carries_properties = true;
         let text = String::from_utf8_lossy(value).into_owned();
         match name {
-            "content-type" => properties.content_type = Some(text),
+            "content-type" => {
+                properties.payload_format_indicator = Some(u8::from(is_text_media_type(&text)));
+                properties.content_type = Some(text);
+            }
             "reply-to" => properties.response_topic = Some(text),
             "correlation-id" => {
                 properties.correlation_data = Some(Bytes::copy_from_slice(value));
@@ -150,6 +175,7 @@ mod tests {
 
         let properties = to_wire_properties(&outgoing).expect("properties built");
         assert_eq!(properties.content_type.as_deref(), Some("application/json"));
+        assert_eq!(properties.payload_format_indicator, Some(1));
         assert_eq!(properties.response_topic.as_deref(), Some("replies/1"));
         assert_eq!(
             properties.correlation_data.as_deref(),
@@ -165,6 +191,45 @@ mod tests {
     fn plain_messages_stay_property_free() {
         let outgoing = OutgoingMessage::new("orders", b"{}".as_slice());
         assert!(to_wire_properties(&outgoing).is_none());
+    }
+
+    /// The indicator follows the media type, and the protocol has only two answers: UTF-8 or
+    /// unspecified bytes. A vendor JSON type is still JSON; a binary codec's type is not.
+    #[test]
+    fn the_payload_format_follows_the_media_type() {
+        for (content_type, expected) in [
+            ("application/json", 1),
+            ("application/json; charset=utf-8", 1),
+            ("application/vnd.acme.order+json", 1),
+            ("text/plain", 1),
+            ("TEXT/CSV", 1),
+            ("application/cbor", 0),
+            ("application/msgpack", 0),
+            ("application/octet-stream", 0),
+        ] {
+            let mut headers = HeaderMap::new();
+            headers.insert("content-type", content_type);
+            let outgoing = OutgoingMessage::new("orders", b"{}".as_slice()).with_headers(headers);
+            let properties = to_wire_properties(&outgoing).expect("properties built");
+            assert_eq!(
+                properties.payload_format_indicator,
+                Some(expected),
+                "{content_type} is {}",
+                if expected == 1 { "text" } else { "bytes" }
+            );
+        }
+    }
+
+    /// A message with no media type says nothing about its format, which is the protocol's own
+    /// default of unspecified bytes.
+    #[test]
+    fn a_message_without_a_media_type_declares_no_payload_format() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-tenant", "acme");
+        let outgoing = OutgoingMessage::new("orders", b"{}".as_slice()).with_headers(headers);
+
+        let properties = to_wire_properties(&outgoing).expect("properties built");
+        assert_eq!(properties.payload_format_indicator, None);
     }
 
     /// Every header a message carries is a user property or a first-class one. The delivery

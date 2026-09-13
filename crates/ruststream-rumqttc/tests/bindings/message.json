@@ -1,6 +1,5 @@
 {
   "bindingVersion": "0.2.0",
-  "payloadFormatIndicator": 0,
   "correlationData": {
     "type": "string",
     "description": "The correlation-id header, carried in the MQTT 5 Correlation Data property."

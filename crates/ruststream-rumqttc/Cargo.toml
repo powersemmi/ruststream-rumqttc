@@ -34,6 +34,9 @@ tokio.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+# A raw client reads the PUBLISH packet the crate produced, which is the only way to assert a
+# protocol property the crate maps in one direction only.
+rumqttc.workspace = true
 ruststream = { workspace = true, features = [
     "asyncapi",
     "conformance",

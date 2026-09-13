@@ -7,10 +7,13 @@ use std::pin::pin;
 use std::time::Duration;
 
 use futures::StreamExt;
+use rumqttc::v5::mqttbytes::QoS;
+use rumqttc::v5::mqttbytes::v5::Packet;
+use rumqttc::v5::{AsyncClient, Event, MqttOptions};
 use ruststream::runtime::PublishExt;
 use ruststream::{
     AckError, Broker, ConnectedBroker, HeaderMap, IncomingMessage, Outgoing, OutgoingMessage,
-    PublishPolicy, Publisher, Serialized, Subscriber,
+    PublishPolicy, Publisher, Serialized, ServerSpec, Subscriber,
 };
 use ruststream_rumqttc::{
     ConnectedMqttBroker, MqttBroker, MqttFilter, MqttPublish, MqttPublishSteps, MqttTopic, Qos,
@@ -445,6 +448,77 @@ async fn nack_reports_unsupported_and_dropping_acknowledges() {
         .nack(false)
         .await
         .expect("declining redelivery acknowledges");
+
+    connected.shutdown().await.expect("shutdown succeeds");
+}
+
+/// The MQTT 5 properties a JSON publish carries, read off the packet by a client of the broker's
+/// own rather than by this crate: the payload format indicator travels one way only, so nothing
+/// on the crate's receive path could report it back.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_json_publish_carries_the_payload_format_and_the_content_type() {
+    let Some(url) = test_url() else { return };
+    let authority = ServerSpec::host_from_url(&url);
+    let (host, port) = authority
+        .rsplit_once(':')
+        .expect("the stand url names a port");
+
+    let mut options = MqttOptions::new(
+        format!("props-{}", std::process::id()),
+        host,
+        port.parse::<u16>().expect("the port parses"),
+    );
+    options.set_max_packet_size(Some(1024 * 1024));
+    let (client, mut eventloop) = AsyncClient::new(options, 16);
+    let topic = unique("properties");
+    client
+        .subscribe(topic.clone(), QoS::AtLeastOnce)
+        .await
+        .expect("the raw client subscribes");
+    // Poll until the SUBACK, so the publish below cannot race the subscription.
+    loop {
+        let event = tokio::time::timeout(RECV_TIMEOUT, eventloop.poll())
+            .await
+            .expect("the raw client reaches a SUBACK")
+            .expect("the raw event loop stays alive");
+        if matches!(event, Event::Incoming(Packet::SubAck(_))) {
+            break;
+        }
+    }
+
+    let connected = connect(&url, "properties").await;
+    let mut headers = HeaderMap::new();
+    headers.insert("content-type", "application/json");
+    connected
+        .publisher()
+        .publish(
+            OutgoingMessage::new(&topic, br#"{"id":1}"#.as_slice()).with_headers(headers),
+            None,
+        )
+        .await
+        .expect("publish succeeds");
+
+    let publish = loop {
+        let event = tokio::time::timeout(RECV_TIMEOUT, eventloop.poll())
+            .await
+            .expect("the raw client receives the publish")
+            .expect("the raw event loop stays alive");
+        if let Event::Incoming(Packet::Publish(publish)) = event {
+            break publish;
+        }
+    };
+    let properties = publish.properties.expect("the packet carries properties");
+
+    assert_eq!(
+        properties.payload_format_indicator,
+        Some(1),
+        "a JSON payload is UTF-8 on the wire"
+    );
+    assert_eq!(
+        properties.content_type.as_deref(),
+        Some("application/json"),
+        "the media type reaches the packet as the content type property"
+    );
 
     connected.shutdown().await.expect("shutdown succeeds");
 }

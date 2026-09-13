@@ -342,6 +342,12 @@ data), in both directions. A message with no headers is published with no proper
 [per-message arguments](#per-message-arguments) are not headers but fields of the PUBLISH packet,
 resolved over the policy's defaults before the packet is built.
 
+The media type decides one more property of the packet. A publish whose content type is textual -
+`application/json`, any `text/` subtype, any `+json` vendor type - carries the payload format
+indicator 1, and every other one carries 0, so a non-Rust peer reads a JSON body as the UTF-8 it
+is. The framework fills the `content-type` header from the codec of the publish position, which is
+what makes this follow the codec without anything being declared.
+
 A responder is a plain handler: the incoming request carries its response topic in the `reply-to`
 header, and the handler reads `ctx.headers().reply_to()` and publishes the answer to that topic
 through an injected publisher.
@@ -381,8 +387,9 @@ nothing there:
 ```
 
 Every message reports the MQTT 5 properties this crate maps it through. The payload format
-indicator is 0 because the crate sets none: a payload travels as bytes, and its media type travels
-in the `contentType` the framework fills from the codec:
+indicator is not among them: it follows the media type of one message, which the codec of the
+publish position produces, and a descriptor or a policy is never handed that codec - the document
+reports the media type itself, in the `contentType` the framework fills:
 
 ```json
 --8<-- "crates/ruststream-rumqttc/tests/bindings/message.json"

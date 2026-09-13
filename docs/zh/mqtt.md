@@ -303,6 +303,11 @@ MQTT 在 PUBLISH 报文上携带的两个参数，都是发布上的步骤，先
 也不带：[单条消息的参数](#per-message-arguments)不是消息头，而是 PUBLISH 报文自己的字段，每一项
 的取值都在报文组装之前、在策略的默认值之上定下来。
 
+媒体类型还决定报文的一个属性。内容类型是文本的那种发布 - `application/json`、任何 `text/` 子类型、
+任何以 `+json` 结尾的厂商类型 - 带的负载格式指示是 1，其余的是 0，于是非 Rust 的对端把 JSON 正文
+按它本来的 UTF-8 读。`content-type` 消息头由框架按发布位置的编解码器填上，这就是这项指示跟着
+编解码器走、却不需要声明任何东西的原因。
+
 响应方就是一个普通处理器：进来的请求把响应主题放在 `reply-to` 消息头里，处理器读
 `ctx.headers().reply_to()`，通过注入进来的发布者把答复发布到那个主题。
 
@@ -338,8 +343,9 @@ ruststream-rumqttc = { version = "0.7", features = ["asyncapi"] }
 --8<-- "crates/ruststream-rumqttc/tests/bindings/send_operation.json"
 ```
 
-每条消息都报告 crate 为它映射的那几个 MQTT 5 属性。负载格式指示为 0，因为 crate 不设置它：负载
-以字节走，它的媒体类型走 `contentType`，由框架按编解码器填上：
+每条消息都报告 crate 为它映射的那几个 MQTT 5 属性，但负载格式指示不在其中：它跟着单条消息的媒体
+类型走，而那是发布位置的编解码器产出的，描述符和策略都拿不到那个编解码器 - 文档报告媒体类型本身，
+写在框架填上的 `contentType` 里：
 
 ```json
 --8<-- "crates/ruststream-rumqttc/tests/bindings/message.json"

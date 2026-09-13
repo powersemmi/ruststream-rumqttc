@@ -63,17 +63,18 @@ struct MqttOperation {
     retain: Option<bool>,
 }
 
-/// The MQTT 5 properties this crate maps a message onto.
+/// The MQTT 5 properties this crate maps a message onto: `correlation-id` rides the Correlation
+/// Data property and `reply-to` rides the Response Topic property, in both directions.
 ///
-/// `payloadFormatIndicator` is 0 because the crate sets no payload-format indicator: a payload
-/// travels as bytes and its media type travels in the `contentType` the core fills from the
-/// codec. The other two are the crate's header mapping stated as schemas: `correlation-id` rides
-/// the Correlation Data property and `reply-to` rides the Response Topic property, in both
-/// directions.
+/// `payloadFormatIndicator` is deliberately absent. The indicator follows the media type of the
+/// message, which the codec of the publish position produces, and neither the subscription
+/// descriptor nor the publish policy is handed that codec - the document is built from
+/// declarations, and the codec is resolved at the mount site. Reporting a fixed value here would
+/// describe every message by the one the crate happened to pick, so the packet decides it instead
+/// (see [`to_wire_properties`](crate::message)) and the document reports the media type itself
+/// through `contentType`, which the core fills from the codec.
 #[derive(Debug, Serialize)]
 struct MqttMessageBinding {
-    #[serde(rename = "payloadFormatIndicator")]
-    payload_format_indicator: u8,
     #[serde(rename = "correlationData")]
     correlation_data: StringSchema,
     #[serde(rename = "responseTopic")]
@@ -112,7 +113,6 @@ pub(crate) fn send_operation(qos: Qos, retain: bool) -> Bindings {
 /// The properties every message on this broker is mapped through, whichever direction it travels.
 pub(crate) fn message() -> Bindings {
     one(&MqttMessageBinding {
-        payload_format_indicator: 0,
         correlation_data: StringSchema {
             kind: "string",
             description: "The correlation-id header, carried in the MQTT 5 Correlation Data \

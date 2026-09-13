@@ -150,18 +150,24 @@ At `QoS` 0 there is nothing to redeliver and the message is gone. Read `retry()`
 for the next session", not as "try again shortly".
 
 `HandlerOutcome::retry_after(delay)` is the outcome that retries within the session, through the
-framework's own fallback rather than the protocol: give the mount site a retry publisher with
-`retry_via(..)` and the runtime acknowledges the original, waits, then re-publishes a copy to the
-same topic carrying the retry count in its headers. Acknowledging the original is that fallback's
-first step, so it needs an acknowledgeable delivery: at `QoS` 0 the step is refused and the
-deferred copy is never published, which drops the message. With no retry publisher configured the
-runtime warns and falls back to `retry()`, with the consequences above.
+framework's own fallback rather than the protocol. Name the publisher the copy leaves through at
+the mount site, `b.include(handle).out_retry(Publish::default())`, and the runtime acknowledges the
+original, waits, then re-publishes a copy to the same topic carrying the retry count in its
+headers. Acknowledging the original is that fallback's first step, so it needs an acknowledgeable
+delivery: at `QoS` 0 the step is refused and the deferred copy is never published, which drops the
+message. With nothing bound to the position the runtime warns and falls back to `retry()`, with the
+consequences above.
+
+The position is an ordinary slot, so the steps after it are a slot's: `.codec(..)`, `.transform(..)`
+and `.map_publisher(..)`. The deferred copy carries the delivery's own bytes, so a codec named there
+resolves the position and encodes nothing, while a transform runs on the copy - the one place a
+service marks a redelivery as one.
 
 That copy needs a topic, and a subscription can only name one if its filter is a topic. A
 subscription on `devices/dev42/telemetry` is reached by publishing there, shared groups included -
 the group takes the copy between its members. A subscription on a wildcard filter is not reachable
 that way at all, because `+` and `#` are subscribe-only, so the crate says it cannot name an
-address rather than naming one that reaches nothing. A scope that wires `retry_via(..)` over a
+address rather than naming one that reaches nothing. A registration that binds `out_retry` over a
 wildcard subscription then refuses to start, naming the subscription: the service learns at startup
 that `retry_after` has no fallback there, instead of losing every delayed message to a publish that
 went nowhere.
@@ -195,10 +201,11 @@ service and the retain flag. It is also this broker's default policy, so a
 `#[subscriber(.., publish)]` handler mounted without a policy of its own sends through it. A reply
 goes to the topic its own type declares.
 
-A mount site that does name a policy uses `.out(marker, policy)`:
-`.out(Reply, Publish::default().qos(Qos::ExactlyOnce))` for what the handler returns, and the same
-call under an `Out` slot's own marker for a publisher the body holds. The policy carries the
-arguments in both places, so a slot and a reply are written alike.
+A mount site that does name a policy names one per position. `.out_reply(policy)` carries what the
+handler returns, `.out_retry(policy)` the copy a deferred retry publishes, and
+`.out(marker, policy)` a publisher the body holds under that slot's own marker. The policy carries
+the arguments in all three, so `.out_reply(Publish::default().qos(Qos::ExactlyOnce))` and the slot
+beside it are written alike.
 
 Which name a file writes follows from the prelude it imports. A handler file imports
 `ruststream::prelude::*` and bounds its injected publisher with a capability trait,
@@ -306,7 +313,7 @@ same deadline, so a batch handler receives under the harness what a server would
 A routes file mounts on it as written, both halves of it. `MqttTopic` opens a subscription on the
 test broker, so the handler a service ships is the handler the harness mounts - the one at the top
 of this page, wildcard, quality of service, shared group and all - and `MqttPublish` pairs against
-it, so `b.include(handle).out(Reply, Publish::default())` is the same line under both brokers.
+it, so `b.include(handle).out_reply(Publish::default())` is the same line under both brokers.
 There is no in-process descriptor and no in-process policy to swap in; the only thing that changes
 is the broker the app is built with.
 

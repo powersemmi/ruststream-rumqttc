@@ -102,7 +102,7 @@ fn app() -> impl App {
 }
 ```
 
-`#[ruststream::app]` generates `main`, so there is no runtime boilerplate. `.out(marker, policy)` is the mount site's one publish verb: `DefaultSlot` names the handler's single unnamed `Out`, `Reply` the reply slot of a `publish(..)` handler, and a `#[derive(OutSlot)]` marker any further one. The policy carries the MQTT arguments, so the body states a capability (`Out<impl Publisher>`) and never a broker type - which is what lets the same handler run under the harness below.
+`#[ruststream::app]` generates `main`, so there is no runtime boilerplate. The mount site names a policy per publish position: `.out_reply(policy)` for what a `publish(..)` handler returns, `.out_retry(policy)` for the copy a deferred `retry_after` publishes, and `.out(marker, policy)` for a slot the body holds - `DefaultSlot` for its single unnamed `Out`, a `#[derive(OutSlot)]` marker for any further one. The policy carries the MQTT arguments, so the body states a capability (`Out<impl Publisher>`) and never a broker type - which is what lets the same handler run under the harness below.
 
 ## Test it
 

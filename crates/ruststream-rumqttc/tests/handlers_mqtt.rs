@@ -8,6 +8,11 @@
 
 #![cfg(feature = "testing")]
 
+use std::time::Duration;
+
+// The derive and the value a publish transform reads share the name in different namespaces: the
+// prelude carries the macro `ruststream::Outgoing`, and this is the type `runtime::Outgoing`.
+use ruststream::runtime::{Outgoing, RETRY_COUNT_HEADER, SlotContext};
 use ruststream::testing::TestApp;
 use ruststream_rumqttc::prelude::*;
 use ruststream_rumqttc::testing::MqttTestBroker;
@@ -402,7 +407,7 @@ async fn a_production_routes_line_mounts_whole_on_the_in_process_broker() {
     let app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(
         MqttTestBroker::new(),
         |b| {
-            b.include(answer_ping).out(Reply, Publish::default());
+            b.include(answer_ping).out_reply(Publish::default());
         },
     );
 
@@ -432,7 +437,7 @@ fn a_production_routes_line_mounts_on_the_real_broker() {
     let _app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(
         MqttBroker::new("mqtt://localhost:1883", "mqtt-handlers"),
         |b| {
-            b.include(answer_ping).out(Reply, Publish::default());
+            b.include(answer_ping).out_reply(Publish::default());
         },
     );
 }
@@ -505,7 +510,7 @@ async fn a_reply_that_declares_no_topic_lands_on_the_mount_site_one() {
     let app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(
         MqttTestBroker::new(),
         |b| {
-            b.include(issue_receipt).out(Reply, Publish::default());
+            b.include(issue_receipt).out_reply(Publish::default());
         },
     );
 
@@ -538,7 +543,126 @@ fn a_reply_on_a_declared_topic_takes_the_arguments_of_its_policy() {
         MqttBroker::new("mqtt://localhost:1883", "mqtt-handlers"),
         |b| {
             b.include(acknowledge)
-                .out(Reply, Publish::default().qos(Qos::ExactlyOnce).retain(true));
+                .out_reply(Publish::default().qos(Qos::ExactlyOnce).retain(true));
+        },
+    );
+}
+
+const DEFERRED: &str = "devices/dev42/deferred";
+const DEFERRED_WILDCARD: &str = "devices/+/deferred";
+
+/// Long enough that no other timer in the test is due at the same instant; the clock is paused,
+/// so nothing waits for it.
+const RETRY_DELAY: Duration = Duration::from_secs(5);
+
+/// Stamps every message leaving the position it is mounted on with that position's name. It sets
+/// neither of the two arguments MQTT carries, so it is generic over the options a position writes
+/// and mounts over any publisher.
+#[derive(Debug, Clone, Copy)]
+struct StampSlot;
+
+impl<Options> PublishTransform<ForSlot, Options> for StampSlot {
+    type Destination = Reads;
+
+    fn apply(&self, out: &mut Outgoing<'_>, _options: &mut Option<Options>, cx: &SlotContext<'_>) {
+        out.headers_mut()
+            .insert("x-left-through", cx.slot().to_owned());
+    }
+}
+
+/// Defers the first delivery and settles the copy, so one subscription runs both legs of the
+/// fallback.
+#[subscriber("devices/dev42/deferred")]
+async fn reconcile(telemetry: &Telemetry, ctx: &mut Context) -> HandlerOutcome {
+    let _ = telemetry.temperature;
+    let attempt = ctx
+        .headers()
+        .get_str(RETRY_COUNT_HEADER)
+        .and_then(|count| count.parse::<u64>().ok())
+        .unwrap_or(0);
+    if attempt == 0 {
+        HandlerOutcome::retry_after(RETRY_DELAY)
+    } else {
+        HandlerOutcome::ack()
+    }
+}
+
+/// MQTT cannot defer a redelivery, so `retry_after` runs on the framework's fallback: the
+/// original is dropped and a copy is published back to the topic the subscription reported. The
+/// copy leaves through the publisher the registration bound at the mount site, transforms
+/// included, which is the only place a service can mark it.
+#[tokio::test(start_paused = true)]
+async fn a_transform_on_the_retry_position_stamps_the_deferred_copy() {
+    let app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(
+        MqttTestBroker::new(),
+        |b| {
+            b.include(reconcile)
+                .out_retry(Publish::default())
+                .transform(StampSlot);
+        },
+    );
+
+    let tb = TestApp::start(app).await.expect("the harness starts");
+    tb.broker::<MqttTestBroker>()
+        .message(&Telemetry {
+            device: "dev42".to_owned(),
+            temperature: 21.5,
+        })
+        .to(DEFERRED)
+        .publish()
+        .await
+        .expect("the injected reading is routed");
+    tb.advance(RETRY_DELAY)
+        .await
+        .expect("the deferred copy is published and handled");
+
+    tb.broker::<MqttTestBroker>()
+        .published::<Telemetry>(DEFERRED)
+        .with_header("x-left-through", "Retry");
+    tb.broker::<MqttTestBroker>()
+        .subscriber(DEFERRED)
+        .assert_called(2)
+        .settled(HandlerOutcome::ack());
+}
+
+/// A wildcard filter is not a topic a publisher can name, so the descriptor reports no address
+/// for it and a registration that binds the retry position over one refuses to start. The
+/// service learns at startup that `retry_after` has no fallback there, rather than losing every
+/// delayed message to a publish that reaches nothing.
+#[subscriber(MqttTopic::new("devices/+/deferred"))]
+async fn reconcile_anywhere(telemetry: &Telemetry) -> HandlerOutcome {
+    let _ = telemetry.temperature;
+    HandlerOutcome::retry_after(RETRY_DELAY)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_retry_position_over_a_wildcard_subscription_does_not_start() {
+    let app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(
+        MqttTestBroker::new(),
+        |b| {
+            b.include(reconcile_anywhere).out_retry(Publish::default());
+        },
+    );
+
+    let error = TestApp::start(app)
+        .await
+        .expect_err("a wildcard subscription cannot name where its redelivery is published");
+    assert!(
+        error.to_string().contains(DEFERRED_WILDCARD),
+        "the startup error names the subscription that has no address: {error}"
+    );
+}
+
+/// The same registration on the real broker. Building the app is I/O-free, so the mount is what
+/// this checks; that the copy reaches a wire is the live suite's.
+#[test]
+fn a_registration_that_defers_retries_mounts_on_the_real_broker() {
+    let _app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(
+        MqttBroker::new("mqtt://localhost:1883", "mqtt-handlers"),
+        |b| {
+            b.include(reconcile)
+                .out_retry(Publish::default())
+                .transform(StampSlot);
         },
     );
 }

@@ -200,8 +200,8 @@ impl SubscriptionSource<ConnectedMqttTestBroker> for MqttTopic {
         connected.subscribe_topic(self).await
     }
 
-    /// The same answer as against a server, so a scope wired with `retry_via` either starts on
-    /// both brokers or on neither.
+    /// The same answer as against a server, so a registration bound with `out_retry` either
+    /// starts on both brokers or on neither.
     fn redelivery_address(
         &self,
         connected: &ConnectedMqttTestBroker,

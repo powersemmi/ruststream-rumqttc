@@ -179,7 +179,8 @@ impl Subscribe for ConnectedMqttTestBroker {
         self.subscribe_topic(MqttTopic::new(name))
     }
 
-    /// The real broker's answer, so `retry_via` composes the same way here.
+    /// The real broker's answer, so a registration bound with `out_retry` composes the same
+    /// way here.
     fn redelivery_address(&self, name: &str) -> Option<RedeliveryAddress> {
         redelivery_topic(name)
     }

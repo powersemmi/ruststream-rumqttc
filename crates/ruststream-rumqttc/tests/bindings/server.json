@@ -1,0 +1,9 @@
+{
+  "bindingVersion": "0.2.0",
+  "clientId": "telemetry-svc",
+  "cleanSession": false,
+  "keepAlive": 30,
+  "sessionExpiryInterval": 3600,
+  "maximumPacketSize": 1048576,
+  "lastWill": { "topic": "devices/svc/status", "qos": 1, "retain": true }
+}

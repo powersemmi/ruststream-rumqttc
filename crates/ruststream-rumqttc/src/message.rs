@@ -23,6 +23,10 @@ use ruststream::{AckError, HeaderMap, IncomingMessage, OutgoingMessage};
 /// it does not retry inside the live connection: the delivery stays unacknowledged and comes back
 /// only when a persistent session resumes. `retry_after` with a retry publisher is the outcome
 /// that retries within the session; the guide's acknowledgement section spells both out.
+///
+/// A delivery reports no redelivery count. The protocol carries a duplicate flag and no counter,
+/// so a registration's cap is counted on the framework's retry-count header instead, which the
+/// copies the runtime publishes carry.
 pub struct MqttMessage {
     payload: Bytes,
     headers: HeaderMap,

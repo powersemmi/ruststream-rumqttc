@@ -18,7 +18,7 @@ serde = { version = "1", features = ["derive"] }
 
 | 能力 | 原生 | 原因 |
 | --- | --- | --- |
-| `Subscribe` | 是 | `MqttTopic` 描述对一个主题过滤器的订阅。参见[订阅](#subscriptions)。 |
+| `Subscribe` | 是 | `MqttTopic` 描述对一个主题的订阅，`MqttFilter` 描述对一个主题过滤器的订阅。参见[订阅](#subscriptions)。 |
 | 确认（`ack` / `nack`） | 部分 | `QoS` 1 和 2 通过协议结算。`QoS` 0 和 `nack(requeue = true)` 返回 `AckError::Unsupported`。参见[确认](#acknowledgement)。 |
 | `BatchSubscriber` | 在客户端 | 一个 PUBLISH 报文只携带一条消息，因此批次由 crate 自己攒，攒到挂载点指定的大小。参见[批次](#batches)。 |
 | `TransactionalPublisher` | 否 | MQTT 没有事务。 |
@@ -26,7 +26,7 @@ serde = { version = "1", features = ["derive"] }
 | `RequestReply` | 否 | MQTT 5 有响应主题属性，crate 在两个方向上都把它映射到 `reply-to` 消息头；带关联的 `request(msg, timeout)` 调用没有实现。响应方就是一个普通处理器，它发布到 `ctx.headers().reply_to()`。参见[消息头](#headers)。 |
 | `Partitioned` | 否 | MQTT 没有分区，也没有路由键；顺序是一条连接上按主题保证的。 |
 | `Seekable` / `Positioned` | 否 | Broker 每个主题只存一条保留消息，外加持久会话里尚未确认的消息，再没有别的可以定位过去。 |
-| `DescribeServer` | 是 | `MqttBroker` 报告客户端连接的主机和端口，以及 `mqtt` 协议，AsyncAPI 模式记录的就是这些。URL 里的凭据不会进去。 |
+| `DescribeServer` | 是 | `MqttBroker` 报告客户端连接的主机和端口、协议版本，以及它打开的会话。凭据不会进去。参见[生成的文档](#the-generated-document)。 |
 
 ## 生命周期 { #the-lifecycle }
 
@@ -51,9 +51,10 @@ MqttBroker::new(url, client_id)   只有配置，同步，没有 I/O
 
 ## 订阅 { #subscriptions }
 
-`MqttTopic` 描述一条订阅：一个主题过滤器、一个服务质量和一个可选的共享组。它直接写在
-`#[subscriber(..)]` 里；`ruststream_rumqttc::prelude` 重导出框架自己的 prelude，再加上这个 crate
-的表面，因此一个 glob 就够一个服务文件用：
+MQTT 有两个名字，这里就有两个描述符。`MqttTopic` 订阅一个主题；`MqttFilter` 订阅一个主题过滤器，
+通配符也在内。两者都带一个服务质量和一个可选的共享组，都直接写在 `#[subscriber(..)]` 里，也都配
+`ruststream_rumqttc::prelude`：它重导出框架自己的 prelude，再加上这个 crate 的表面，因此一个
+glob 就够一个服务文件用：
 
 ```rust
 --8<-- "crates/ruststream-rumqttc/examples/mqtt_service.rs:handler"
@@ -65,15 +66,22 @@ MqttBroker::new(url, client_id)   只有配置，同步，没有 I/O
 --8<-- "crates/ruststream-rumqttc/examples/mqtt_service.rs:app"
 ```
 
-过滤器属于部署而不属于代码的处理器，改写成 `#[subscriber(MqttTopic)]`，在挂载点用 `.name(..)`
-给出过滤器；这时服务质量和共享组都取默认值。
+过滤器属于部署而不属于代码的处理器，改写成 `#[subscriber(MqttFilter)]`，在挂载点用 `.name(..)`
+给出过滤器；这时服务质量和共享组都取默认值。订阅单个主题时 `#[subscriber(MqttTopic)]` 是一样的
+写法。
+
+除了接受哪些通配符，选哪个描述符还决定一件事：延迟的重新投递发布到哪里。主题是发布者能用的名字，
+所以 `MqttTopic` 自己说得出副本从哪里回到这条订阅；过滤器不是这样的名字，所以 `MqttFilter` 上的
+注册在挂载点点名那个主题。[处理器的结果在这里做什么](#what-a-handlers-outcome-does-here)讲的就是
+这件事。
 
 订阅者被丢弃时，它的过滤器随之退订。
 
 ### 通配符 { #wildcards }
 
 通配符就是协议自己的那两个：`+` 精确匹配一个主题层级，`#` 匹配主题的其余部分，并且只能出现在
-最后一级。`MqttMessage::topic` 报告消息到达的那个具体主题，绝不是匹配上它的过滤器，因此挂在
+最后一级。它们属于 `MqttFilter`；把通配符交给 `MqttTopic` 会返回错误，点名该用哪个描述符，发生在
+任何 I/O 之前。`MqttMessage::topic` 报告消息到达的那个具体主题，绝不是匹配上它的过滤器，因此挂在
 `devices/+/telemetry` 上的处理器能读出读数是哪台设备发来的。通配符只在订阅侧有效：向含通配符的
 主题发布会返回错误，什么也不发送。
 
@@ -93,7 +101,7 @@ MqttBroker::new(url, client_id)   只有配置，同步，没有 I/O
 
 `MqttTopic::new("jobs").shared("workers")` 订阅的是 `$share/workers/jobs`。Broker 把匹配的消息
 分给组内成员，而不是给每人一份副本，MQTT 就是这样表达竞争消费者的。组名只属于订阅用的那个
-过滤器：`filter()` 和投递时报告的主题仍是不带组名的形式。
+过滤器：`topic()`、`filter()` 和投递时报告的主题仍是不带组名的形式。
 
 同一条连接上一个组的两个成员，在 Broker 看来是一条订阅，因此它们的投递由 crate 轮流分发。共享
 组名为空，或者含有 `/`、`+`、`#`，都会在任何 I/O 之前返回错误，和无效过滤器一样。
@@ -137,24 +145,40 @@ MqttBroker::new(url, client_id)   只有配置，同步，没有 I/O
 “过一会儿再试”。
 
 `HandlerOutcome::retry_after(delay)` 是在会话之内重试的那个结果，走的是框架自己的兜底路径而
-不是协议。副本从哪个发布者出去，由挂载点点名：`b.include(handle).out_retry(Publish::default())`。
-运行时就会确认原件、等待，然后把一份副本重新发布到同一个主题，消息头里带上重试次数。确认原件是
-这条兜底路径的第一步，它需要一次可以确认的投递：在 `QoS` 0 上这一步被拒绝，延迟副本永远不会
-发布，消息因此丢失。这个位置没被占住时，运行时发出警告并退回 `retry()`，后果如上。
+不是协议。运行时确认原件、等待，然后发布一份带着重试次数的副本。确认原件是这条兜底路径的第一步，
+它需要一次可以确认的投递：在 `QoS` 0 上这一步被拒绝，延迟副本永远不会发布，消息因此丢失。
 
-这个位置就是一个普通槽位，所以它后面接的是槽位的那几步：`.codec(..)`、`.transform(..)` 和
+一直要求重试的处理器会让自己的消息一直转下去，直到有人来干预；`include` 之后紧跟的两步结束这件
+事：
+
+```rust
+--8<-- "crates/ruststream-rumqttc/examples/mqtt_retries.rs:declaration"
+```
+
+`max_attempts(n)` 是一条消息一共得到几次投递，第一次也算在内。MQTT 自己不数重新投递，所以这个数
+记在框架的重试次数消息头里，随副本一起走。`dead_letter(topic)` 是次数用完之后消息去的主题；给它
+一个本服务的订阅都不读的主题，因为与某条活着的过滤器匹配的主题会把消息直接还回来。只声明上限而
+不给主题，则是拒绝这条消息，而在 MQTT 上这意味着确认它然后放手。
+
+副本发布到哪里，要么由描述符回答，要么由挂载点回答。`MqttTopic` 订阅一个主题，所以它自己说得出
+副本从哪里回到这条订阅 - 共享订阅也一样，组会把那份副本分给成员 - 上面那段声明就是挂载点的全部。
+`MqttFilter` 订阅许多主题，一个也点不出来，因为 `+` 和 `#` 只在订阅侧有效，于是由注册来点名：
+
+```rust
+--8<-- "crates/ruststream-rumqttc/examples/mqtt_retries.rs:named"
+```
+
+与过滤器匹配的主题把副本送回同一条订阅。在过滤器上的注册既不点名主题也不挂发布变换，就起不来，
+并点名那条订阅：服务在启动时就知道 `retry_after` 在这里无处可去，而不是让每一条延迟消息都丢在
+一次发往虚空的发布里。
+
+`out_retry(policy)` 同时替换副本出去的那个发布者 - 否则用的是这个 Broker 的默认策略。这个位置
+就是一个普通槽位，所以它后面接的是槽位的那几步：`.codec(..)`、`.transform(..)` 和
 `.map_publisher(..)`。延迟副本带的是投递本身的字节，所以这里点名的编解码器只把位置解析出来，
 并不编码任何东西，而发布变换会在副本上执行：服务只有在这里才能把一次重新投递标记成重新投递。
+这里的发布变换读的是正在重试的那次投递，和回复上的发布变换一样。
 
-那份副本需要一个主题，而订阅只有在自己的过滤器就是一个主题时才说得出来。对
-`devices/dev42/telemetry` 的订阅，向那里发布就能到达，共享组也一样 - 组会把那份副本分给成员。
-对通配符过滤器的订阅根本无法这样到达，因为 `+` 和 `#` 只在订阅侧有效，因此 crate 直说自己给不出
-地址，而不是给出一个谁也到不了的地址。于是，在通配符订阅之上用 `out_retry` 占住这个位置的那条
-注册起不来，并点名那条订阅：服务在启动时就知道 `retry_after` 在这里没有兜底，而不是让每一条
-延迟消息都丢在一次发往虚空的发布里。
-
-`HandlerOutcome::drop()` 是确认，因为丢弃是协议唯一的终态答复。发往 dead-letter 是服务自己做的
-一次发布，不是 Broker 做的事。
+`HandlerOutcome::drop()` 是确认，因为丢弃是协议唯一的终态答复。
 
 背压就是协议的 receive-maximum，由 `MqttBroker::receive_maximum` 设置：Broker 同时在途的未确认
 `QoS` 1/2 投递不超过这个数，未被读取的订阅者队列也由它兜住上界。`QoS` 0 没有这样的上界。
@@ -265,6 +289,48 @@ MQTT 在 PUBLISH 报文上携带的两个参数，都是发布上的步骤，先
 响应方就是一个普通处理器：进来的请求把响应主题放在 `reply-to` 消息头里，处理器读
 `ctx.headers().reply_to()`，通过注入进来的发布者把答复发布到那个主题。
 
+## 生成的文档 { #the-generated-document }
+
+框架从服务自己的声明生成 AsyncAPI 文档，而这个 crate 填上只有 MQTT 才知道的那部分。打开
+`asyncapi` 能力即可，它转发框架的同名能力：
+
+```toml
+ruststream-rumqttc = { version = "0.7", features = ["asyncapi"] }
+```
+
+服务器声明自己说的是 MQTT 5，并描述客户端打开的那个会话：
+
+```json
+--8<-- "crates/ruststream-rumqttc/tests/bindings/server.json"
+```
+
+有两样东西是故意不写的。凭据不会进入一份团队发布并分享的文档，所以 URL 里的用户信息和
+`credentials` 都不会出现。遗嘱消息交出主题、服务质量和保留标志，但不交出负载：那是消息的内容而
+不是坐标，而且它可能是内部的东西。
+
+订阅在自己的接收操作上报告读取时用的服务质量：
+
+```json
+--8<-- "crates/ruststream-rumqttc/tests/bindings/receive_operation.json"
+```
+
+发布策略报告自己报文上的那两个参数，写在 `Out` 槽位或 dead-letter 主题的发送操作上。回复没有
+自己的发送操作，所以回复策略在那里什么也不添：
+
+```json
+--8<-- "crates/ruststream-rumqttc/tests/bindings/send_operation.json"
+```
+
+每条消息都报告 crate 为它映射的那几个 MQTT 5 属性。负载格式指示为 0，因为 crate 不设置它：负载
+以字节走，它的媒体类型走 `contentType`，由框架按编解码器填上：
+
+```json
+--8<-- "crates/ruststream-rumqttc/tests/bindings/message.json"
+```
+
+在请求自带的响应主题上作答的响应方没有固定的回复通道，所以文档把回复地址报告为 `null`，并把读者
+指向 `$message.header#/reply-to` - 响应主题到达时所在的那个消息头。
+
 ## 测试 { #testing }
 
 `testing` feature 提供 `MqttTestBroker`，一个不需要服务器、不需要网络就能运行服务的进程内
@@ -276,7 +342,8 @@ Broker。从 `ruststream_rumqttc::testing` 导入它：路由文件导入的 pre
 它攒批次的方式和真实订阅者一样，大小同样来自挂载点，期限也相同，因此批量处理器在测试套件下
 收到的，就是服务器本会给出的东西。
 
-路由文件原封不动地挂上去，两半都是。`MqttTopic` 在测试 Broker 上同样能建立订阅，因此服务交付的
+路由文件原封不动地挂上去，两半都是。`MqttTopic` 和 `MqttFilter` 在测试 Broker 上同样能建立
+订阅，因此服务交付的
 那个处理器，就是测试套件挂载的那个处理器 - 本页开头那一个，连同通配符、服务质量和共享组 -
 `MqttPublish` 也在它之上实例化发布者，因此 `b.include(handle).out_reply(Publish::default())`
 在两个 Broker 下是同一行。没有进程内的描述符，也没有进程内的策略要换进来；变的只有构建应用时

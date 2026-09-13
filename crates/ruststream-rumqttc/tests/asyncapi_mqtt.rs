@@ -85,47 +85,22 @@ impl<C, Options> PublishTransform<ForReply<C>, Options> for ToResponseTopic {
     }
 }
 
-/// The session a client opens, as the document reports it. No credential appears: the binding
-/// carries the client identity and the session settings, and the last will contributes its
+/// The excerpts the documentation shows, read back from the files it shows them from: a change to
+/// either the document or a page fails here.
+///
+/// The session a client opens carries no credential, and the last will contributes its
 /// coordinates without its payload.
-// --8<-- [start:server_binding]
-const SERVER_BINDING: &str = r#"{
-  "bindingVersion": "0.2.0",
-  "clientId": "telemetry-svc",
-  "cleanSession": false,
-  "keepAlive": 30,
-  "sessionExpiryInterval": 3600,
-  "maximumPacketSize": 1048576,
-  "lastWill": { "topic": "devices/svc/status", "qos": 1, "retain": true }
-}"#;
-// --8<-- [end:server_binding]
+const SERVER_BINDING: &str = include_str!("bindings/server.json");
 
 /// What one subscription adds to its receive operation: the quality of service it reads at.
-// --8<-- [start:operation_binding]
-const RECEIVE_BINDING: &str = r#"{ "bindingVersion": "0.2.0", "qos": 2 }"#;
-// --8<-- [end:operation_binding]
+const RECEIVE_BINDING: &str = include_str!("bindings/receive_operation.json");
 
 /// What one publish policy adds to its send operation: both arguments MQTT carries on a PUBLISH
 /// packet.
-// --8<-- [start:send_binding]
-const SEND_BINDING: &str = r#"{ "bindingVersion": "0.2.0", "qos": 1, "retain": true }"#;
-// --8<-- [end:send_binding]
+const SEND_BINDING: &str = include_str!("bindings/send_operation.json");
 
 /// The MQTT 5 properties a message is mapped through, in both directions.
-// --8<-- [start:message_binding]
-const MESSAGE_BINDING: &str = r#"{
-  "bindingVersion": "0.2.0",
-  "payloadFormatIndicator": 0,
-  "correlationData": {
-    "type": "string",
-    "description": "The correlation-id header, carried in the MQTT 5 Correlation Data property."
-  },
-  "responseTopic": {
-    "type": "string",
-    "description": "The reply-to header, carried in the MQTT 5 Response Topic property."
-  }
-}"#;
-// --8<-- [end:message_binding]
+const MESSAGE_BINDING: &str = include_str!("bindings/message.json");
 
 fn broker() -> MqttBroker {
     MqttBroker::new("mqtt://alice:hunter2@localhost:1883", "telemetry-svc")

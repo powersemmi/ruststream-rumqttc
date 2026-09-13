@@ -19,7 +19,7 @@ acknowledgement lands:
 
 | Capability | Native | Reason |
 | --- | --- | --- |
-| `Subscribe` | Yes | `MqttTopic` describes a subscription to one topic filter. See [Subscriptions](#subscriptions). |
+| `Subscribe` | Yes | `MqttTopic` describes a subscription to one topic and `MqttFilter` one to a topic filter. See [Subscriptions](#subscriptions). |
 | Acknowledgement (`ack` / `nack`) | Partial | `QoS` 1 and 2 settle through the protocol. `QoS` 0 and `nack(requeue = true)` return `AckError::Unsupported`. See [Acknowledgement](#acknowledgement). |
 | `BatchSubscriber` | On the client | A PUBLISH packet carries one message, so the crate assembles the batches itself, to the size the mount site named. See [Batches](#batches). |
 | `TransactionalPublisher` | No | MQTT has no transactions. |
@@ -27,7 +27,7 @@ acknowledgement lands:
 | `RequestReply` | No | MQTT 5 has a response-topic property, which the crate maps to the `reply-to` header in both directions; the correlated `request(msg, timeout)` call is not implemented. A responder is an ordinary handler that publishes to `ctx.headers().reply_to()`. See [Headers](#headers). |
 | `Partitioned` | No | MQTT has no partitions or routing keys; ordering is per topic on a connection. |
 | `Seekable` / `Positioned` | No | The broker stores one retained message per topic and the unacknowledged messages of a persistent session, and nothing else to reposition into. |
-| `DescribeServer` | Yes | `MqttBroker` reports the host and port a client connects to, and the `mqtt` protocol, which the AsyncAPI schema records. Credentials in the URL stay out of it. |
+| `DescribeServer` | Yes | `MqttBroker` reports the host and port a client connects to, the protocol version, and the session it opens. Credentials stay out of it. See [The generated document](#the-generated-document). |
 
 ## The lifecycle
 
@@ -54,9 +54,11 @@ cover managed MQTT services that require a client certificate.
 
 ## Subscriptions
 
-`MqttTopic` describes one subscription: a topic filter, a quality of service and an optional share
-group. It goes inline in `#[subscriber(..)]`, and `ruststream_rumqttc::prelude` carries the
-framework's own prelude along with this crate's surface, so one glob covers a service file:
+Two descriptors, one per thing MQTT names. `MqttTopic` subscribes to a topic; `MqttFilter`
+subscribes with a topic filter, wildcards included. Each carries a quality of service and an
+optional share group, goes inline in `#[subscriber(..)]`, and works with
+`ruststream_rumqttc::prelude`, which carries the framework's own prelude along with this crate's
+surface, so one glob covers a service file:
 
 ```rust
 --8<-- "crates/ruststream-rumqttc/examples/mqtt_service.rs:handler"
@@ -69,18 +71,26 @@ The app names the broker and includes the handler:
 ```
 
 A handler whose filter belongs to the deployment rather than to the code writes
-`#[subscriber(MqttTopic)]` instead and takes the filter from `.name(..)` at the mount site; the
-quality of service and the share group are then the defaults.
+`#[subscriber(MqttFilter)]` instead and takes the filter from `.name(..)` at the mount site; the
+quality of service and the share group are then the defaults. `#[subscriber(MqttTopic)]` does the
+same for a subscription to a single topic.
+
+Which of the two a subscription uses decides one thing beyond the wildcards it accepts: where a
+deferred redelivery is published. A topic is a name a publisher can use, so `MqttTopic` says where
+a copy reaches its subscription again; a filter is not, so a registration on `MqttFilter` names
+that topic at its mount site. [What a handler's outcome does here](#what-a-handlers-outcome-does-here)
+spells it out.
 
 Dropping a subscriber unsubscribes its filter.
 
 ### Wildcards
 
 Wildcards are the protocol's own: `+` matches exactly one topic level, `#` matches the rest of the
-topic and may appear only as the last level. `MqttMessage::topic` reports the concrete topic a
-message arrived on, never the filter that matched it, so a handler on `devices/+/telemetry` reads
-which device sent the reading. Wildcards are subscribe-only: a publish to a topic containing one
-returns an error and sends nothing.
+topic and may appear only as the last level. They belong to `MqttFilter`; handing one to
+`MqttTopic` returns an error naming the descriptor that takes it, before any I/O.
+`MqttMessage::topic` reports the concrete topic a message arrived on, never the filter that matched
+it, so a handler on `devices/+/telemetry` reads which device sent the reading. Wildcards are
+subscribe-only: a publish to a topic containing one returns an error and sends nothing.
 
 An invalid filter returns an error naming the filter, before any I/O.
 
@@ -98,8 +108,8 @@ An invalid filter returns an error naming the filter, before any I/O.
 
 `MqttTopic::new("jobs").shared("workers")` subscribes `$share/workers/jobs`. The broker splits
 matching messages across the group's members instead of giving each one a copy, which is how MQTT
-expresses competing consumers. The group name belongs to the subscribed filter only: `filter()` and
-the topic reported on delivery stay the plain form.
+expresses competing consumers. The group name belongs to the subscribed filter only: `topic()`,
+`filter()` and the topic reported on delivery stay the plain form.
 
 Two members of one group on a single connection are a single subscription to the broker, so the
 crate hands their deliveries out in turn. A share group name that is empty, or that contains `/`,
@@ -150,30 +160,48 @@ At `QoS` 0 there is nothing to redeliver and the message is gone. Read `retry()`
 for the next session", not as "try again shortly".
 
 `HandlerOutcome::retry_after(delay)` is the outcome that retries within the session, through the
-framework's own fallback rather than the protocol. Name the publisher the copy leaves through at
-the mount site, `b.include(handle).out_retry(Publish::default())`, and the runtime acknowledges the
-original, waits, then re-publishes a copy to the same topic carrying the retry count in its
-headers. Acknowledging the original is that fallback's first step, so it needs an acknowledgeable
-delivery: at `QoS` 0 the step is refused and the deferred copy is never published, which drops the
-message. With nothing bound to the position the runtime warns and falls back to `retry()`, with the
-consequences above.
+framework's own fallback rather than the protocol. The runtime acknowledges the original, waits,
+then publishes a copy carrying the retry count in its headers. Acknowledging the original is that
+fallback's first step, so it needs an acknowledgeable delivery: at `QoS` 0 the step is refused and
+the deferred copy is never published, which drops the message.
 
-The position is an ordinary slot, so the steps after it are a slot's: `.codec(..)`, `.transform(..)`
-and `.map_publisher(..)`. The deferred copy carries the delivery's own bytes, so a codec named there
-resolves the position and encodes nothing, while a transform runs on the copy - the one place a
-service marks a redelivery as one.
+A handler that keeps asking circulates its message until an operator intervenes, and two steps
+right after `include` end that:
 
-That copy needs a topic, and a subscription can only name one if its filter is a topic. A
-subscription on `devices/dev42/telemetry` is reached by publishing there, shared groups included -
-the group takes the copy between its members. A subscription on a wildcard filter is not reachable
-that way at all, because `+` and `#` are subscribe-only, so the crate says it cannot name an
-address rather than naming one that reaches nothing. A registration that binds `out_retry` over a
-wildcard subscription then refuses to start, naming the subscription: the service learns at startup
-that `retry_after` has no fallback there, instead of losing every delayed message to a publish that
-went nowhere.
+```rust
+--8<-- "crates/ruststream-rumqttc/examples/mqtt_retries.rs:declaration"
+```
+
+`max_attempts(n)` is how many deliveries one message gets, the first included. MQTT counts no
+redeliveries of its own, so the count is the framework's retry-count header and it travels on the
+copies. `dead_letter(topic)` is where a message goes once the attempts run out; give it a topic no
+subscription of the service reads, because one that matches a live filter hands the message
+straight back. A cap declared without a topic rejects the message instead, which on MQTT means
+acknowledging it and letting it go.
+
+Where the copy is published is the descriptor's answer or the mount site's. `MqttTopic` subscribes
+to a topic, so it says where a copy reaches the subscription again - shared groups included, since
+the group takes the copy between its members - and the declaration above is the whole mount site.
+`MqttFilter` subscribes to many topics and can name none of them, because `+` and `#` are
+subscribe-only, so the registration names one:
+
+```rust
+--8<-- "crates/ruststream-rumqttc/examples/mqtt_retries.rs:named"
+```
+
+A topic the filter matches sends the copy back to the same subscription. A registration on a filter
+that names neither a topic nor a publish transform refuses to start, naming the subscription: the
+service learns at startup that `retry_after` has nowhere to go, instead of losing every delayed
+message to a publish that went nowhere.
+
+`out_retry(policy)` also replaces the publisher the copies leave through, which is otherwise this
+broker's default policy. The position is an ordinary slot, so the steps after it are a slot's:
+`.codec(..)`, `.transform(..)` and `.map_publisher(..)`. The deferred copy carries the delivery's
+own bytes, so a codec named there resolves the position and encodes nothing, while a transform runs
+on the copy - the one place a service marks a redelivery as one. A transform there reads the
+delivery being retried, the way a reply's does.
 
 `HandlerOutcome::drop()` acknowledges, because dropping is the protocol's only terminal answer.
-Dead-lettering is a publish the service makes, not something the broker does.
 
 Back-pressure is the protocol's receive-maximum, which `MqttBroker::receive_maximum` sets: the
 broker holds no more than that many unacknowledged `QoS` 1/2 deliveries in flight, which is also
@@ -298,6 +326,52 @@ A responder is a plain handler: the incoming request carries its response topic 
 header, and the handler reads `ctx.headers().reply_to()` and publishes the answer to that topic
 through an injected publisher.
 
+## The generated document
+
+The framework generates an AsyncAPI document from the service's own declarations, and this crate
+fills what only MQTT knows. Turn it on with the `asyncapi` feature, which forwards the framework's:
+
+```toml
+ruststream-rumqttc = { version = "0.7", features = ["asyncapi"] }
+```
+
+The server says it speaks MQTT 5 and describes the session the client opens:
+
+```json
+--8<-- "crates/ruststream-rumqttc/tests/bindings/server.json"
+```
+
+Two things are missing on purpose. Credentials never reach a document teams publish and share, so
+neither the URL's user information nor `credentials` appears. The last will contributes its topic,
+its quality of service and its retain flag, but not its payload: that is the content of a message
+rather than a coordinate, and it may say something internal.
+
+A subscription reports the quality of service it reads at, on its receive operation:
+
+```json
+--8<-- "crates/ruststream-rumqttc/tests/bindings/receive_operation.json"
+```
+
+A publish policy reports both arguments its packets carry, on the send operation of an `Out` slot
+or a dead-letter topic. A reply has no send operation of its own, so a reply policy contributes
+nothing there:
+
+```json
+--8<-- "crates/ruststream-rumqttc/tests/bindings/send_operation.json"
+```
+
+Every message reports the MQTT 5 properties this crate maps it through. The payload format
+indicator is 0 because the crate sets none: a payload travels as bytes, and its media type travels
+in the `contentType` the framework fills from the codec:
+
+```json
+--8<-- "crates/ruststream-rumqttc/tests/bindings/message.json"
+```
+
+A responder that answers on the request's own response topic has no fixed reply channel, so the
+document reports the reply address as `null` and points a reader at `$message.header#/reply-to`,
+the header the response topic arrives in.
+
 ## Testing
 
 The `testing` feature ships `MqttTestBroker`, an in-process broker that runs a service with no
@@ -310,8 +384,8 @@ harness. See
 It fills batches the way the real subscriber does, with the same size from the mount site and the
 same deadline, so a batch handler receives under the harness what a server would have produced.
 
-A routes file mounts on it as written, both halves of it. `MqttTopic` opens a subscription on the
-test broker, so the handler a service ships is the handler the harness mounts - the one at the top
+A routes file mounts on it as written, both halves of it. `MqttTopic` and `MqttFilter` open a
+subscription on the test broker, so the handler a service ships is the handler the harness mounts - the one at the top
 of this page, wildcard, quality of service, shared group and all - and `MqttPublish` pairs against
 it, so `b.include(handle).out_reply(Publish::default())` is the same line under both brokers.
 There is no in-process descriptor and no in-process policy to swap in; the only thing that changes

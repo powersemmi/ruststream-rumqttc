@@ -387,8 +387,13 @@ describes the session the client opens:
 
 A subscription reports the quality of service it reads at on its receive operation, and a publish
 policy reports both of its arguments on the send operation of an `Out` slot or a dead-letter topic.
-A reply has no send operation of its own, so a reply policy contributes nothing there. Every
-message reports the MQTT 5 properties it is mapped through. A responder that answers on the
+A reply has no send operation of its own, so a reply policy contributes nothing there.
+
+Every message reports the MQTT 5 properties it is mapped through, and the two directions differ in
+one of them. A delivery a subscription reads describes the response topic, because a requester
+sets that property on its own request; a message a service publishes is not that request, so its
+binding describes the correlation data alone. Where a reply goes is the operation's `reply` object,
+and under a naming transform its `reply.address.location`. A responder that answers on the
 request's own response topic has no fixed reply channel, so the document reports the reply address
 as `null` and points a reader at `$message.header#/reply-to`.
 

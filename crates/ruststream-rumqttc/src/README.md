@@ -5,7 +5,10 @@ This crate implements the framework's broker contract over [`rumqttc`](https://d
 Handlers, routers, codecs and middleware come from [`ruststream`](https://docs.rs/ruststream); what
 is here is the transport. MQTT 5 is the only version targeted, because two things the framework
 relies on exist only there: user properties, which carry headers natively instead of inside an
-envelope, and shared subscriptions, which make competing consumers expressible.
+envelope, and shared subscriptions, which make competing consumers expressible. How a handler is
+written, how a router is composed, which codec encodes a payload and what middleware wraps are the
+framework's own subjects, at <https://docs.rs/ruststream/latest/ruststream/runtime/index.html> and
+<https://docs.rs/ruststream/latest/ruststream/codec/index.html>.
 
 MQTT is a topic bus with no history. There is no log to seek in, no partition, no transaction and
 no server-side retry. What a broker keeps is one retained message per topic and the unacknowledged

@@ -117,8 +117,8 @@ const SEND_BINDING: &str = include_str!("bindings/send_operation.json");
 /// it reads.
 const MESSAGE_BINDING: &str = include_str!("bindings/message.json");
 
-/// The same properties as a publish position describes them, with the destination it resolved
-/// named as the topic a request answered there carries.
+/// The same properties as a publish position describes them: the correlation data alone, because
+/// the response topic is a property the requester sets.
 const OUTGOING_MESSAGE_BINDING: &str = include_str!("bindings/outgoing_message.json");
 
 fn broker() -> MqttBroker {
@@ -195,10 +195,10 @@ fn a_message_reports_the_properties_it_is_mapped_through() {
     assert_eq!(message["bindings"]["mqtt"], expected(MESSAGE_BINDING));
 }
 
-/// A reply mounted on a topic of its own names it in the property a client asks to be answered
-/// through.
+/// A reply is not a request, so it describes no response topic: where it goes is the operation's
+/// own reply object.
 #[test]
-fn a_reply_reports_the_topic_a_request_is_answered_on() {
+fn a_reply_names_no_response_topic() {
     let document = document();
     let message = &document["components"]["messages"]["Ack"];
 
@@ -208,16 +208,16 @@ fn a_reply_reports_the_topic_a_request_is_answered_on() {
     );
 }
 
-/// A slot resolves a destination of its own, and that is the one its messages report: the policy
-/// is handed the position's destination, never the registration's reply.
+/// A slot resolves a destination of its own, and it reaches no binding field either: a
+/// destination is not a response topic.
 #[test]
-fn a_slot_reports_the_destination_it_resolved() {
+fn a_slot_names_no_response_topic() {
     let document = document();
     let message = &document["components"]["messages"]["Alert"];
 
     assert_eq!(
-        message["bindings"]["mqtt"]["responseTopic"]["const"],
-        "alerts/overheat"
+        message["bindings"]["mqtt"],
+        expected(OUTGOING_MESSAGE_BINDING)
     );
 }
 

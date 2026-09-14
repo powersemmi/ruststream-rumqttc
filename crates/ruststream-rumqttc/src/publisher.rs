@@ -290,14 +290,15 @@ impl PublishPolicy<ConnectedMqttBroker> for MqttPublish {
         asyncapi::send_operation(self.qos, self.retain)
     }
 
-    /// The MQTT 5 properties every message this policy sends is mapped through, with the
-    /// destination the mount site resolved reported as the topic a request answered there names.
+    /// The MQTT 5 properties every message this policy sends is mapped through.
     ///
-    /// The position is not part of what a policy is handed, so a slot restates its own
-    /// destination here as well as a reply does.
+    /// The destination the mount site resolved is not read here, nor on the operation: the `mqtt`
+    /// binding has no field that names one. The Response Topic property is the requester's to
+    /// set, so a message a service sends describes none, and where a reply goes is the
+    /// operation's `reply` object.
     #[cfg(feature = "asyncapi")]
-    fn message_bindings(&self, channel: &str) -> Bindings {
-        asyncapi::publish_message(channel)
+    fn message_bindings(&self, _channel: &str) -> Bindings {
+        asyncapi::publish_message()
     }
 
     /// The crate answers a request through the Response Topic property, which arrives as the
@@ -338,14 +339,15 @@ impl PublishPolicy<ConnectedMqttTestBroker> for MqttPublish {
         asyncapi::send_operation(self.qos, self.retain)
     }
 
-    /// The MQTT 5 properties every message this policy sends is mapped through, with the
-    /// destination the mount site resolved reported as the topic a request answered there names.
+    /// The MQTT 5 properties every message this policy sends is mapped through.
     ///
-    /// The position is not part of what a policy is handed, so a slot restates its own
-    /// destination here as well as a reply does.
+    /// The destination the mount site resolved is not read here, nor on the operation: the `mqtt`
+    /// binding has no field that names one. The Response Topic property is the requester's to
+    /// set, so a message a service sends describes none, and where a reply goes is the
+    /// operation's `reply` object.
     #[cfg(feature = "asyncapi")]
-    fn message_bindings(&self, channel: &str) -> Bindings {
-        asyncapi::publish_message(channel)
+    fn message_bindings(&self, _channel: &str) -> Bindings {
+        asyncapi::publish_message()
     }
 
     /// The crate answers a request through the Response Topic property, which arrives as the

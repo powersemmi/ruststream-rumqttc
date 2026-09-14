@@ -395,9 +395,9 @@ reports the media type itself, in the `contentType` the framework fills:
 --8<-- "crates/ruststream-rumqttc/tests/bindings/message.json"
 ```
 
-The messages a service publishes carry the same properties, with one of them pinned. Every publish
-position is handed the topic it sends to. That topic is what the response topic holds: it is what a
-client names to be answered there.
+The messages a service publishes report the correlation data alone. The response topic is a
+property a requester sets on its own request, and a reply is not a request, so the binding
+describes none:
 
 ```json
 --8<-- "crates/ruststream-rumqttc/tests/bindings/outgoing_message.json"

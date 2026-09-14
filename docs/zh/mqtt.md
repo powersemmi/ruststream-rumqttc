@@ -351,8 +351,8 @@ ruststream-rumqttc = { version = "0.7", features = ["asyncapi"] }
 --8<-- "crates/ruststream-rumqttc/tests/bindings/message.json"
 ```
 
-服务发布的消息带着同样的属性，只是其中一个被固定下来。每个发布位置都会拿到自己要发往的主题。
-响应主题里写的就是它：想在那里拿到应答的客户端，填的正是这个主题。
+服务发布的消息只报告关联数据。响应主题是发起请求的一方在自己的请求上设置的属性，而回复不是
+请求，所以这份绑定不描述它：
 
 ```json
 --8<-- "crates/ruststream-rumqttc/tests/bindings/outgoing_message.json"

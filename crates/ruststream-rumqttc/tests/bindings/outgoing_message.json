@@ -1,0 +1,12 @@
+{
+  "bindingVersion": "0.2.0",
+  "correlationData": {
+    "type": "string",
+    "description": "The correlation-id header, carried in the MQTT 5 Correlation Data property."
+  },
+  "responseTopic": {
+    "type": "string",
+    "const": "devices/dev42/ack",
+    "description": "The reply-to header, carried in the MQTT 5 Response Topic property. A request answered on this channel names this topic in it."
+  }
+}

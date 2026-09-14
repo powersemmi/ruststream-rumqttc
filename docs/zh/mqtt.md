@@ -351,6 +351,13 @@ ruststream-rumqttc = { version = "0.7", features = ["asyncapi"] }
 --8<-- "crates/ruststream-rumqttc/tests/bindings/message.json"
 ```
 
+服务发布的消息带着同样的属性，只是其中一个被固定下来。每个发布位置都会拿到自己要发往的主题。
+响应主题里写的就是它：想在那里拿到应答的客户端，填的正是这个主题。
+
+```json
+--8<-- "crates/ruststream-rumqttc/tests/bindings/outgoing_message.json"
+```
+
 在请求自带的响应主题上作答的响应方没有固定的回复通道，所以文档把回复地址报告为 `null`，并把读者
 指向 `$message.header#/reply-to` - 响应主题到达时所在的那个消息头。
 

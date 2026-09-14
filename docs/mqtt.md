@@ -395,6 +395,14 @@ reports the media type itself, in the `contentType` the framework fills:
 --8<-- "crates/ruststream-rumqttc/tests/bindings/message.json"
 ```
 
+The messages a service publishes carry the same properties, with one of them pinned. Every publish
+position is handed the topic it sends to. That topic is what the response topic holds: it is what a
+client names to be answered there.
+
+```json
+--8<-- "crates/ruststream-rumqttc/tests/bindings/outgoing_message.json"
+```
+
 A responder that answers on the request's own response topic has no fixed reply channel, so the
 document reports the reply address as `null` and points a reader at `$message.header#/reply-to`,
 the header the response topic arrives in.

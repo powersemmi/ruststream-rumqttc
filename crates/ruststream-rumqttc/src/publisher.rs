@@ -290,10 +290,14 @@ impl PublishPolicy<ConnectedMqttBroker> for MqttPublish {
         asyncapi::send_operation(self.qos, self.retain)
     }
 
-    /// The MQTT 5 properties every message this policy sends is mapped through.
+    /// The MQTT 5 properties every message this policy sends is mapped through, with the
+    /// destination the mount site resolved reported as the topic a request answered there names.
+    ///
+    /// The position is not part of what a policy is handed, so a slot restates its own
+    /// destination here as well as a reply does.
     #[cfg(feature = "asyncapi")]
-    fn message_bindings(&self, _channel: &str) -> Bindings {
-        asyncapi::message()
+    fn message_bindings(&self, channel: &str) -> Bindings {
+        asyncapi::publish_message(channel)
     }
 
     /// The crate answers a request through the Response Topic property, which arrives as the
@@ -334,10 +338,14 @@ impl PublishPolicy<ConnectedMqttTestBroker> for MqttPublish {
         asyncapi::send_operation(self.qos, self.retain)
     }
 
-    /// The MQTT 5 properties every message this policy sends is mapped through.
+    /// The MQTT 5 properties every message this policy sends is mapped through, with the
+    /// destination the mount site resolved reported as the topic a request answered there names.
+    ///
+    /// The position is not part of what a policy is handed, so a slot restates its own
+    /// destination here as well as a reply does.
     #[cfg(feature = "asyncapi")]
-    fn message_bindings(&self, _channel: &str) -> Bindings {
-        asyncapi::message()
+    fn message_bindings(&self, channel: &str) -> Bindings {
+        asyncapi::publish_message(channel)
     }
 
     /// The crate answers a request through the Response Topic property, which arrives as the

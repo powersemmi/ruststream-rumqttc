@@ -33,6 +33,11 @@ struct Alert {
     device: String,
 }
 
+#[derive(Debug, Serialize, Outgoing)]
+struct Ack {
+    device: String,
+}
+
 /// The slot the alert leaves through, which is where a send operation comes from: a reply has
 /// none of its own.
 #[derive(OutSlot)]
@@ -62,6 +67,15 @@ async fn collect(
 #[subscriber(MqttTopic::new("devices/dev42/ping"), publish("devices/dev42/pong"))]
 async fn answer(telemetry: &Telemetry) -> Pong {
     Pong {
+        device: telemetry.device.clone(),
+    }
+}
+
+/// A responder whose answer goes where the mount site names, which is the reply channel the
+/// document reports an address for.
+#[subscriber(MqttTopic::new("devices/dev42/config"), publish("devices/dev42/ack"))]
+async fn confirm(telemetry: &Telemetry) -> Ack {
+    Ack {
         device: telemetry.device.clone(),
     }
 }
@@ -99,8 +113,13 @@ const RECEIVE_BINDING: &str = include_str!("bindings/receive_operation.json");
 /// packet.
 const SEND_BINDING: &str = include_str!("bindings/send_operation.json");
 
-/// The MQTT 5 properties a message is mapped through, in both directions.
+/// The MQTT 5 properties a message is mapped through, as a subscription describes the deliveries
+/// it reads.
 const MESSAGE_BINDING: &str = include_str!("bindings/message.json");
+
+/// The same properties as a publish position describes them, with the destination it resolved
+/// named as the topic a request answered there carries.
+const OUTGOING_MESSAGE_BINDING: &str = include_str!("bindings/outgoing_message.json");
 
 fn broker() -> MqttBroker {
     MqttBroker::new("mqtt://alice:hunter2@localhost:1883", "telemetry-svc")
@@ -130,6 +149,7 @@ fn document() -> Value {
             b.include(answer)
                 .out_reply(Publish::default())
                 .transform(ToResponseTopic);
+            b.include(confirm).out_reply(Publish::default());
         },
     );
     let json = build_spec(&app)
@@ -173,6 +193,32 @@ fn a_message_reports_the_properties_it_is_mapped_through() {
     let message = &document["components"]["messages"]["Telemetry"];
 
     assert_eq!(message["bindings"]["mqtt"], expected(MESSAGE_BINDING));
+}
+
+/// A reply mounted on a topic of its own names it in the property a client asks to be answered
+/// through.
+#[test]
+fn a_reply_reports_the_topic_a_request_is_answered_on() {
+    let document = document();
+    let message = &document["components"]["messages"]["Ack"];
+
+    assert_eq!(
+        message["bindings"]["mqtt"],
+        expected(OUTGOING_MESSAGE_BINDING)
+    );
+}
+
+/// A slot resolves a destination of its own, and that is the one its messages report: the policy
+/// is handed the position's destination, never the registration's reply.
+#[test]
+fn a_slot_reports_the_destination_it_resolved() {
+    let document = document();
+    let message = &document["components"]["messages"]["Alert"];
+
+    assert_eq!(
+        message["bindings"]["mqtt"]["responseTopic"]["const"],
+        "alerts/overheat"
+    );
 }
 
 /// A reply whose destination a transform names per delivery has no fixed address, so the document

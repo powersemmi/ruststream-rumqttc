@@ -66,6 +66,12 @@ struct MqttOperation {
 /// The MQTT 5 properties this crate maps a message onto: `correlation-id` rides the Correlation
 /// Data property and `reply-to` rides the Response Topic property, in both directions.
 ///
+/// `responseTopic` carries a topic of its own where the document knows one. A publish position is
+/// handed the destination it resolved, and a request is answered on that channel by naming it in
+/// the Response Topic property, so the binding restates the address in the field an MQTT client
+/// reads it from. A subscription describes deliveries whose senders each chose their own, so
+/// there the schema constrains nothing.
+///
 /// `payloadFormatIndicator` is deliberately absent. The indicator follows the media type of the
 /// message, which the codec of the publish position produces, and neither the subscription
 /// descriptor nor the publish policy is handed that codec - the document is built from
@@ -78,7 +84,7 @@ struct MqttMessageBinding {
     #[serde(rename = "correlationData")]
     correlation_data: StringSchema,
     #[serde(rename = "responseTopic")]
-    response_topic: StringSchema,
+    response_topic: ResponseTopic,
 }
 
 /// The shape of a property the crate carries as a header.
@@ -86,6 +92,17 @@ struct MqttMessageBinding {
 struct StringSchema {
     #[serde(rename = "type")]
     kind: &'static str,
+    description: &'static str,
+}
+
+/// The Response Topic property, pinned to one topic where the position describing it resolved a
+/// destination.
+#[derive(Debug, Serialize)]
+struct ResponseTopic {
+    #[serde(rename = "type")]
+    kind: &'static str,
+    #[serde(rename = "const", skip_serializing_if = "Option::is_none")]
+    topic: Option<String>,
     description: &'static str,
 }
 
@@ -110,17 +127,37 @@ pub(crate) fn send_operation(qos: Qos, retain: bool) -> Bindings {
     })
 }
 
-/// The properties every message on this broker is mapped through, whichever direction it travels.
+/// The properties every delivery a subscription reads is mapped through, whose response topic is
+/// each sender's to choose.
 pub(crate) fn message() -> Bindings {
+    mapped_properties(None)
+}
+
+/// The same properties for a publish position, with `channel` - the destination the mount site
+/// resolved - named as the topic a request answered there carries.
+pub(crate) fn publish_message(channel: &str) -> Bindings {
+    mapped_properties(Some(channel.to_owned()))
+}
+
+/// The one message binding both directions build, differing only in whether the response topic is
+/// known here.
+fn mapped_properties(response_topic: Option<String>) -> Bindings {
+    let description = if response_topic.is_some() {
+        "The reply-to header, carried in the MQTT 5 Response Topic property. A request answered \
+         on this channel names this topic in it."
+    } else {
+        "The reply-to header, carried in the MQTT 5 Response Topic property."
+    };
     one(&MqttMessageBinding {
         correlation_data: StringSchema {
             kind: "string",
             description: "The correlation-id header, carried in the MQTT 5 Correlation Data \
                           property.",
         },
-        response_topic: StringSchema {
+        response_topic: ResponseTopic {
             kind: "string",
-            description: "The reply-to header, carried in the MQTT 5 Response Topic property.",
+            topic: response_topic,
+            description,
         },
     })
 }

@@ -3,9 +3,10 @@
 //! The specification's `mqtt` binding (version 0.2.0, the one that replaced the deprecated
 //! `mqtt5`) has room for the session a client opens, the quality of service an operation runs at,
 //! and the MQTT 5 properties a message carries. Each body here is built from what the broker, the
-//! subscription descriptor or the publish policy already holds, with no connection and no
-//! credential: the document is generated before anything connects, and it is published and
-//! shared.
+//! subscription descriptor or the publish policy already holds, plus the destination a publish
+//! position resolved, which the framework hands the policy: a policy declares this broker's
+//! settings and never a destination. There is no connection and no credential in any of it: the
+//! document is generated before anything connects, and it is published and shared.
 
 use ruststream::asyncapi::{Binding, Bindings};
 use serde::Serialize;

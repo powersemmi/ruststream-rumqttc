@@ -24,15 +24,30 @@ The app function names the broker and includes the handler:
 
 ## Where to go next
 
+The crate's guide is its rustdoc. The [crate overview](https://docs.rs/ruststream-rumqttc) on
+docs.rs covers [subscribing][subscribing] with the two descriptors, wildcards, share groups and
+batches; [acknowledgement][ack] and what each handler outcome means on a transport with no
+server-side retry; [publishing][publishing], including the quality of service and the retain flag
+of a single message; [the generated document][asyncapi]; [testing][testing] against the in-process
+broker; and [the connection settings][operations].
+
 <div class="grid cards" markdown>
 
-- :material-access-point: **[MQTT guide](mqtt.md)** - topic filters, quality of service, shared subscriptions, retained publishes, and testing.
-- :material-book-open-variant: **[RustStream docs](https://powersemmi.github.io/ruststream/)** - the framework itself: subscribers, routing, codecs, middleware, the CLI.
-- :material-language-rust: **[API reference](https://docs.rs/ruststream-rumqttc)** - the crate's rustdoc on docs.rs.
+- :material-access-point: **[Crate overview](https://docs.rs/ruststream-rumqttc)** - the MQTT guide and the API reference, in one document on docs.rs.
+- :material-book-open-variant: **[RustStream docs](https://powersemmi.github.io/ruststream/)** - installation, the quick start, the tutorial and the list of brokers.
+- :material-language-rust: **[Framework reference](https://docs.rs/ruststream/latest/ruststream/)** - subscribers, routing, codecs, middleware, the CLI.
 
 </div>
 
 ## How this site relates to the RustStream docs
 
-This site documents the MQTT broker. Framework concepts that work the same on every broker live in
-the [RustStream documentation](https://powersemmi.github.io/ruststream/).
+This site is the entry page for the MQTT broker, and everything it used to explain now lives in the
+crate overview on docs.rs. Framework concepts that work the same on every broker live in the
+[RustStream documentation](https://powersemmi.github.io/ruststream/).
+
+[subscribing]: https://docs.rs/ruststream-rumqttc/latest/ruststream_rumqttc/index.html#subscribing
+[ack]: https://docs.rs/ruststream-rumqttc/latest/ruststream_rumqttc/index.html#acknowledgement
+[publishing]: https://docs.rs/ruststream-rumqttc/latest/ruststream_rumqttc/index.html#publishing
+[asyncapi]: https://docs.rs/ruststream-rumqttc/latest/ruststream_rumqttc/index.html#the-generated-document
+[testing]: https://docs.rs/ruststream-rumqttc/latest/ruststream_rumqttc/index.html#testing
+[operations]: https://docs.rs/ruststream-rumqttc/latest/ruststream_rumqttc/index.html#operations

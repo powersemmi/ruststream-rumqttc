@@ -67,13 +67,22 @@ hooks:
 
 plugins:
   - search
+  # The MQTT guide moved into the crate's rustdoc, where the items it describes already live.
+  # Every URL it published keeps working and lands on the overview section that took the topic
+  # over. External targets are what mkdocs-redirects 1.2.3 added; an older one rewrites them as
+  # relative paths and produces a broken link.
+  - redirects:
+      redirect_maps:
+        mqtt.md: https://docs.rs/ruststream-rumqttc/latest/ruststream_rumqttc/index.html
+        ru/mqtt.md: https://docs.rs/ruststream-rumqttc/latest/ruststream_rumqttc/index.html
+        zh/mqtt.md: https://docs.rs/ruststream-rumqttc/latest/ruststream_rumqttc/index.html
   # Versioned docs are published with `mike` (see the Docs workflow and the version switcher).
   # Each translation is a tree of its own under `docs/<locale>/`, mirroring the English paths.
   # English stays at the docs root: a file outside a locale folder is the default language.
   #
   # English is normative; a page with no translation yet falls back to the English text inside
   # the localized site rather than disappearing from it, which is what lets translations land
-  # page by page. Both pages are translated into both locales, so the fallback carries nothing
+  # page by page. The entry page is translated into both locales, so the fallback carries nothing
   # today; it is what keeps a new English page visible in `ru` and `zh` before it is translated.
   - i18n:
       docs_structure: folder
@@ -90,7 +99,6 @@ plugins:
           build: true
           nav_translations:
             Home: Главная
-            Guide: Руководство
             RustStream docs: Документация RustStream
             API reference: Справочник API
         - locale: zh
@@ -98,7 +106,6 @@ plugins:
           build: true
           nav_translations:
             Home: 首页
-            Guide: 指南
             RustStream docs: RustStream 文档
             API reference: API 参考
 
@@ -111,7 +118,5 @@ extra:
 
 nav:
   - Home: index.md
-  - Guide:
-      - mqtt.md
   - RustStream docs: https://powersemmi.github.io/ruststream/
   - API reference: https://docs.rs/ruststream-rumqttc

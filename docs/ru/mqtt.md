@@ -427,7 +427,7 @@ ruststream-rumqttc = { version = "0.7", features = ["asyncapi"] }
 импортирует файл маршрутов, - это словарь точки монтирования, и его там нет. Тест монтирует
 приложение на этот брокер и прогоняет настоящие обработчики, кодеки и middleware через обвязку
 `TestApp` фреймворка. См.
-[Юнит-тестирование сервиса через TestApp](https://powersemmi.github.io/ruststream/latest/guides/testing/#unit-testing-a-service-with-testapp).
+[модуль `testing`](https://docs.rs/ruststream/latest/ruststream/testing/index.html) фреймворка.
 
 Пакеты он наполняет так же, как настоящий подписчик: тот же размер из точки монтирования и тот же
 срок, поэтому под обвязкой пакетный обработчик получает то, что дал бы сервер.

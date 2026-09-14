@@ -366,8 +366,8 @@ ruststream-rumqttc = { version = "0.7", features = ["asyncapi"] }
 `testing` feature 提供 `MqttTestBroker`，一个不需要服务器、不需要网络就能运行服务的进程内
 Broker。从 `ruststream_rumqttc::testing` 导入它：路由文件导入的 prelude 是挂载点的词汇表，里面
 没有它。测试把应用挂在这个 Broker 上，通过框架的 `TestApp` 测试套件驱动真实的处理器、编解码器
-和中间件。参见
-[用 TestApp 对服务做单元测试](https://powersemmi.github.io/ruststream/latest/guides/testing/#unit-testing-a-service-with-testapp)。
+和中间件。参见框架的
+[`testing` 模块](https://docs.rs/ruststream/latest/ruststream/testing/index.html)。
 
 它攒批次的方式和真实订阅者一样，大小同样来自挂载点，期限也相同，因此批量处理器在测试套件下
 收到的，就是服务器本会给出的东西。

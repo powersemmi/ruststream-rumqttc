@@ -286,13 +286,13 @@ impl PublishPolicy<ConnectedMqttBroker> for MqttPublish {
     /// What every packet this policy sends carries: the quality of service and the retain flag,
     /// which the `mqtt` binding puts on the operation.
     #[cfg(feature = "asyncapi")]
-    fn operation_bindings(&self) -> Bindings {
+    fn operation_bindings(&self, _channel: &str) -> Bindings {
         asyncapi::send_operation(self.qos, self.retain)
     }
 
     /// The MQTT 5 properties every message this policy sends is mapped through.
     #[cfg(feature = "asyncapi")]
-    fn message_bindings(&self) -> Bindings {
+    fn message_bindings(&self, _channel: &str) -> Bindings {
         asyncapi::message()
     }
 
@@ -330,13 +330,13 @@ impl PublishPolicy<ConnectedMqttTestBroker> for MqttPublish {
     /// What every packet this policy sends carries: the quality of service and the retain flag,
     /// which the `mqtt` binding puts on the operation.
     #[cfg(feature = "asyncapi")]
-    fn operation_bindings(&self) -> Bindings {
+    fn operation_bindings(&self, _channel: &str) -> Bindings {
         asyncapi::send_operation(self.qos, self.retain)
     }
 
     /// The MQTT 5 properties every message this policy sends is mapped through.
     #[cfg(feature = "asyncapi")]
-    fn message_bindings(&self) -> Bindings {
+    fn message_bindings(&self, _channel: &str) -> Bindings {
         asyncapi::message()
     }
 

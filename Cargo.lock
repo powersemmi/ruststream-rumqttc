@@ -499,9 +499,9 @@ dependencies = [
 
 [[package]]
 name = "ruststream"
-version = "0.7.0-rc.5"
+version = "0.7.0-rc.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c929b2df0e44898828eba7b6f255a0ca66e99123c9ecb8107487711764f439e3"
+checksum = "8dcdd86f86819f9573d26c146e85fe1271d5b4e379dbcaf2106ceca84d35170e"
 dependencies = [
  "bytes",
  "futures",
@@ -519,9 +519,9 @@ dependencies = [
 
 [[package]]
 name = "ruststream-macros"
-version = "0.7.0-rc.5"
+version = "0.7.0-rc.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d6e4ef329ce718c7757e494c4a34e545be897c5ea23abe8a3e9fb0a31fc701df"
+checksum = "e7a0e5e0b23f92ddd0a7981ee267491abb4f103e4ecd5940ef634941920e4fbf"
 dependencies = [
  "proc-macro2",
  "quote",

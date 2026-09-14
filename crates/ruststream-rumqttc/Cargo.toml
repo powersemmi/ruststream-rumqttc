@@ -11,6 +11,11 @@ readme = "../../README.md"
 keywords = ["mqtt", "mqtt5", "iot", "broker", "ruststream"]
 categories = ["asynchronous", "network-programming"]
 
+# The overview links the `testing` and `asyncapi` modules, and both are off by default, so a
+# default build of the page would document neither and every link into them would 404.
+[package.metadata.docs.rs]
+all-features = true
+
 [lints]
 workspace = true
 

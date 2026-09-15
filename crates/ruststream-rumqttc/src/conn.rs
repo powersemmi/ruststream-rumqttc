@@ -187,6 +187,11 @@ fn fatal_reason(err: &ConnectionError) -> Option<String> {
             "broker disconnected the session: {reason_code:?} {reason_string:?}"
         )),
         ConnectionError::NotConnAck(_) => Some("the peer is not an MQTT broker".to_owned()),
+        // A TLS failure is an answer about the configuration, not about the moment: an unknown
+        // certificate authority, an address the server's certificate does not cover, a refused
+        // client certificate all answer the same way on every attempt. Retrying one only replaces
+        // its reason with a timeout.
+        ConnectionError::Tls(err) => Some(format!("tls handshake failed: {err}")),
         _ => None,
     }
 }

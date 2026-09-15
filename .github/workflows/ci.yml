@@ -171,6 +171,7 @@ jobs:
       - name: Start mosquitto
         timeout-minutes: 2
         run: |
+          scripts/stand_tls_certs.sh
           docker compose -f docker-compose.test.yml up -d --wait
           docker compose -f docker-compose.test.yml logs | tail -3
 
@@ -184,6 +185,8 @@ jobs:
         env:
           MQTT_TEST_URL: mqtt://127.0.0.1:1883
           MQTT_TEST_AUTH_URL: mqtt://127.0.0.1:1884
+          MQTT_TEST_TLS_URL: mqtts://127.0.0.1:8883
+          MQTT_TEST_TLS_DIR: ${{ github.workspace }}/.stand-tls
           # The gated tests skip themselves without the URL, so a renamed variable or a dropped
           # env block would leave this job green having asserted nothing. With this set, a
           # missing URL fails the suite instead of skipping it.

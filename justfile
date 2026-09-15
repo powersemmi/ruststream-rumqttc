@@ -17,8 +17,12 @@ check:
 test:
     cargo test --workspace --all-features
 
-brokers-up:
+brokers-up: tls-certs
     docker compose -f docker-compose.test.yml up -d --wait
+
+# The certificate chain the TLS listener uses, generated next to the stand rather than committed.
+tls-certs:
+    scripts/stand_tls_certs.sh "{{justfile_directory()}}/.stand-tls"
 
 brokers-down:
     docker compose -f docker-compose.test.yml down -v
@@ -31,6 +35,8 @@ test-brokers: brokers-up
     # developer without a broker.
     MQTT_TEST_URL=mqtt://127.0.0.1:1883 \
     MQTT_TEST_AUTH_URL=mqtt://127.0.0.1:1884 \
+    MQTT_TEST_TLS_URL=mqtts://127.0.0.1:8883 \
+    MQTT_TEST_TLS_DIR={{justfile_directory()}}/.stand-tls \
     RUSTSTREAM_REQUIRE_LIVE=1 \
         cargo test --workspace --all-features -- --test-threads=1
 

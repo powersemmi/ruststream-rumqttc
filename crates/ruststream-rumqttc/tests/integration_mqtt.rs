@@ -3,6 +3,7 @@
 //! Start one with `just brokers-up` (mosquitto), then:
 //! `MQTT_TEST_URL=mqtt://127.0.0.1:1883 cargo test --all-features -- --test-threads=1`.
 
+use std::path::{Path, PathBuf};
 use std::pin::pin;
 use std::time::Duration;
 
@@ -1447,4 +1448,97 @@ async fn a_broker_that_demands_credentials_refuses_the_wrong_ones() {
             "{what} is a connection refusal: {error}"
         );
     }
+}
+
+/// The TLS listener's URL and the directory the stand's certificate chain was generated into, or
+/// `None` when there is no stand.
+fn tls_stand() -> Option<(String, PathBuf)> {
+    match (
+        std::env::var("MQTT_TEST_TLS_URL"),
+        std::env::var("MQTT_TEST_TLS_DIR"),
+    ) {
+        (Ok(url), Ok(dir)) if !url.is_empty() && !dir.is_empty() => Some((url, PathBuf::from(dir))),
+        _ => {
+            assert!(
+                std::env::var_os("RUSTSTREAM_REQUIRE_LIVE").is_none(),
+                "RUSTSTREAM_REQUIRE_LIVE is set, so the TLS tests must run, but \
+                 MQTT_TEST_TLS_URL or MQTT_TEST_TLS_DIR is missing or empty"
+            );
+            eprintln!("MQTT_TEST_TLS_URL is not set; skipping the TLS test");
+            None
+        }
+    }
+}
+
+/// One of the stand's generated PEM files.
+fn pem(dir: &Path, name: &str) -> Vec<u8> {
+    std::fs::read(dir.join(name))
+        .unwrap_or_else(|err| panic!("the stand's {name} is readable: {err}"))
+}
+
+/// Both halves of the crate's TLS surface at once: the listener verifies the client against the
+/// stand's authority and the client verifies the listener against the same one, so a session that
+/// carries a message says each PEM reached the place it belongs.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_tls_listener_accepts_the_certificates_the_builder_records() {
+    let Some((url, dir)) = tls_stand() else {
+        return;
+    };
+
+    let connected = MqttBroker::new(&url, format!("it-tls-{}", std::process::id()))
+        .tls_ca(pem(&dir, "ca.crt"))
+        .tls_client_auth(pem(&dir, "client.crt"), pem(&dir, "client.key"))
+        .connect()
+        .await
+        .expect("the TLS session is established");
+
+    let topic = unique("over-tls");
+    let mut subscriber = connected
+        .subscribe_topic(MqttTopic::new(&topic).qos(Qos::AtLeastOnce))
+        .await
+        .expect("subscription opens");
+    connected
+        .publisher()
+        .publish(OutgoingMessage::new(&topic, b"encrypted".as_slice()), None)
+        .await
+        .expect("publish succeeds");
+
+    let mut stream = pin!(subscriber.stream());
+    let message = tokio::time::timeout(RECV_TIMEOUT, stream.next())
+        .await
+        .expect("delivery arrives")
+        .expect("stream is open")
+        .expect("delivery is ok");
+    assert_eq!(message.payload(), b"encrypted");
+    message.ack().await.expect("ack succeeds");
+
+    connected.shutdown().await.expect("shutdown succeeds");
+}
+
+/// An authority that did not sign the server's certificate verifies nothing, and that answer is
+/// the same on every attempt: `connect` reports the handshake rather than retrying it until the
+/// wait turns into a timeout naming nothing. This is what a wrong `tls_ca` looks like in a
+/// deployment - a real certificate, just not the one that signed the server's.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_certificate_authority_that_signed_nothing_is_reported_rather_than_retried() {
+    let Some((url, dir)) = tls_stand() else {
+        return;
+    };
+
+    let error = tokio::time::timeout(
+        RECV_TIMEOUT,
+        MqttBroker::new(&url, format!("it-tls-wrong-ca-{}", std::process::id()))
+            .tls_ca(pem(&dir, "client.crt"))
+            .tls_client_auth(pem(&dir, "client.crt"), pem(&dir, "client.key"))
+            .connect(),
+    )
+    .await
+    .expect("the refusal is reported instead of being retried")
+    .expect_err("the server's certificate was signed by an authority this client does not hold");
+
+    let reported = error.to_string();
+    assert!(
+        matches!(error, MqttError::Connect(_)) && reported.contains("tls handshake failed"),
+        "the error names the handshake that failed: {reported}"
+    );
 }

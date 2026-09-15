@@ -12,3 +12,6 @@ __pycache__/
 .DS_Store
 
 tmp/
+
+# The test stand's generated certificate chain (`just tls-certs`).
+.stand-tls/

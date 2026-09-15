@@ -19,8 +19,9 @@ The crate owns one task that drives the client's single event loop, demultiplexe
 per-subscription streams by topic-filter match, reconnects with a backoff that starts at 100 ms and
 doubles to a 5 second ceiling, and resubscribes when the broker reports the session gone. Polling
 that loop is what drives keep-alive, acknowledgement and flow control, so a slow handler never
-stalls the connection. A refusal the broker will not reconsider (bad credentials, an unacceptable
-client id) ends the task instead, and every subscription returns that error.
+stalls the connection. A refusal the connection will not outgrow (bad credentials, an unacceptable
+client id, a TLS handshake the certificates cannot satisfy) ends the task instead, and every
+subscription returns that error.
 
 # A service
 

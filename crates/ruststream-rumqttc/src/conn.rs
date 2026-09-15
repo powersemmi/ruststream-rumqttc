@@ -54,6 +54,10 @@ pub(crate) struct Shared {
     /// flushes what it queued immediately after `CONNACK`, before the application has opened a
     /// single subscription, so they wait here for the filter they belong to.
     held: Mutex<VecDeque<MqttMessage>>,
+    /// The last failure the connection task decided to retry, as it read on the wire. A retry
+    /// leaves no other trace, so without this a startup that never reaches a `CONNACK` can only
+    /// report that it waited.
+    last_error: Mutex<Option<String>>,
     pub(crate) closed: AtomicBool,
     next_id: AtomicU64,
     /// Rotates local delivery across entries sharing one wire filter (a shared group
@@ -67,6 +71,7 @@ impl Shared {
             subs: Mutex::new(Vec::new()),
             pending: Mutex::new(VecDeque::new()),
             held: Mutex::new(VecDeque::new()),
+            last_error: Mutex::new(None),
             closed: AtomicBool::new(false),
             next_id: AtomicU64::new(0),
             round_robin: AtomicU64::new(0),
@@ -86,6 +91,19 @@ impl Shared {
             );
         }
         held.push_back(message);
+    }
+
+    /// Records the failure a retry is about to hide.
+    fn record_error(&self, err: &ConnectionError) {
+        *self.last_error.lock().expect("mqtt error mutex poisoned") = Some(err.to_string());
+    }
+
+    /// What the connection last failed with, if it has failed at all.
+    pub(crate) fn last_error(&self) -> Option<String> {
+        self.last_error
+            .lock()
+            .expect("mqtt error mutex poisoned")
+            .clone()
     }
 
     /// How many deliveries are still waiting for a subscription to match them.
@@ -242,6 +260,12 @@ pub(crate) async fn run(mut conn: Conn) {
                     break;
                 }
                 tracing::debug!(error = %err, "mqtt connection error; backing off");
+                // A refusal the broker issues after the TLS handshake - a client certificate it
+                // wanted and did not get - reaches the client wrapped as a deserialization error,
+                // which is what a corrupt stream looks like too. Reconnecting is right for one and
+                // futile for the other, so the task keeps retrying and leaves the reason where
+                // `connect` can name it.
+                conn.shared.record_error(&err);
                 tokio::time::sleep(backoff).await;
                 backoff = (backoff * 2).min(Duration::from_secs(5));
             }

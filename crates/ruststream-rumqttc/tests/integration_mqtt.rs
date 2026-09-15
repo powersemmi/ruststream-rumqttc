@@ -1542,3 +1542,32 @@ async fn a_certificate_authority_that_signed_nothing_is_reported_rather_than_ret
         "the error names the handshake that failed: {reported}"
     );
 }
+
+/// A refusal the broker issues after the TLS handshake - a client certificate it demanded and did
+/// not get - arrives wrapped the way a corrupt stream does, and reconnecting is the right answer
+/// to one of those two. So the connection task retries it and `connect` ends on its own timeout;
+/// what that timeout says is the whole difference between a deployment that learns its
+/// certificate was refused and one that learns only that it waited. The wait is that timeout,
+/// which is why this is the slow test of the suite.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_connect_that_only_times_out_still_names_what_failed() {
+    let Some((url, dir)) = tls_stand() else {
+        return;
+    };
+
+    let error = MqttBroker::new(&url, format!("it-tls-bare-{}", std::process::id()))
+        .tls_ca(pem(&dir, "ca.crt"))
+        .connect()
+        .await
+        .expect_err("the listener demands a client certificate");
+
+    let reported = error.to_string();
+    assert!(
+        reported.contains("timed out waiting for the broker's CONNACK"),
+        "the wait is what ended the attempt: {reported}"
+    );
+    assert!(
+        reported.contains("CertificateRequired"),
+        "and the timeout carries the refusal the retries hid: {reported}"
+    );
+}

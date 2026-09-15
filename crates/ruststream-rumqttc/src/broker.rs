@@ -291,9 +291,19 @@ impl Broker for MqttBroker {
                     }
                     Err(_) => {
                         shared.closed.store(true, Ordering::Release);
-                        return Err(MqttError::Connect(Box::from(
-                            "timed out waiting for the broker's CONNACK",
-                        )));
+                        // Everything the task retried is gone by now, so the wait is all there
+                        // would be to report: a wrong port, an unreachable host and a handshake
+                        // the broker refused after the fact would all read the same.
+                        let reason = shared.last_error().map_or_else(
+                            || "timed out waiting for the broker's CONNACK".to_owned(),
+                            |last| {
+                                format!(
+                                    "timed out waiting for the broker's CONNACK; \
+                                     last connection error: {last}"
+                                )
+                            },
+                        );
+                        return Err(MqttError::Connect(Box::from(reason)));
                     }
                 }
                 Ok::<_, MqttError>(Core { client, shared })

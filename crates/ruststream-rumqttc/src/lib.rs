@@ -1,31 +1,11 @@
-//! MQTT 5 broker implementation for `RustStream`, built on `rumqttc`.
-//!
-//! Handlers, routers, codecs, and middleware come from the framework; this crate supplies
-//! the transport over [`rumqttc`](https://docs.rs/rumqttc), targeting MQTT 5 because two
-//! things the framework relies on exist only there: user properties (headers travel natively
-//! instead of inside a wrapper envelope) and shared subscriptions (which make competing
-//! consumers expressible).
-//!
-//! - The crate owns a connection task that drives the client's single event loop,
-//!   demultiplexes packets to per-subscription streams by topic-filter matching, reconnects
-//!   with backoff, and resubscribes when the broker reports the session gone, without
-//!   stalling keep-alive traffic.
-//! - Acknowledgement follows the quality of service: `QoS` 1/2 acknowledge through the
-//!   protocol under manual control; `QoS` 0 has no protocol acknowledgement and reports
-//!   [`AckError::Unsupported`](ruststream::AckError::Unsupported), as does
-//!   `nack(requeue = true)` - MQTT has no negative acknowledgement, and unacked
-//!   messages redeliver when a persistent session resumes.
-//! - A handler taking a batch (`&[T]`) gets one. A PUBLISH packet carries a single message, so
-//!   the batches are assembled on the client to the size the mount site named, and nothing at
-//!   that mount site says which side of the wire filled them.
-//! - Retained messages, last will, session persistence, and TLS with client certificates are
-//!   configuration on the broker and the publish policy. Quality of service and the retain flag
-//!   are also settable per message through [`MqttPublishOptions`].
-
+#![doc = include_str!("README.md")]
 #![forbid(unsafe_code)]
 
+#[cfg(feature = "asyncapi")]
+mod asyncapi;
 mod broker;
 mod conn;
+mod context;
 mod error;
 mod filter;
 mod message;
@@ -36,10 +16,9 @@ mod subscriber;
 pub mod testing;
 
 pub use broker::{ConnectedMqttBroker, MqttBroker};
+pub use context::{DeliveryTopic, MqttContext};
 pub use error::MqttError;
-pub use filter::{MqttTopic, Qos};
+pub use filter::{MqttFilter, MqttTopic, Qos};
 pub use message::MqttMessage;
-pub use publisher::{
-    MqttPublish, MqttPublishOptions, MqttPublishOverride, MqttPublisher, QOS_HEADER, RETAIN_HEADER,
-};
+pub use publisher::{MqttPublish, MqttPublishOptions, MqttPublishSteps, MqttPublisher};
 pub use subscriber::MqttSubscriber;

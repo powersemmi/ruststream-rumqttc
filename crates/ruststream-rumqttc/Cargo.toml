@@ -11,6 +11,11 @@ readme = "../../README.md"
 keywords = ["mqtt", "mqtt5", "iot", "broker", "ruststream"]
 categories = ["asynchronous", "network-programming"]
 
+# The overview links the `testing` and `asyncapi` modules, and both are off by default, so a
+# default build of the page would document neither and every link into them would 404.
+[package.metadata.docs.rs]
+all-features = true
+
 [lints]
 workspace = true
 
@@ -19,17 +24,31 @@ default = []
 # The in-process test broker (TestableBroker + TestApp support). The conformance harness is a
 # broker-author tool and stays in this repo's dev-dependencies, not in the user-facing feature.
 testing = ["ruststream/testing"]
+# The `mqtt` protocol bindings of the generated AsyncAPI document. Forwards the core's own
+# feature; serde comes with it because a binding body is a serialized struct.
+asyncapi = ["ruststream/asyncapi", "dep:serde"]
 
 [dependencies]
 ruststream = { workspace = true, default-features = false }
 rumqttc.workspace = true
 bytes.workspace = true
+serde = { version = "1", features = ["derive"], optional = true }
 futures.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-ruststream = { workspace = true, features = ["conformance", "testing", "macros", "json"] }
+# A raw client reads the PUBLISH packet the crate produced, which is the only way to assert a
+# protocol property the crate maps in one direction only.
+rumqttc.workspace = true
+ruststream = { workspace = true, features = [
+    "asyncapi",
+    "conformance",
+    "testing",
+    "macros",
+    "json",
+] }
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time"] }

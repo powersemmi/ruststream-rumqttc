@@ -1,0 +1,15 @@
+{
+  "rules": [
+    "Import `ruststream_rumqttc::prelude::*` in a routes file; it re-exports the framework's prelude along with the broker, the descriptors and the publish policy under the name `Publish`.",
+    "Subscribe with `MqttTopic` for one topic and `MqttFilter` for a filter carrying `+` or `#`; a bare `#[subscriber(\"devices/dev42/telemetry\")]` string is an `MqttTopic` with the defaults.",
+    "A registration on `MqttFilter` says where a deferred retry copy goes, with `.out_retry(policy).to(\"topic\")` or a publish transform declaring `Destination = Names`; one on `MqttTopic` needs neither and refusing to name either fails at startup.",
+    "Declare the quality of service and the retain flag once on `Publish::default().qos(..).retain(..)` at the mount site, and change one message with the `.qos(..)` / `.retain(..)` steps on the publish builder; neither ever rides a header.",
+    "Set the `content-type` header yourself where peers read the MQTT 5 content type and payload format properties: nothing fills it for you, and a publish transform over the position is where it belongs.",
+    "A handler body that takes one of those steps bounds its slot `Out<impl Publisher<Options = MqttPublishOptions>, Marker>` and imports this crate's prelude; every other body states a capability such as `Out<impl Publisher>` and names no broker type.",
+    "`QoS` 0 deliveries and `nack(requeue = true)` report `AckError::Unsupported`, so `HandlerOutcome::retry()` means \"leave it for the next persistent session\" and `retry_after(delay)` is the outcome that retries inside the running one.",
+    "Cap redeliveries with `.max_attempts(n).dead_letter(topic)` right after `include`; MQTT counts no attempts, so the count travels in the framework's retry-count header and the dead-letter topic must match no filter the service reads.",
+    "A `&[T]` handler takes `.batch(n)` at the mount site; a PUBLISH packet carries one message, so the crate fills batches on the client and closes a partial one 20 ms after its first delivery.",
+    "MQTT offers no transactions, no partitions, no position to seek to and no correlated `request(..)`, so a responder is an ordinary handler that reads `ctx.headers().reply_to()` and publishes the answer there.",
+    "Test with `ruststream::testing::TestApp` over `ruststream_rumqttc::testing::MqttTestBroker` (feature `testing`), which routes by topic-filter match and honours share groups and quality of service but models neither retained messages nor session redelivery."
+  ]
+}

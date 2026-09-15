@@ -14,7 +14,7 @@ struct Telemetry {
     temperature: f64,
 }
 
-#[subscriber(MqttTopic::new("devices/+/telemetry").qos(Qos::AtLeastOnce).shared("workers"))]
+#[subscriber(MqttFilter::new("devices/+/telemetry").qos(Qos::AtLeastOnce).shared("workers"))]
 async fn handle(telemetry: &Telemetry) -> HandlerOutcome {
     println!("temperature: {}", telemetry.temperature);
     HandlerOutcome::ack()
@@ -30,7 +30,12 @@ fn app() -> impl App {
             .clean_start(false)
             .session_expiry(Duration::from_secs(3600)),
         |b| {
-            b.include(handle);
+            // A filter matches many topics and names none of them, so the mount site says where
+            // a deferred retry copy goes. This topic matches the filter, so a copy comes back to
+            // this subscription.
+            b.include(handle)
+                .out_retry(Publish::default())
+                .to("devices/retry/telemetry");
         },
     )
 }

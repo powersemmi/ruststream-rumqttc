@@ -11,5 +11,8 @@ mkdocs-material>=9.5
 # The plugin targets MkDocs, and properdocs aliases the `mkdocs` package and reads the
 # `mkdocs.plugins` entry-point group, so it loads unchanged under `properdocs build`.
 mkdocs-static-i18n>=1.3
+# The guide's old URLs redirect to the crate's rustdoc. 1.2.3 is the first release that leaves an
+# absolute target alone instead of rewriting it as a relative path.
+mkdocs-redirects>=1.2.3
 pymdown-extensions>=10.7
 mike>=2.2

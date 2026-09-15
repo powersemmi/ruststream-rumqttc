@@ -344,8 +344,33 @@ take the matching first-class properties (content type, response topic, correlat
 directions. A message with no headers is published with no properties at all. A publish whose
 content type is textual (`application/json`, any `text/` subtype, any `+json` vendor type) carries
 the payload format indicator 1 and every other one carries 0, so a peer reads a JSON body as the
-UTF-8 it is; the framework fills `content-type` from the codec of the publish position, which is
-what makes this follow the codec without anything being declared.
+UTF-8 it is.
+
+The media type is a header like any other, and nothing writes it for you: a reply the runtime
+sends, a deferred retry copy and a plain publish all carry the headers something put on them, and
+the codec of the position is not one of those things. A service whose peers read the property sets
+it once at the mount site, through a publish transform over the position:
+
+```
+# mod demo {
+use ruststream::runtime::{Outgoing, Reads};
+use ruststream_rumqttc::prelude::*;
+
+/// States the media type of every message this position sends, which is what fills the content
+/// type property and decides the payload format indicator. It reads nothing about the delivery,
+/// so it is generic over the position and mounts on any of them.
+struct Json;
+
+impl<K: ContextKind, Options> PublishTransform<K, Options> for Json {
+    type Destination = Reads;
+
+    fn apply(&self, out: &mut Outgoing<'_>, _options: &mut Option<Options>, _cx: &K::View<'_>) {
+        out.headers_mut().insert("content-type", "application/json");
+    }
+}
+# }
+# fn main() {}
+```
 
 The correlated `RequestReply` call is not implemented, and neither is `TransactionalPublisher`,
 `OwnedTransactions` or `Partitioned`: MQTT has no transactions, no partitions and no routing keys,
@@ -401,8 +426,8 @@ Two things are absent on purpose. Credentials never reach a document teams publi
 neither the URL's user information nor `credentials` appears. The last will contributes its topic,
 quality of service and retain flag, but not its payload: that is the content of a message rather
 than a coordinate. The payload format indicator is absent for a different reason: it follows the
-media type of one message, which the codec of the publish position produces, and the document
-reports that media type itself in the `contentType` the framework fills.
+media type one message carries in its headers, which no declaration knows, while the document
+reports the media type of the position's codec in the `contentType` the framework fills.
 
 # Testing
 

@@ -136,10 +136,10 @@ fn is_text_media_type(content_type: &str) -> bool {
 /// [`MqttPublishOptions`](crate::MqttPublishOptions) and resolved before the packet is built.
 ///
 /// The payload format indicator is decided here rather than declared anywhere, because it follows
-/// the media type of this message, which the codec of the publish position produced and wrote into
-/// the `content-type` header. A message whose media type is textual is published as UTF-8 (`1`),
-/// every other one as unspecified bytes (`0`), and the same header fills the MQTT 5 content type
-/// property, so a non-Rust peer reads both from the packet.
+/// the media type this message carries in its `content-type` header, which only the sender puts
+/// there. A message whose media type is textual is published as UTF-8 (`1`), every other one as
+/// unspecified bytes (`0`), and the same header fills the MQTT 5 content type property, so a
+/// non-Rust peer reads both from the packet. A message that names no media type declares neither.
 pub(crate) fn to_wire_properties(msg: &OutgoingMessage<'_>) -> Option<PublishProperties> {
     let mut properties = PublishProperties::default();
     let mut carries_properties = false;

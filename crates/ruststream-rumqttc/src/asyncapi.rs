@@ -71,13 +71,12 @@ struct MqttOperation {
 /// field out there rather than describing a property the packet will not have. Where a reply goes
 /// is the operation's `reply` object, and under a naming transform its `reply.address.location`.
 ///
-/// `payloadFormatIndicator` is deliberately absent. The indicator follows the media type of the
-/// message, which the codec of the publish position produces, and neither the subscription
-/// descriptor nor the publish policy is handed that codec - the document is built from
-/// declarations, and the codec is resolved at the mount site. Reporting a fixed value here would
-/// describe every message by the one the crate happened to pick, so the packet decides it instead
-/// (see [`to_wire_properties`](crate::message)) and the document reports the media type itself
-/// through `contentType`, which the core fills from the codec.
+/// `payloadFormatIndicator` is deliberately absent. The indicator follows the media type one
+/// message carries in its headers, and a binding is built from declarations, which know nothing
+/// about the headers of a message nobody has sent yet. Reporting a fixed value here would describe
+/// every message by the one the crate happened to pick, so the packet decides it instead (see
+/// [`to_wire_properties`](crate::message)) while the document reports the media type of the
+/// position's codec through `contentType`, which the core fills.
 #[derive(Debug, Serialize)]
 struct MqttMessageBinding {
     #[serde(rename = "correlationData")]

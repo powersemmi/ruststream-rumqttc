@@ -149,13 +149,18 @@ impl MqttBroker {
     }
 
     /// Trusts `ca` (PEM) for the TLS connection; selects TLS regardless of the URL scheme.
+    ///
+    /// The client verifies the server against this certificate authority and no other store, so
+    /// it is what a TLS connection needs rather than an option on one: a `mqtts://` URL without
+    /// it is refused when the broker connects, naming this setting.
     pub fn tls_ca(mut self, ca: impl Into<Vec<u8>>) -> Self {
         self.tls_ca = Some(ca.into());
         self
     }
 
     /// Authenticates with a TLS client certificate (both PEM), as managed MQTT services
-    /// commonly require. Implies [`tls_ca`](Self::tls_ca) must be set too.
+    /// commonly require. Asks for TLS on its own, and [`tls_ca`](Self::tls_ca) is what verifies
+    /// the server, so a connection that sets this and not that one is refused.
     pub fn tls_client_auth(mut self, cert: impl Into<Vec<u8>>, key: impl Into<Vec<u8>>) -> Self {
         self.tls_client_auth = Some((cert.into(), key.into()));
         self
@@ -238,8 +243,18 @@ impl MqttBroker {
                 None,
             ));
         }
-        if tls_from_scheme || self.tls_ca.is_some() {
-            let ca = self.tls_ca.clone().unwrap_or_default();
+        if tls_from_scheme || self.tls_ca.is_some() || self.tls_client_auth.is_some() {
+            // The client verifies the server against the certificates handed to it here and
+            // against no other store, so an empty one trusts nothing: every handshake would fail,
+            // and the connection task would read that as transient and retry until `connect`
+            // times out. Refusing here is the difference between a message naming the missing
+            // setting and half a minute of silence.
+            let Some(ca) = self.tls_ca.clone() else {
+                return Err(MqttError::Invalid(
+                    "a TLS connection needs the certificate authority to trust: call tls_ca(pem)"
+                        .to_owned(),
+                ));
+            };
             options.set_transport(Transport::tls(ca, self.tls_client_auth.clone(), None));
         }
         Ok(options)
@@ -512,6 +527,30 @@ mod tests {
             let broker = broker(url);
             let (host, port) = broker.endpoint().expect("the url parses");
             assert_eq!((host.as_str(), port), expected, "parsing {url}");
+        }
+    }
+
+    /// TLS with nothing to verify the server against is a connection that can never succeed, so
+    /// the setting that is missing is named instead. Each of the three ways to ask for TLS
+    /// answers the same.
+    #[tokio::test]
+    async fn tls_without_a_certificate_authority_is_refused_before_any_io() {
+        let scheme = MqttBroker::new("mqtts://127.0.0.1:8883", "tls-scheme");
+        let client_auth =
+            broker("mqtt://127.0.0.1:1").tls_client_auth(b"cert".to_vec(), b"key".to_vec());
+
+        for (broker, asked) in [
+            (scheme, "the URL scheme"),
+            (client_auth, "a client certificate"),
+        ] {
+            let error = broker
+                .connect()
+                .await
+                .expect_err("nothing can verify the server");
+            assert!(
+                matches!(&error, MqttError::Invalid(reason) if reason.contains("tls_ca")),
+                "{asked} asks for TLS, and the refusal names what is missing: {error}"
+            );
         }
     }
 

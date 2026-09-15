@@ -517,7 +517,9 @@ Eclipse Mosquitto covers, gated behind `MQTT_TEST_URL` and run by `just test-bro
 
 * Authentication is `credentials(username, password)` on the synchronous builder. TLS is
   `tls_ca(pem)`, which selects TLS whatever the URL scheme says, plus `tls_client_auth(cert, key)`
-  for the managed services that require a client certificate.
+  for the managed services that require a client certificate. The client verifies the server
+  against that certificate authority and no other store, so a `mqtts://` URL without `tls_ca` is
+  refused when the broker connects instead of failing every handshake behind a retry.
 * The session is `clean_start(false)` plus `session_expiry(duration)`; resuming a persistent
   session is what redelivers unacknowledged messages. `last_will(topic, payload, qos, retain)`
   names the message the broker publishes if that session dies unexpectedly. `keep_alive(duration)`

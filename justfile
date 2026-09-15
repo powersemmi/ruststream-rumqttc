@@ -30,6 +30,7 @@ test-brokers: brokers-up
     # This recipe starts the stand, so a gated test that skips itself here is a fault, not a
     # developer without a broker.
     MQTT_TEST_URL=mqtt://127.0.0.1:1883 \
+    MQTT_TEST_AUTH_URL=mqtt://127.0.0.1:1884 \
     RUSTSTREAM_REQUIRE_LIVE=1 \
         cargo test --workspace --all-features -- --test-threads=1
 

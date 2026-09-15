@@ -515,6 +515,23 @@ mod tests {
         }
     }
 
+    /// The floor is the protocol's, and a value below it is refused where the service can still
+    /// see it: before any I/O, with the number named. A broker that took it would negotiate a
+    /// keep-alive nobody asked for.
+    #[tokio::test]
+    async fn a_keep_alive_below_the_protocol_floor_is_refused_before_any_io() {
+        let error = broker("mqtt://127.0.0.1:1")
+            .keep_alive(Duration::from_secs(1))
+            .connect()
+            .await
+            .expect_err("the protocol floor is five seconds");
+
+        assert!(
+            matches!(&error, MqttError::Invalid(reason) if reason.contains("5 seconds")),
+            "the refusal names the floor: {error}"
+        );
+    }
+
     #[test]
     fn a_url_with_credentials_describes_a_server_without_them() {
         let spec = broker("mqtt://alice:s3cret@broker.example.com:1884").describe_server();

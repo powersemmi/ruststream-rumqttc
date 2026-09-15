@@ -16,7 +16,8 @@ use ruststream::{
     PublishPolicy, Publisher, Serialized, ServerSpec, Subscriber,
 };
 use ruststream_rumqttc::{
-    ConnectedMqttBroker, MqttBroker, MqttFilter, MqttPublish, MqttPublishSteps, MqttTopic, Qos,
+    ConnectedMqttBroker, MqttBroker, MqttError, MqttFilter, MqttPublish, MqttPublishSteps,
+    MqttTopic, Qos,
 };
 
 const RECV_TIMEOUT: Duration = Duration::from_secs(15);
@@ -1367,4 +1368,83 @@ async fn a_fire_and_forget_publish_leaves_the_strongest_subscription_nothing_to_
         .expect("the same subscription settles what the publisher sent at QoS 2");
 
     connected.shutdown().await.expect("shutdown succeeds");
+}
+
+/// The URL of the listener that requires a user name and a password, or `None` when there is no
+/// stand. It is a second listener of the same broker, because authentication is the one capability
+/// an anonymous stand cannot answer for.
+fn auth_url() -> Option<String> {
+    match std::env::var("MQTT_TEST_AUTH_URL") {
+        Ok(url) if !url.is_empty() => Some(url),
+        _ => {
+            assert!(
+                std::env::var_os("RUSTSTREAM_REQUIRE_LIVE").is_none(),
+                "RUSTSTREAM_REQUIRE_LIVE is set, so the credentials test must run, \
+                 but MQTT_TEST_AUTH_URL is missing or empty"
+            );
+            eprintln!("MQTT_TEST_AUTH_URL is not set; skipping the credentials test");
+            None
+        }
+    }
+}
+
+/// Credentials are the broker's to accept, so the proof is a session that carries a message:
+/// a `CONNACK` on its own says the packet was well formed, not that the user exists.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_broker_that_demands_credentials_accepts_the_ones_the_builder_records() {
+    let Some(url) = auth_url() else { return };
+
+    let connected = MqttBroker::new(&url, format!("it-auth-{}", std::process::id()))
+        .credentials("tester", "s3cret")
+        .connect()
+        .await
+        .expect("the broker accepts the credentials");
+
+    let topic = unique("authenticated");
+    let mut subscriber = connected
+        .subscribe_topic(MqttTopic::new(&topic).qos(Qos::AtLeastOnce))
+        .await
+        .expect("subscription opens");
+    connected
+        .publisher()
+        .publish(OutgoingMessage::new(&topic, b"hello".as_slice()), None)
+        .await
+        .expect("publish succeeds");
+
+    let mut stream = pin!(subscriber.stream());
+    let message = tokio::time::timeout(RECV_TIMEOUT, stream.next())
+        .await
+        .expect("delivery arrives")
+        .expect("stream is open")
+        .expect("delivery is ok");
+    assert_eq!(message.payload(), b"hello");
+    message.ack().await.expect("ack succeeds");
+
+    connected.shutdown().await.expect("shutdown succeeds");
+}
+
+/// The refusal a service meets when the credentials are wrong or absent: `connect` reports it
+/// instead of retrying forever, because no amount of retrying turns a bad password into a good
+/// one. This is what tells a misconfigured deployment from an unreachable broker.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_broker_that_demands_credentials_refuses_the_wrong_ones() {
+    let Some(url) = auth_url() else { return };
+
+    let wrong = MqttBroker::new(&url, format!("it-auth-wrong-{}", std::process::id()))
+        .credentials("tester", "not-the-password");
+    let absent = MqttBroker::new(&url, format!("it-auth-absent-{}", std::process::id()));
+
+    for (broker, what) in [
+        (wrong, "a wrong password"),
+        (absent, "no credentials at all"),
+    ] {
+        let error = tokio::time::timeout(RECV_TIMEOUT, broker.connect())
+            .await
+            .unwrap_or_else(|_| panic!("connect reports {what} instead of retrying"))
+            .expect_err("the broker refuses the session");
+        assert!(
+            matches!(error, MqttError::Connect(_)),
+            "{what} is a connection refusal: {error}"
+        );
+    }
 }

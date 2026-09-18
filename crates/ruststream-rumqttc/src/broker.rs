@@ -12,12 +12,16 @@ use std::time::Duration;
 use rumqttc::Transport;
 use rumqttc::v5::mqttbytes::v5::LastWill;
 use rumqttc::v5::{AsyncClient, MqttOptions};
-use ruststream::{Broker, ConnectedBroker, DefaultPublish, DescribeServer, ServerSpec, Subscribe};
+use ruststream::{
+    AddressedCopies, Broker, ConnectedBroker, DefaultPublish, DescribeServer, ServerSpec, Subscribe,
+};
 use tokio::sync::{OnceCell, mpsc, oneshot};
 
+#[cfg(feature = "asyncapi")]
+use crate::asyncapi::{self, MqttLastWill, MqttServer};
 use crate::conn::{Conn, Shared, run};
 use crate::error::MqttError;
-use crate::filter::{MqttTopic, Qos};
+use crate::filter::{MqttFilter, MqttTopic, Qos};
 use crate::publisher::{MqttPublish, MqttPublisher};
 use crate::subscriber::MqttSubscriber;
 
@@ -145,13 +149,18 @@ impl MqttBroker {
     }
 
     /// Trusts `ca` (PEM) for the TLS connection; selects TLS regardless of the URL scheme.
+    ///
+    /// The client verifies the server against this certificate authority and no other store, so
+    /// it is what a TLS connection needs rather than an option on one: a `mqtts://` URL without
+    /// it is refused when the broker connects, naming this setting.
     pub fn tls_ca(mut self, ca: impl Into<Vec<u8>>) -> Self {
         self.tls_ca = Some(ca.into());
         self
     }
 
     /// Authenticates with a TLS client certificate (both PEM), as managed MQTT services
-    /// commonly require. Implies [`tls_ca`](Self::tls_ca) must be set too.
+    /// commonly require. Asks for TLS on its own, and [`tls_ca`](Self::tls_ca) is what verifies
+    /// the server, so a connection that sets this and not that one is refused.
     pub fn tls_client_auth(mut self, cert: impl Into<Vec<u8>>, key: impl Into<Vec<u8>>) -> Self {
         self.tls_client_auth = Some((cert.into(), key.into()));
         self
@@ -163,29 +172,44 @@ impl MqttBroker {
         MqttPublisher::new(Arc::clone(&self.cell), Qos::default(), false)
     }
 
-    fn options(&self) -> Result<MqttOptions, MqttError> {
-        let (tls_from_scheme, rest) = self.url.strip_prefix("mqtts://").map_or_else(
-            || {
-                (
-                    false,
-                    self.url
-                        .strip_prefix("mqtt://")
-                        .unwrap_or(self.url.as_str()),
-                )
-            },
-            |rest| (true, rest),
-        );
-        let (host, port) = match rest.rsplit_once(':') {
+    /// Whether the URL's scheme selects TLS.
+    fn tls_from_scheme(&self) -> bool {
+        self.url.starts_with("mqtts://")
+    }
+
+    /// The URL's authority: the host and port, without the scheme, the userinfo or anything after
+    /// the host.
+    ///
+    /// An MQTT URL routinely carries `user:password@`, and that password must reach neither the
+    /// connection nor the generated document. The framework owns that trimming, so the rule is
+    /// the same one every broker crate applies.
+    fn authority(&self) -> String {
+        ServerSpec::host_from_url(&self.url)
+    }
+
+    /// The host and port a client connects to, and what the generated document reports.
+    fn endpoint(&self) -> Result<(String, u16), MqttError> {
+        let authority = self.authority();
+        let (host, port) = match authority.rsplit_once(':') {
             Some((host, port)) => (
                 host.to_owned(),
                 port.parse::<u16>()
                     .map_err(|_| MqttError::Invalid(format!("'{port}' is not a valid port")))?,
             ),
-            None => (rest.to_owned(), if tls_from_scheme { 8883 } else { 1883 }),
+            None => (
+                authority.clone(),
+                if self.tls_from_scheme() { 8883 } else { 1883 },
+            ),
         };
         if host.is_empty() {
             return Err(MqttError::Invalid("host must be non-empty".into()));
         }
+        Ok((host, port))
+    }
+
+    fn options(&self) -> Result<MqttOptions, MqttError> {
+        let tls_from_scheme = self.tls_from_scheme();
+        let (host, port) = self.endpoint()?;
         if let Some(keep_alive) = self.keep_alive
             && keep_alive < Duration::from_secs(5)
         {
@@ -219,8 +243,18 @@ impl MqttBroker {
                 None,
             ));
         }
-        if tls_from_scheme || self.tls_ca.is_some() {
-            let ca = self.tls_ca.clone().unwrap_or_default();
+        if tls_from_scheme || self.tls_ca.is_some() || self.tls_client_auth.is_some() {
+            // The client verifies the server against the certificates handed to it here and
+            // against no other store, so an empty one trusts nothing: every handshake would fail,
+            // and the connection task would read that as transient and retry until `connect`
+            // times out. Refusing here is the difference between a message naming the missing
+            // setting and half a minute of silence.
+            let Some(ca) = self.tls_ca.clone() else {
+                return Err(MqttError::Invalid(
+                    "a TLS connection needs the certificate authority to trust: call tls_ca(pem)"
+                        .to_owned(),
+                ));
+            };
             options.set_transport(Transport::tls(ca, self.tls_client_auth.clone(), None));
         }
         Ok(options)
@@ -257,9 +291,19 @@ impl Broker for MqttBroker {
                     }
                     Err(_) => {
                         shared.closed.store(true, Ordering::Release);
-                        return Err(MqttError::Connect(Box::from(
-                            "timed out waiting for the broker's CONNACK",
-                        )));
+                        // Everything the task retried is gone by now, so the wait is all there
+                        // would be to report: a wrong port, an unreachable host and a handshake
+                        // the broker refused after the fact would all read the same.
+                        let reason = shared.last_error().map_or_else(
+                            || "timed out waiting for the broker's CONNACK".to_owned(),
+                            |last| {
+                                format!(
+                                    "timed out waiting for the broker's CONNACK; \
+                                     last connection error: {last}"
+                                )
+                            },
+                        );
+                        return Err(MqttError::Connect(Box::from(reason)));
                     }
                 }
                 Ok::<_, MqttError>(Core { client, shared })
@@ -273,14 +317,52 @@ impl Broker for MqttBroker {
     }
 }
 
+impl MqttBroker {
+    /// The session this broker opens, as the `mqtt` server binding describes it.
+    ///
+    /// Credentials are absent by construction: the binding carries the client identity and the
+    /// session settings, never the user name or the password. The last will contributes its
+    /// coordinates and not its payload, which is content rather than a coordinate.
+    #[cfg(feature = "asyncapi")]
+    fn server_binding(&self) -> ruststream::asyncapi::Bindings {
+        asyncapi::server(&MqttServer {
+            client_id: self.client_id.clone(),
+            clean_session: self.clean_start,
+            last_will: self
+                .last_will
+                .as_ref()
+                .map(|(topic, _payload, qos, retain)| MqttLastWill {
+                    topic: topic.clone(),
+                    qos: qos.level(),
+                    retain: *retain,
+                }),
+            keep_alive: self.keep_alive.map(|interval| interval.as_secs()),
+            session_expiry_interval: self.session_expiry,
+            maximum_packet_size: self.max_packet_size,
+        })
+    }
+}
+
 impl DescribeServer for MqttBroker {
+    /// Reports the host and port a client connects to, the protocol version it speaks, and the
+    /// session settings the `mqtt` binding has room for. A URL's credentials stay out of the
+    /// generated document, which teams publish and share.
+    ///
+    /// The port is stated even where the URL leaves it out, because the protocol's default is
+    /// what a reader of the document would otherwise have to know.
     fn describe_server(&self) -> ServerSpec {
-        ServerSpec::new(
-            self.url
-                .trim_start_matches("mqtts://")
-                .trim_start_matches("mqtt://"),
-            "mqtt",
-        )
+        // A URL `connect` will reject still must not hold up the document, so the fallback keeps
+        // the framework's stripped authority and drops the unusable port.
+        let spec = self.endpoint().map_or_else(
+            |_| ServerSpec::from_url(&self.url, "mqtt"),
+            |(host, port)| ServerSpec::new(format!("{host}:{port}"), "mqtt"),
+        );
+        // The crate speaks MQTT 5 and nothing else: user properties and shared subscriptions
+        // exist only there.
+        let spec = spec.protocol_version("5");
+        #[cfg(feature = "asyncapi")]
+        let spec = spec.bindings(self.server_binding());
+        spec
     }
 }
 
@@ -314,10 +396,26 @@ impl ConnectedMqttBroker {
     ///
     /// # Errors
     ///
-    /// Returns [`MqttError`] when the descriptor is invalid, the broker rejects the filter,
-    /// or the broker is shut down.
+    /// Returns [`MqttError`] when the value is not a topic, the broker rejects it, or the broker
+    /// is shut down.
     pub async fn subscribe_topic(&self, topic: MqttTopic) -> Result<MqttSubscriber, MqttError> {
         topic.validate()?;
+        self.open(topic.into_filter()).await
+    }
+
+    /// Opens the subscription described by `filter` and waits for the broker's `SUBACK`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MqttError`] when the descriptor is invalid, the broker rejects the filter,
+    /// or the broker is shut down.
+    pub async fn subscribe_filter(&self, filter: MqttFilter) -> Result<MqttSubscriber, MqttError> {
+        filter.validate()?;
+        self.open(filter).await
+    }
+
+    /// The wire half both descriptors share, with validation already done.
+    async fn open(&self, topic: MqttFilter) -> Result<MqttSubscriber, MqttError> {
         self.shared.ensure_open()?;
 
         let wire_filter = topic.wire_filter();
@@ -363,6 +461,15 @@ impl ConnectedBroker for ConnectedMqttBroker {
 
     async fn shutdown(self) -> Result<(), Self::Error> {
         self.shared.closed.store(true, Ordering::Release);
+        let held = self.shared.held();
+        if held > 0 {
+            // Unacknowledged, so the broker redelivers them when the session resumes; they are
+            // lost only if the session is not persistent.
+            tracing::warn!(
+                held,
+                "mqtt shutdown with deliveries no subscription ever matched"
+            );
+        }
         // A clean DISCONNECT lets the broker publish no last will and expire the session per
         // policy; the connection task sees the closed flag and exits.
         let _ = self.client.disconnect().await;
@@ -372,6 +479,10 @@ impl ConnectedBroker for ConnectedMqttBroker {
 
 impl Subscribe for ConnectedMqttBroker {
     type Subscriber = MqttSubscriber;
+    /// A name written at the mount site is a topic, which is also the topic a publisher names, so
+    /// a deferred retry reaches the subscription that took it. A filter with `+` or `#` is
+    /// subscribe-only, and subscribing to one is what [`MqttFilter`] is for.
+    type Copies = AddressedCopies;
 
     async fn subscribe(&self, name: &str) -> Result<Self::Subscriber, Self::Error> {
         self.subscribe_topic(MqttTopic::new(name)).await
@@ -380,4 +491,107 @@ impl Subscribe for ConnectedMqttBroker {
 
 impl DefaultPublish for ConnectedMqttBroker {
     type Policy = MqttPublish;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn broker(url: &str) -> MqttBroker {
+        MqttBroker::new(url, "describe")
+    }
+
+    #[test]
+    fn the_endpoint_is_the_host_and_port_whatever_else_the_url_carries() {
+        for (url, expected) in [
+            ("mqtt://broker.example.com", ("broker.example.com", 1883)),
+            ("mqtts://broker.example.com", ("broker.example.com", 8883)),
+            (
+                "mqtt://broker.example.com:1884",
+                ("broker.example.com", 1884),
+            ),
+            (
+                "mqtt://alice:s3cret@broker.example.com:1884",
+                ("broker.example.com", 1884),
+            ),
+            (
+                "mqtts://alice:s3cret@broker.example.com",
+                ("broker.example.com", 8883),
+            ),
+            // A password may contain the separator, so the split takes the last one.
+            (
+                "mqtt://alice:p@ss@broker.example.com:1884",
+                ("broker.example.com", 1884),
+            ),
+            (
+                "mqtt://broker.example.com:1884/ns",
+                ("broker.example.com", 1884),
+            ),
+            ("mqtt://broker.example.com/ns", ("broker.example.com", 1883)),
+            // The authority ends before the path, so an `@` after it is not a separator.
+            (
+                "mqtt://broker.example.com/a@b",
+                ("broker.example.com", 1883),
+            ),
+        ] {
+            let broker = broker(url);
+            let (host, port) = broker.endpoint().expect("the url parses");
+            assert_eq!((host.as_str(), port), expected, "parsing {url}");
+        }
+    }
+
+    /// TLS with nothing to verify the server against is a connection that can never succeed, so
+    /// the setting that is missing is named instead. Each of the three ways to ask for TLS
+    /// answers the same.
+    #[tokio::test]
+    async fn tls_without_a_certificate_authority_is_refused_before_any_io() {
+        let scheme = MqttBroker::new("mqtts://127.0.0.1:8883", "tls-scheme");
+        let client_auth =
+            broker("mqtt://127.0.0.1:1").tls_client_auth(b"cert".to_vec(), b"key".to_vec());
+
+        for (broker, asked) in [
+            (scheme, "the URL scheme"),
+            (client_auth, "a client certificate"),
+        ] {
+            let error = broker
+                .connect()
+                .await
+                .expect_err("nothing can verify the server");
+            assert!(
+                matches!(&error, MqttError::Invalid(reason) if reason.contains("tls_ca")),
+                "{asked} asks for TLS, and the refusal names what is missing: {error}"
+            );
+        }
+    }
+
+    /// The floor is the protocol's, and a value below it is refused where the service can still
+    /// see it: before any I/O, with the number named. A broker that took it would negotiate a
+    /// keep-alive nobody asked for.
+    #[tokio::test]
+    async fn a_keep_alive_below_the_protocol_floor_is_refused_before_any_io() {
+        let error = broker("mqtt://127.0.0.1:1")
+            .keep_alive(Duration::from_secs(1))
+            .connect()
+            .await
+            .expect_err("the protocol floor is five seconds");
+
+        assert!(
+            matches!(&error, MqttError::Invalid(reason) if reason.contains("5 seconds")),
+            "the refusal names the floor: {error}"
+        );
+    }
+
+    #[test]
+    fn a_url_with_credentials_describes_a_server_without_them() {
+        let spec = broker("mqtt://alice:s3cret@broker.example.com:1884").describe_server();
+        let host = spec.host.expect("a networked broker states its host");
+
+        assert_eq!(host, "broker.example.com:1884");
+        assert!(
+            !host.contains('@'),
+            "the userinfo separator is gone: {host}"
+        );
+        assert!(!host.contains("alice"), "the user name is gone: {host}");
+        assert!(!host.contains("s3cret"), "the password is gone: {host}");
+    }
 }

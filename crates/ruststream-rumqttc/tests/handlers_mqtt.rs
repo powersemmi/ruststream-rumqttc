@@ -1,19 +1,26 @@
 //! Handlers on this broker, driven through the framework's own surfaces rather than the broker
-//! SPI: a `#[subscriber]` body runs on the in-process transport under `TestApp`, and the crate's
-//! per-message publish steps are reached through an injected `Out` slot.
+//! SPI: a `#[subscriber]` body runs on the in-process transport under `TestApp`, the crate's
+//! per-message publish steps are reached through an injected `Out` slot, and the crate's own
+//! descriptor and publish policy mount on both brokers from one routes file.
 //!
 //! The live suite (`integration_mqtt.rs`) covers the transport; this file covers the seam
 //! between the crate and the framework's dispatch and injection paths, which needs no server.
 
 #![cfg(feature = "testing")]
 
+use std::time::Duration;
+
+// The derive and the value a publish transform reads share the name in different namespaces: the
+// prelude carries the macro `ruststream::Outgoing`, and this is the type `runtime::Outgoing`.
+use ruststream::runtime::{Outgoing, PublishContext, RETRY_COUNT_HEADER};
 use ruststream::testing::TestApp;
 use ruststream_rumqttc::prelude::*;
-use ruststream_rumqttc::testing::{MqttTestBroker, MqttTestPublish};
-use ruststream_rumqttc::{QOS_HEADER, RETAIN_HEADER};
+use ruststream_rumqttc::testing::MqttTestBroker;
 use serde::{Deserialize, Serialize};
 
-// The attribute takes the topic as a literal; the assertions address the same subscription.
+// The topic a device publishes to. The handlers below name it as a literal and assert on the same
+// subscription; the one declared with `MqttFilter` covers it with a wildcard instead, so its
+// assertions address the filter.
 const TELEMETRY: &str = "devices/dev42/telemetry";
 
 #[derive(Debug, PartialEq, Deserialize, Serialize, Outgoing)]
@@ -50,7 +57,7 @@ async fn a_handler_publishes_through_its_slot_on_the_in_process_broker() {
         MqttTestBroker::new(),
         |b| {
             b.include(raise_alert)
-                .out(DefaultSlot, MqttTestPublish)
+                .out(DefaultSlot, Publish::default())
                 .build();
         },
     );
@@ -81,6 +88,7 @@ async fn a_handler_publishes_through_its_slot_on_the_in_process_broker() {
 }
 
 const STATE: &str = "devices/dev42/state";
+const HEARTBEAT: &str = "devices/dev42/heartbeat";
 
 /// A device state is bytes on the wire rather than an encoded model, so the type carries its own
 /// bytes and no codec runs on them.
@@ -92,14 +100,13 @@ struct DeviceState(Vec<u8>);
 #[publishes(DeviceState)]
 struct States;
 
-/// A body that needs the two arguments MQTT carries on every PUBLISH packet bounds its slot with
-/// this crate's own [`MqttPublishOptions`] instead. The step resolves on the slot entry the body
-/// holds, so the publish stays the slot's; resolving one layer down would reach the same wire and
-/// lose the attribution.
+/// A body that adjusts the two arguments MQTT carries on every PUBLISH packet names this crate's
+/// options type in its slot bound. The steps sit on the publish builder, so the publish is still
+/// the slot's own - attributed to `States`, and encoded with the codec the include site named.
 #[subscriber("devices/dev42/telemetry")]
 async fn announce_state(
     telemetry: &Telemetry,
-    Out(out): Out<impl MqttPublishOptions, States>,
+    Out(out): Out<impl Publisher<Options = MqttPublishOptions>, States>,
 ) -> HandlerOutcome {
     let state = if telemetry.temperature > 30.0 {
         "hot"
@@ -107,9 +114,9 @@ async fn announce_state(
         "ok"
     };
     if out
-        .with_retain(true)
-        .with_qos(Qos::ExactlyOnce)
         .message(&DeviceState(state.as_bytes().to_vec()))
+        .retain(true)
+        .qos(Qos::ExactlyOnce)
         .publish()
         .await
         .is_err()
@@ -125,7 +132,7 @@ async fn the_per_message_arguments_ride_the_slot_and_stop_at_the_transport() {
         MqttTestBroker::new(),
         |b| {
             b.include(announce_state)
-                .out(States, MqttTestPublish)
+                .out(States, Publish::default())
                 .build();
         },
     );
@@ -141,31 +148,82 @@ async fn the_per_message_arguments_ride_the_slot_and_stop_at_the_transport() {
         .await
         .expect("the injected reading is routed");
 
-    // The slot saw it, which is what says the step resolved on the entry rather than past it.
-    let states = tb.out::<States>().assert_called_once().with_raw(b"hot");
-    let attributed = &states.messages()[0];
-    assert_eq!(attributed.name(), STATE);
-    assert_eq!(
-        attributed.headers().get_str(QOS_HEADER),
-        Some("2"),
-        "the arguments travel with the message to the publisher"
-    );
-    assert_eq!(attributed.headers().get_str(RETAIN_HEADER), Some("true"));
+    // The slot saw the publish and the arguments it carried, which is what says the steps
+    // resolved on the slot's own entry rather than past it.
+    let states = tb
+        .out::<States>()
+        .assert_called_once()
+        .with_raw(b"hot")
+        .with_options(
+            &MqttPublishOptions::default()
+                .retain(true)
+                .qos(Qos::ExactlyOnce),
+        );
+    assert_eq!(states.messages()[0].name(), STATE);
 
-    // The transport consumed them, so a subscriber sees a plain message.
+    // They are protocol fields, so the publisher hands them to the client rather than to the
+    // message: a subscriber sees a plain delivery.
     let delivered = tb.broker::<MqttTestBroker>().published::<()>(STATE);
-    let delivered = delivered.assert_called_once().messages()[0]
-        .headers()
-        .clone();
-    assert_eq!(delivered.get(QOS_HEADER), None);
-    assert_eq!(delivered.get(RETAIN_HEADER), None);
+    assert!(
+        delivered.assert_called_once().messages()[0]
+            .headers()
+            .is_empty(),
+        "nothing about the arguments reaches a subscriber as a header"
+    );
 }
 
-/// The same body mounts on the real broker, which is where the two arguments reach a wire.
-/// Building the app is I/O-free, so the mount is what this checks; the wire effect is the live
-/// suite's.
+/// The mirror case: a body that takes no step publishes entirely under the policy the mount site
+/// named, and the slot view says so rather than reporting an empty options value.
+#[subscriber("devices/dev42/heartbeat")]
+async fn announce_plainly(
+    telemetry: &Telemetry,
+    Out(out): Out<impl Publisher<Options = MqttPublishOptions>, States>,
+) -> HandlerOutcome {
+    let _ = telemetry.temperature;
+    if out
+        .message(&DeviceState(b"alive".to_vec()))
+        .publish()
+        .await
+        .is_err()
+    {
+        return HandlerOutcome::retry();
+    }
+    HandlerOutcome::ack()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_publish_that_takes_no_step_carries_the_policy_alone() {
+    let app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(
+        MqttTestBroker::new(),
+        |b| {
+            b.include(announce_plainly)
+                .out(States, Publish::default().qos(Qos::ExactlyOnce))
+                .build();
+        },
+    );
+
+    let tb = TestApp::start(app).await.expect("the harness starts");
+    tb.broker::<MqttTestBroker>()
+        .message(&Telemetry {
+            device: "dev42".to_owned(),
+            temperature: 21.5,
+        })
+        .to(HEARTBEAT)
+        .publish()
+        .await
+        .expect("the injected reading is routed");
+
+    tb.out::<States>()
+        .assert_called_once()
+        .with_raw(b"alive")
+        .assert_options_default();
+}
+
+/// The same body, and the same policy attached the same way, mount on the real broker - which is
+/// where the two arguments reach a wire. Building the app is I/O-free, so the mount is what this
+/// checks; the wire effect is the live suite's.
 #[test]
-fn a_slot_bound_with_the_crate_capability_mounts_on_the_real_broker() {
+fn a_slot_bound_with_the_crate_options_mounts_on_the_real_broker() {
     let _app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(
         MqttBroker::new("mqtt://localhost:1883", "mqtt-handlers"),
         |b| {
@@ -234,4 +292,629 @@ fn a_batch_handler_mounts_on_the_real_broker() {
             b.include(ingest.batch(nonzero!(8)));
         },
     );
+}
+
+const WILDCARD: &str = "devices/+/telemetry";
+
+/// The declaration a service ships: the crate's own descriptor, with the wildcard, the quality of
+/// service and the shared group a fleet subscription carries. Nothing about it is written for a
+/// test, and the tests below mount this one handle on both brokers.
+#[subscriber(MqttFilter::new("devices/+/telemetry").qos(Qos::AtLeastOnce).shared("workers"))]
+async fn collect_telemetry(telemetry: &Telemetry) -> HandlerOutcome {
+    let _ = telemetry.temperature;
+    HandlerOutcome::ack()
+}
+
+/// The wildcard resolves in process the way it resolves on the wire, so the message a device
+/// would publish reaches the body under its own topic - not under the filter, which is not a
+/// topic a producer could publish to at all.
+///
+/// What the descriptor asks for beyond the filter is the transport's, and this transport has
+/// none: the `QoS` is not handshaked and the group is not distributed, so this settles what
+/// routing did and says nothing about either.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_declaration_a_service_ships_mounts_on_the_in_process_broker() {
+    let app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(
+        MqttTestBroker::new(),
+        |b| {
+            b.include(collect_telemetry)
+                .out_retry(Publish::default())
+                .to(TELEMETRY);
+        },
+    );
+
+    let tb = TestApp::start(app).await.expect("the harness starts");
+    let reading = Telemetry {
+        device: "dev42".to_owned(),
+        temperature: 21.5,
+    };
+    tb.broker::<MqttTestBroker>()
+        .message(&reading)
+        .to(TELEMETRY)
+        .publish()
+        .await
+        .expect("the injected reading is routed");
+
+    tb.broker::<MqttTestBroker>()
+        .subscriber(WILDCARD)
+        .assert_called_once()
+        .with(&reading)
+        .settled(HandlerOutcome::ack());
+}
+
+/// The same handle, the same descriptor, the other broker. Building the app is I/O-free, so the
+/// mount is what this checks, and it is the whole claim: one declaration serves production and
+/// the harness alike.
+#[test]
+fn the_same_declaration_mounts_on_the_real_broker() {
+    let _app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(
+        MqttBroker::new("mqtt://localhost:1883", "mqtt-handlers"),
+        |b| {
+            b.include(collect_telemetry)
+                .out_retry(Publish::default())
+                .to(TELEMETRY);
+        },
+    );
+}
+
+/// A filter with `#` anywhere but last is one no broker would accept.
+#[subscriber(MqttFilter::new("devices/#/telemetry"))]
+async fn never_subscribes(telemetry: &Telemetry) -> HandlerOutcome {
+    let _ = telemetry.temperature;
+    HandlerOutcome::ack()
+}
+
+/// The descriptor is validated on this transport too, so a filter a server would reject fails
+/// the same way here instead of passing its first test in process and its first deployment
+/// nowhere.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_descriptor_a_server_would_reject_does_not_start_here_either() {
+    let app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(
+        MqttTestBroker::new(),
+        |b| {
+            b.include(never_subscribes)
+                .out_retry(Publish::default())
+                .to(TELEMETRY);
+        },
+    );
+
+    let error = TestApp::start(app)
+        .await
+        .expect_err("an invalid topic filter cannot open a subscription");
+    assert!(
+        error.to_string().contains("devices/#/telemetry"),
+        "the startup error names the filter it refused, not just the subscription: {error}"
+    );
+}
+
+const PING: &str = "devices/dev42/ping";
+const PONG: &str = "devices/dev42/pong";
+
+#[derive(Debug, PartialEq, Deserialize, Serialize, Outgoing)]
+struct Pong {
+    device: String,
+}
+
+/// A responder in the shape a service writes it: the subscription is the crate's descriptor and
+/// the attribute names where the answer goes, so the body returns the reply instead of publishing
+/// it by hand.
+#[subscriber(MqttFilter::new("devices/+/ping").qos(Qos::AtLeastOnce), publish("devices/dev42/pong"))]
+async fn answer_ping(ping: &Telemetry) -> Pong {
+    Pong {
+        device: ping.device.clone(),
+    }
+}
+
+/// The whole routes line, both halves of it, on the in-process broker: the descriptor names the
+/// subscription and the production policy is attached to the reply slot. This is the line a
+/// service ships, character for character, and the reply comes out where the attribute said.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_production_routes_line_mounts_whole_on_the_in_process_broker() {
+    let app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(
+        MqttTestBroker::new(),
+        |b| {
+            b.include(answer_ping)
+                .out_reply(Publish::default())
+                .out_retry(Publish::default())
+                .to(PING);
+        },
+    );
+
+    let tb = TestApp::start(app).await.expect("the harness starts");
+    tb.broker::<MqttTestBroker>()
+        .message(&Telemetry {
+            device: "dev42".to_owned(),
+            temperature: 21.5,
+        })
+        .to(PING)
+        .publish()
+        .await
+        .expect("the injected ping is routed");
+
+    tb.broker::<MqttTestBroker>()
+        .published::<Pong>(PONG)
+        .assert_called_once()
+        .with(&Pong {
+            device: "dev42".to_owned(),
+        });
+}
+
+/// The same routes line on the real broker. The policy is the one that reaches a wire there, and
+/// nothing at the mount site had to change to get here.
+#[test]
+fn a_production_routes_line_mounts_on_the_real_broker() {
+    let _app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(
+        MqttBroker::new("mqtt://localhost:1883", "mqtt-handlers"),
+        |b| {
+            b.include(answer_ping)
+                .out_reply(Publish::default())
+                .out_retry(Publish::default())
+                .to(PING);
+        },
+    );
+}
+
+const COMMANDS: &str = "devices/dev42/commands";
+const ACKS: &str = "devices/dev42/acks";
+const AUDITED: &str = "devices/dev42/audited";
+const RECEIPTS: &str = "devices/dev42/receipts";
+
+#[derive(Debug, PartialEq, Deserialize, Serialize, Outgoing)]
+struct Command {
+    id: u64,
+}
+
+/// A device acknowledgement is answered on one topic wherever the handler is mounted, so the type
+/// states it.
+#[derive(Debug, PartialEq, Deserialize, Serialize, Outgoing)]
+#[outgoing(name = "devices/dev42/acks")]
+struct Ack {
+    id: u64,
+}
+
+#[subscriber("devices/dev42/commands", publish)]
+async fn acknowledge(command: &Command) -> Ack {
+    Ack { id: command.id }
+}
+
+/// An audit receipt goes wherever the deployment collects them, so the type leaves the topic to
+/// the mount site.
+#[derive(Debug, PartialEq, Deserialize, Serialize, Outgoing)]
+struct Receipt {
+    id: u64,
+}
+
+#[subscriber("devices/dev42/audited", publish("devices/dev42/receipts"))]
+async fn issue_receipt(command: &Command) -> Receipt {
+    Receipt { id: command.id }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_reply_lands_on_the_topic_its_type_declares() {
+    let app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(
+        MqttTestBroker::new(),
+        |b| {
+            b.include(acknowledge);
+        },
+    );
+
+    let tb = TestApp::start(app).await.expect("the harness starts");
+    let command = Command { id: 7 };
+    tb.broker::<MqttTestBroker>()
+        .message(&command)
+        .to(COMMANDS)
+        .publish()
+        .await
+        .expect("the injected command is routed");
+
+    tb.broker::<MqttTestBroker>()
+        .subscriber(COMMANDS)
+        .assert_called_once()
+        .with(&command);
+    tb.broker::<MqttTestBroker>()
+        .published::<Ack>(ACKS)
+        .assert_called_once()
+        .with(&Ack { id: 7 });
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_reply_that_declares_no_topic_lands_on_the_mount_site_one() {
+    let app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(
+        MqttTestBroker::new(),
+        |b| {
+            b.include(issue_receipt).out_reply(Publish::default());
+        },
+    );
+
+    let tb = TestApp::start(app).await.expect("the harness starts");
+    let command = Command { id: 11 };
+    tb.broker::<MqttTestBroker>()
+        .message(&command)
+        .to(AUDITED)
+        .publish()
+        .await
+        .expect("the injected command is routed");
+
+    tb.broker::<MqttTestBroker>()
+        .subscriber(AUDITED)
+        .assert_called_once()
+        .with(&command);
+    tb.broker::<MqttTestBroker>()
+        .published::<Receipt>(RECEIPTS)
+        .assert_called_once()
+        .with(&Receipt { id: 11 });
+}
+
+/// A reply leaves through an ordinary publisher, so the two arguments MQTT carries on every
+/// PUBLISH packet stay the reply policy's: the topic the type declares says where the packet goes
+/// and nothing about how it is sent. The wire effect is the live suite's; the mount is what this
+/// checks.
+#[test]
+fn a_reply_on_a_declared_topic_takes_the_arguments_of_its_policy() {
+    let _app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(
+        MqttBroker::new("mqtt://localhost:1883", "mqtt-handlers"),
+        |b| {
+            b.include(acknowledge)
+                .out_reply(Publish::default().qos(Qos::ExactlyOnce).retain(true));
+        },
+    );
+}
+
+const DEFERRED: &str = "devices/dev42/deferred";
+const DEFERRED_WILDCARD: &str = "devices/+/deferred";
+
+/// Long enough that no other timer in the test is due at the same instant; the clock is paused,
+/// so nothing waits for it.
+const RETRY_DELAY: Duration = Duration::from_secs(5);
+
+/// Stamps every deferred copy with the subscription the delivery came from, which is what marks
+/// a redelivery as one downstream. A transform on the retry position reads the delivery being
+/// retried, the way a reply's does. It sets neither of the two arguments MQTT carries, so it is
+/// generic over the options a position writes and mounts over any publisher.
+#[derive(Debug, Clone, Copy)]
+struct StampRetry;
+
+impl<C, Options> PublishTransform<ForReply<C>, Options> for StampRetry {
+    type Destination = Reads;
+
+    fn apply(
+        &self,
+        out: &mut Outgoing<'_>,
+        _options: &mut Option<Options>,
+        cx: &PublishContext<'_, C>,
+    ) {
+        out.headers_mut()
+            .insert("x-retried-from", cx.name().to_owned());
+    }
+}
+
+/// Defers the first delivery and settles the copy, so one subscription runs both legs of the
+/// fallback.
+#[subscriber("devices/dev42/deferred")]
+async fn reconcile(telemetry: &Telemetry, ctx: &mut Context) -> HandlerOutcome {
+    let _ = telemetry.temperature;
+    let attempt = ctx
+        .headers()
+        .get_str(RETRY_COUNT_HEADER)
+        .and_then(|count| count.parse::<u64>().ok())
+        .unwrap_or(0);
+    if attempt == 0 {
+        HandlerOutcome::retry_after(RETRY_DELAY)
+    } else {
+        HandlerOutcome::ack()
+    }
+}
+
+/// MQTT cannot defer a redelivery, so `retry_after` runs on the framework's fallback: the
+/// original is dropped and a copy is published back to the topic the subscription reported. The
+/// copy leaves through the publisher the registration bound at the mount site, transforms
+/// included, which is the only place a service can mark it.
+#[tokio::test(start_paused = true)]
+async fn a_transform_on_the_retry_position_stamps_the_deferred_copy() {
+    let app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(
+        MqttTestBroker::new(),
+        |b| {
+            b.include(reconcile)
+                .out_retry(Publish::default())
+                .transform(StampRetry);
+        },
+    );
+
+    let tb = TestApp::start(app).await.expect("the harness starts");
+    tb.broker::<MqttTestBroker>()
+        .message(&Telemetry {
+            device: "dev42".to_owned(),
+            temperature: 21.5,
+        })
+        .to(DEFERRED)
+        .publish()
+        .await
+        .expect("the injected reading is routed");
+    tb.advance(RETRY_DELAY)
+        .await
+        .expect("the deferred copy is published and handled");
+
+    tb.broker::<MqttTestBroker>()
+        .published::<Telemetry>(DEFERRED)
+        .with_header("x-retried-from", DEFERRED);
+    tb.broker::<MqttTestBroker>()
+        .subscriber(DEFERRED)
+        .assert_called(2)
+        .settled(HandlerOutcome::ack());
+}
+
+/// A filter subscription reads every topic it matches and addresses none of them, so the mount
+/// site says where a copy goes. This one settles the copy, so both legs run on one subscription.
+#[subscriber(MqttFilter::new("devices/+/deferred"))]
+async fn reconcile_anywhere(telemetry: &Telemetry, ctx: &mut Context) -> HandlerOutcome {
+    let _ = telemetry.temperature;
+    let attempt = ctx
+        .headers()
+        .get_str(RETRY_COUNT_HEADER)
+        .and_then(|count| count.parse::<u64>().ok())
+        .unwrap_or(0);
+    if attempt == 0 {
+        HandlerOutcome::retry_after(RETRY_DELAY)
+    } else {
+        HandlerOutcome::ack()
+    }
+}
+
+/// A filter names no destination of its own, so a registration on one that names none either
+/// refuses to start. The service learns at startup that `retry_after` has nowhere to go, rather
+/// than losing every delayed message to a publish that reaches nothing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_filter_registration_that_names_no_destination_does_not_start() {
+    let app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(
+        MqttTestBroker::new(),
+        |b| {
+            b.include(reconcile_anywhere);
+        },
+    );
+
+    let error = TestApp::start(app)
+        .await
+        .expect_err("a filter subscription cannot name where its redelivery is published");
+    let reported = error.to_string();
+    assert!(
+        reported.contains(DEFERRED_WILDCARD),
+        "the startup error names the subscription that addresses nothing: {reported}"
+    );
+    assert!(
+        reported.contains("MqttFilter"),
+        "the startup error names the descriptor that addresses nothing: {reported}"
+    );
+}
+
+/// The same registration with the destination named: a topic the filter matches, so the copy
+/// comes back to this subscription and the handler settles it on the second delivery.
+#[tokio::test(start_paused = true)]
+async fn a_filter_registration_publishes_its_copies_where_the_mount_site_names() {
+    let app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(
+        MqttTestBroker::new(),
+        |b| {
+            b.include(reconcile_anywhere)
+                .out_retry(Publish::default())
+                .to(DEFERRED);
+        },
+    );
+
+    let tb = TestApp::start(app).await.expect("the harness starts");
+    tb.broker::<MqttTestBroker>()
+        .message(&Telemetry {
+            device: "dev42".to_owned(),
+            temperature: 21.5,
+        })
+        .to(DEFERRED)
+        .publish()
+        .await
+        .expect("the injected reading is routed");
+    tb.advance(RETRY_DELAY)
+        .await
+        .expect("the deferred copy is published and handled");
+
+    tb.broker::<MqttTestBroker>()
+        .published::<Telemetry>(DEFERRED)
+        .with_header(RETRY_COUNT_HEADER, "1");
+    tb.broker::<MqttTestBroker>()
+        .subscriber(DEFERRED_WILDCARD)
+        .assert_called(2)
+        .settled(HandlerOutcome::ack());
+}
+
+/// The same registration on the real broker. Building the app is I/O-free, so the mount is what
+/// this checks; that the copy reaches a wire is the live suite's.
+#[test]
+fn a_registration_that_defers_retries_mounts_on_the_real_broker() {
+    let _app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(
+        MqttBroker::new("mqtt://localhost:1883", "mqtt-handlers"),
+        |b| {
+            b.include(reconcile)
+                .out_retry(Publish::default())
+                .transform(StampRetry);
+        },
+    );
+}
+
+const CAPPED: &str = "devices/dev42/capped";
+const CAPPED_WILDCARD: &str = "devices/+/capped";
+/// Outside the filter's match set on purpose: a dead-letter topic the subscription itself reads
+/// hands the spent delivery straight back.
+const DEAD: &str = "dead/capped";
+
+/// A handler that never settles, which is what the cap is for.
+#[subscriber(MqttTopic::new("devices/dev42/capped"))]
+async fn never_settles(telemetry: &Telemetry) -> HandlerOutcome {
+    let _ = telemetry.temperature;
+    HandlerOutcome::retry_after(RETRY_DELAY)
+}
+
+/// The same body on a filter subscription, where the mount site also names where the copies go.
+#[subscriber(MqttFilter::new("devices/+/capped"))]
+async fn never_settles_anywhere(telemetry: &Telemetry) -> HandlerOutcome {
+    let _ = telemetry.temperature;
+    HandlerOutcome::retry_after(RETRY_DELAY)
+}
+
+/// MQTT counts no redeliveries of its own, so the cap is counted on the framework's retry-count
+/// header and the copies the runtime publishes carry it. A topic subscription addresses its own
+/// copies, so the declaration is the whole mount site.
+#[tokio::test(start_paused = true)]
+async fn a_capped_registration_on_a_topic_dead_letters_the_spent_delivery() {
+    let app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(
+        MqttTestBroker::new(),
+        |b| {
+            b.include(never_settles)
+                .max_attempts(nonzero!(2u32))
+                .dead_letter(DEAD);
+        },
+    );
+
+    let tb = TestApp::start(app).await.expect("the harness starts");
+    tb.broker::<MqttTestBroker>()
+        .message(&Telemetry {
+            device: "dev42".to_owned(),
+            temperature: 21.5,
+        })
+        .to(CAPPED)
+        .publish()
+        .await
+        .expect("the injected reading is routed");
+    tb.advance(RETRY_DELAY)
+        .await
+        .expect("the first copy is published and handled");
+    tb.advance(RETRY_DELAY)
+        .await
+        .expect("the spent delivery leaves for the dead-letter topic");
+
+    tb.broker::<MqttTestBroker>()
+        .subscriber(CAPPED)
+        .assert_called(2);
+    tb.broker::<MqttTestBroker>()
+        .published::<Telemetry>(DEAD)
+        .assert_called_once();
+}
+
+/// The same declaration over a filter subscription: the cap and the destination read the same,
+/// and what the filter adds is the topic its copies are published to.
+#[tokio::test(start_paused = true)]
+async fn a_capped_registration_on_a_filter_dead_letters_the_spent_delivery() {
+    let app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(
+        MqttTestBroker::new(),
+        |b| {
+            b.include(never_settles_anywhere)
+                .max_attempts(nonzero!(2u32))
+                .dead_letter(DEAD)
+                .out_retry(Publish::default())
+                .to(CAPPED);
+        },
+    );
+
+    let tb = TestApp::start(app).await.expect("the harness starts");
+    tb.broker::<MqttTestBroker>()
+        .message(&Telemetry {
+            device: "dev42".to_owned(),
+            temperature: 21.5,
+        })
+        .to(CAPPED)
+        .publish()
+        .await
+        .expect("the injected reading is routed");
+    tb.advance(RETRY_DELAY)
+        .await
+        .expect("the first copy is published and handled");
+    tb.advance(RETRY_DELAY)
+        .await
+        .expect("the spent delivery leaves for the dead-letter topic");
+
+    tb.broker::<MqttTestBroker>()
+        .subscriber(CAPPED_WILDCARD)
+        .assert_called(2);
+    tb.broker::<MqttTestBroker>()
+        .published::<Telemetry>(DEAD)
+        .assert_called_once();
+}
+
+const FLEET: &str = "devices/+/deferred";
+const DEVICE_42: &str = "devices/42/deferred";
+const DEVICE_43: &str = "devices/43/deferred";
+
+/// Sends every copy back to the topic its delivery arrived on, which is what a filter
+/// subscription needs: its many topics have no single answer, and each message belongs to one.
+struct ToDeliveryTopic;
+
+impl<Options> PublishTransform<ForReply<MqttContext>, Options> for ToDeliveryTopic {
+    type Destination = Names;
+
+    fn apply(
+        &self,
+        out: &mut Outgoing<'_>,
+        _options: &mut Option<Options>,
+        cx: &PublishContext<'_, MqttContext>,
+    ) {
+        out.set_name(cx.context(DeliveryTopic).to_owned());
+    }
+}
+
+/// Defers the first delivery and settles the copy, reading the topic it arrived on so the
+/// registration's context type is the crate's.
+#[subscriber(MqttFilter::new("devices/+/deferred"))]
+async fn reconcile_per_device(
+    telemetry: &Telemetry,
+    ctx: &mut Context<'_, MqttContext>,
+) -> HandlerOutcome {
+    let _ = telemetry.temperature;
+    let attempt = ctx
+        .headers()
+        .get_str(RETRY_COUNT_HEADER)
+        .and_then(|count| count.parse::<u64>().ok())
+        .unwrap_or(0);
+    if attempt == 0 {
+        HandlerOutcome::retry_after(RETRY_DELAY)
+    } else {
+        HandlerOutcome::ack()
+    }
+}
+
+/// A filter reads many topics, so naming one at the mount site would send every copy to the same
+/// device. The transform names the destination per delivery instead, and the copy of a message
+/// published to one device's topic comes back on that device's topic.
+#[tokio::test(start_paused = true)]
+async fn a_naming_transform_returns_a_copy_to_the_topic_it_arrived_on() {
+    let app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(
+        MqttTestBroker::new(),
+        |b| {
+            b.include(reconcile_per_device)
+                .out_retry(Publish::default())
+                .transform(ToDeliveryTopic);
+        },
+    );
+
+    let tb = TestApp::start(app).await.expect("the harness starts");
+    tb.broker::<MqttTestBroker>()
+        .message(&Telemetry {
+            device: "42".to_owned(),
+            temperature: 21.5,
+        })
+        .to(DEVICE_42)
+        .publish()
+        .await
+        .expect("the injected reading is routed");
+    tb.advance(RETRY_DELAY)
+        .await
+        .expect("the deferred copy is published and handled");
+
+    tb.broker::<MqttTestBroker>()
+        .published::<Telemetry>(DEVICE_42)
+        .with_header(RETRY_COUNT_HEADER, "1");
+    tb.broker::<MqttTestBroker>()
+        .published::<Telemetry>(DEVICE_43)
+        .assert_not_called();
+    tb.broker::<MqttTestBroker>()
+        .published::<Telemetry>(FLEET)
+        .assert_not_called();
+    tb.broker::<MqttTestBroker>()
+        .subscriber(FLEET)
+        .assert_called(2)
+        .settled(HandlerOutcome::ack());
 }

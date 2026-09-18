@@ -10,12 +10,19 @@ check:
     cargo clippy --workspace --all-targets --all-features -- -D warnings
     cargo check --workspace --all-targets --all-features
     cargo check --workspace --no-default-features
+    # CI denies rustdoc warnings, so a broken intra-doc link fails the build. Running it here is
+    # what keeps that a local finding rather than a red pull request.
+    RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps
 
 test:
     cargo test --workspace --all-features
 
-brokers-up:
+brokers-up: tls-certs
     docker compose -f docker-compose.test.yml up -d --wait
+
+# The certificate chain the TLS listener uses, generated next to the stand rather than committed.
+tls-certs:
+    scripts/stand_tls_certs.sh "{{justfile_directory()}}/.stand-tls"
 
 brokers-down:
     docker compose -f docker-compose.test.yml down -v
@@ -24,7 +31,13 @@ test-brokers: brokers-up
     #!/usr/bin/env bash
     set -euo pipefail
     trap 'just brokers-down' EXIT
+    # This recipe starts the stand, so a gated test that skips itself here is a fault, not a
+    # developer without a broker.
     MQTT_TEST_URL=mqtt://127.0.0.1:1883 \
+    MQTT_TEST_AUTH_URL=mqtt://127.0.0.1:1884 \
+    MQTT_TEST_TLS_URL=mqtts://127.0.0.1:8883 \
+    MQTT_TEST_TLS_DIR={{justfile_directory()}}/.stand-tls \
+    RUSTSTREAM_REQUIRE_LIVE=1 \
         cargo test --workspace --all-features -- --test-threads=1
 
 fmt:

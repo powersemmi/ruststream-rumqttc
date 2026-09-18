@@ -30,12 +30,16 @@ MQTT 5 is the primary target because two things the framework relies on exist on
 - **A crate-owned connection task.** The client exposes a single event loop that must be polled continuously; the crate drives it in a dedicated task that demultiplexes packets into independent per-subscription streams by topic-filter matching, reconnects with exponential backoff (the client itself retries with zero delay, forever), and resubscribes exactly when the broker reports the session gone, without stalling keep-alive traffic. Delivery back-pressure is the protocol's receive-maximum, which bounds unacknowledged deliveries.
 - **QoS-aware acknowledgement.** QoS 1/2 acknowledge through the protocol under manual control (the client completes the QoS 2 handshake); QoS 0 has no protocol acknowledgement, so it reports `AckError::Unsupported` instead of reporting success. MQTT has no negative acknowledgement, so `nack(requeue = true)` reports `Unsupported` too - unacked messages redeliver when a persistent session resumes - and `nack(requeue = false)` acknowledges.
 - **Shared subscriptions.** `MqttTopic::new("jobs").shared("workers")` subscribes `$share/workers/jobs`; the broker splits the stream across the group, and two group members on one connection round-robin locally (they are one wire subscription).
-- **Wildcards as the protocol defines them** (`+`, `#`), with messages reporting the real topic they arrived on.
+- **Two subscription descriptors, one per thing MQTT names.** `MqttTopic` subscribes to a topic, `MqttFilter` to a topic filter with the protocol's own wildcards (`+`, `#`); either way a message reports the real topic it arrived on. The split is what a deferred retry needs: a topic is a name a publisher can use, so `MqttTopic` says where a copy reaches its subscription again, while a registration on `MqttFilter` names that topic at the mount site.
+- **A retry cap and a dead-letter topic per registration.** `b.include(handle).max_attempts(nonzero!(5)).dead_letter("dead/telemetry")` reads the same here as on every other broker. MQTT counts no redeliveries of its own, so the count travels in the framework's retry-count header on the copies the runtime publishes.
 - **Batches for `&[T]` handlers.** A PUBLISH packet carries one message, so the crate assembles batches on the client to the size the mount site named (`b.include(ingest.batch(nonzero!(64)))`), closing a partial batch 20 ms after its first delivery. Nothing at the mount site says which side of the wire filled it.
 - **Headers ride user properties**; the well-known `content-type`, `reply-to`, and `correlation-id` headers ride the matching first-class MQTT 5 properties.
+- **Payloads that are already bytes.** An MQTT payload is often a wire value the service holds already - a state string, a sensor frame, a protobuf record - rather than a model to encode. `#[derive(Serialized)]` on the way out and `#[derive(Deserialized)]` on the way in move those bytes untouched, with no codec on the path; the outgoing type still names its topic through `#[derive(Outgoing)]`, `{placeholder}` segments included.
 - **Sessions, wills, retained.** `clean_start`/`session_expiry` for persistent sessions, `last_will` on the broker, `retain` on the publish policy, TLS with client certificates (`tls_ca` + `tls_client_auth`) for managed MQTT services.
-- **Per-message QoS and retain.** `MqttPublishOptions` sets either on a single publish: `publisher.with_retain(true).message(&state).publish()`.
-- **In-process test broker** (feature `testing`). `MqttTestBroker` reproduces core routing with no server, implements `ruststream::testing::TestableBroker`, and passes the framework's conformance suite in process.
+- **Per-message QoS and retain.** The mount site's policy declares both for every publish through it, and a step on the publish changes one message: `publisher.message(&state).retain(true).publish()`. The step fills a field of `MqttPublishOptions`, which the publisher resolves over its policy and hands to the client as the protocol fields they are - nothing rides a header, and a stepped publish keeps the codec and the slot of the mount site it left through.
+- **One glob per routes file.** `ruststream_rumqttc::prelude::*` carries the framework's prelude plus this crate's surface, with `MqttPublish` aliased to `Publish`, so a mount site reads the same whichever broker it runs on. A handler body imports `ruststream::prelude::*` alone and states a capability on its injected publisher, so it names no broker type at all - unless it adjusts a per-message argument, which is the one case a body says which broker it is on, by binding `Out<impl Publisher<Options = MqttPublishOptions>, Marker>`.
+- **The `mqtt` protocol binding in the generated document** (feature `asyncapi`). The server reports the client identity, the session settings and the last will's coordinates; a subscription reports the quality of service it reads at; a publish policy reports both arguments its packets carry. Credentials and the will's payload stay out.
+- **In-process test broker** (feature `testing`). `MqttTestBroker` reproduces the crate's core routing with no server, a service mounts on it and runs under the `TestApp` harness, and it answers the way a real broker does, which the crate's own tests hold it to.
 
 ## Install
 
@@ -47,6 +51,7 @@ serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
 ruststream-rumqttc = { version = "0.7", features = ["testing"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 ```
 
 ## Write a service
@@ -55,16 +60,31 @@ ruststream-rumqttc = { version = "0.7", features = ["testing"] }
 use std::time::Duration;
 
 use ruststream_rumqttc::prelude::*;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct Telemetry {
+    device: String,
     temperature: f64,
 }
 
-#[subscriber(MqttTopic::new("devices/+/telemetry").qos(Qos::AtLeastOnce).shared("workers"))]
-async fn handle(telemetry: &Telemetry) -> HandlerOutcome {
-    println!("temperature: {}", telemetry.temperature);
+#[derive(Debug, PartialEq, Deserialize, Serialize, Outgoing)]
+#[outgoing(name = "alerts")]
+struct Alert {
+    device: String,
+}
+
+#[subscriber(MqttFilter::new("devices/+/telemetry").qos(Qos::AtLeastOnce).shared("workers"))]
+async fn handle(telemetry: &Telemetry, Out(alerts): Out<impl Publisher>) -> HandlerOutcome {
+    if telemetry.temperature <= 30.0 {
+        return HandlerOutcome::ack();
+    }
+    let alert = Alert {
+        device: telemetry.device.clone(),
+    };
+    if alerts.message(&alert).publish().await.is_err() {
+        return HandlerOutcome::retry();
+    }
     HandlerOutcome::ack()
 }
 
@@ -76,28 +96,63 @@ fn app() -> impl App {
             .clean_start(false)
             .session_expiry(Duration::from_secs(3600)),
         |b| {
-            b.include(handle);
+            b.include(handle)
+                .out(DefaultSlot, Publish::default().qos(Qos::AtLeastOnce))
+                .out_retry(Publish::default())
+                .to("devices/retry/telemetry")
+                .build();
         },
     )
 }
 ```
 
+`#[ruststream::app]` generates `main`, so there is no runtime boilerplate. The mount site names a policy per publish position: `.out_reply(policy)` for what a `publish(..)` handler returns, `.out_retry(policy)` for the copy a deferred `retry_after` publishes, and `.out(marker, policy)` for a slot the body holds - `DefaultSlot` for its single unnamed `Out`, a `#[derive(OutSlot)]` marker for any further one. The policy carries the MQTT arguments, so the body states a capability (`Out<impl Publisher>`) and never a broker type - which is what lets the same handler run under the harness below.
+
 ## Test it
 
-The `testing` feature runs handlers against an in-process MQTT stand-in - no server, same routing, same ladder. Inject a message as a device would with `TestableBroker::inject`, then assert on what a handler published with the free `expect_published`:
+The `testing` feature ships an in-process transport: no server, the crate's own routing, the same lifecycle ladder. Mount the service on `MqttTestBroker` and drive it with the framework's `TestApp`, which runs the production dispatch path and settles the reaction before an assertion reads it. The routes line is the one above, character for character: `MqttFilter` opens the subscription here too, wildcard and share group included, and `Publish` pairs against this broker, so there is no in-process descriptor and no in-process policy to swap in. `Telemetry` and `Alert` carry both serde derives because the test injects one and reads the other back.
 
 ```rust
-use ruststream::{Broker, OutgoingMessage};
-use ruststream::testing::{TestableBroker, expect_published};
+use ruststream::testing::TestApp;
+use ruststream_rumqttc::prelude::*;
 use ruststream_rumqttc::testing::MqttTestBroker;
 
-let broker = MqttTestBroker::new().connect().await?;
-broker.inject(OutgoingMessage::new(
-    "devices/dev42/telemetry",
-    br#"{"temperature":21.5}"#,
-));
-let alerts = expect_published(&broker, "alerts", 1, std::time::Duration::from_secs(1)).await;
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_hot_reading_raises_an_alert() -> Result<(), Box<dyn std::error::Error>> {
+    let app = RustStream::new(AppInfo::new("telemetry", "0.1.0")).with_broker(
+        MqttTestBroker::new(),
+        |b| {
+            b.include(handle)
+                .out(DefaultSlot, Publish::default().qos(Qos::AtLeastOnce))
+                .out_retry(Publish::default())
+                .to("devices/retry/telemetry")
+                .build();
+        },
+    );
+    let tb = TestApp::start(app).await?;
+
+    tb.broker::<MqttTestBroker>()
+        .message(&Telemetry {
+            device: "dev42".to_owned(),
+            temperature: 31.5,
+        })
+        .to("devices/dev42/telemetry")
+        .publish()
+        .await?;
+
+    tb.broker::<MqttTestBroker>()
+        .published::<Alert>("alerts")
+        .assert_called_once()
+        .with(&Alert {
+            device: "dev42".to_owned(),
+        });
+    Ok(())
+}
 ```
+
+The wildcard resolves here the way it resolves on the wire, so the injection names the topic a device would publish to and the body sees it under that topic, never under the filter.
+
+The compiling originals live in `crates/ruststream-rumqttc/tests/handlers_mqtt.rs`, next to the same harness reading back the per-message arguments a slot publish carried (`tb.out::<Marker>().with_options(..)`) and driving a batch handler.
 
 Protocol behaviour (QoS handshakes, shared groups, session redelivery, retained messages) is covered by the env-gated live suite instead: `just test-brokers` starts mosquitto and runs the integration tests plus the framework conformance lifecycle against it.
 
@@ -107,7 +162,9 @@ Protocol behaviour (QoS handshakes, shared groups, session redelivery, retained 
 ruststream-rumqttc/
 ├── crates/
 │   └── ruststream-rumqttc/     the published crate
-│       └── examples/           runnable mqtt_* examples
+│       ├── examples/           runnable mqtt_* examples
+│       └── tests/              handler tests, the live suite, conformance
+├── docs/                       the documentation site
 ├── docker-compose.test.yml     mosquitto for the live suite
 └── Cargo.toml                  workspace
 ```

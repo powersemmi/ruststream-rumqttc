@@ -13,7 +13,7 @@
     "memory_speed": "unknown",
     "os": "Linux 7.2.6-x64v3-xanmod1-1",
     "broker": "eclipse-mosquitto:2 in Docker on localhost",
-    "round_trip": "39.8 microseconds, measured as a QoS 1 publish whose PUBACK the client waits for, averaged over 20,000 exchanges on a connection of its own",
+    "round_trip": "39.3 microseconds, measured as a QoS 1 publish whose PUBACK the client waits for, averaged over 20,000 exchanges on a connection of its own",
     "rustc": "1.98.1",
     "profile": "bench, inheriting release (opt-level = 3, lto = false, codegen-units = 16)",
     "features": "ruststream-rumqttc default (none), ruststream macros,json",
@@ -23,50 +23,50 @@
     {
       "name": "QoS 0 topic, 512 B JSON",
       "unit": "msg/s",
-      "messages": 843380,
+      "messages": 773113,
       "pairs": 11,
       "raw": {
-        "median": 157281,
-        "min": 151416,
-        "max": 158721
+        "median": 155788,
+        "min": 152388,
+        "max": 157459
       },
       "adapter": {
-        "median": 157669,
-        "min": 150912,
-        "max": 160049
+        "median": 155368,
+        "min": 150169,
+        "max": 158161
       },
       "framework": {
-        "median": 158346,
-        "min": 151232,
-        "max": 160025
+        "median": 155291,
+        "min": 150473,
+        "max": 157087
       },
-      "adapter_overhead_percent": -0.2,
-      "overhead_percent": -0.7,
+      "adapter_overhead_percent": 0.3,
+      "overhead_percent": 0.3,
       "verdict": "indistinguishable",
       "broker_bound": false
     },
     {
       "name": "QoS 1 topic, 512 B JSON, ack each",
       "unit": "msg/s",
-      "messages": 746698,
+      "messages": 748200,
       "pairs": 11,
       "raw": {
-        "median": 122493,
-        "min": 118278,
-        "max": 124927
+        "median": 123054,
+        "min": 118901,
+        "max": 124497
       },
       "adapter": {
-        "median": 121743,
-        "min": 119820,
-        "max": 125066
+        "median": 122531,
+        "min": 115777,
+        "max": 123046
       },
       "framework": {
-        "median": 123270,
-        "min": 117042,
-        "max": 125024
+        "median": 121833,
+        "min": 118037,
+        "max": 122856
       },
-      "adapter_overhead_percent": 0.6,
-      "overhead_percent": -0.6,
+      "adapter_overhead_percent": 0.4,
+      "overhead_percent": 1.0,
       "verdict": "indistinguishable",
       "broker_bound": true
     }

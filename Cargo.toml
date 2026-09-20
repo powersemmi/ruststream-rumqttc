@@ -15,9 +15,8 @@ authors = ["RustStream contributors"]
 ruststream-rumqttc = { path = "crates/ruststream-rumqttc" }
 # The lower bound names the pre-release so cargo admits it: a range that mentions no pre-release
 # excludes every pre-release, so `>=0.7.0` would skip 0.7.0-rc.8. The final 0.7.0 satisfies this
-# range too, so the requirement does not need revisiting once the core line settles. rc.8 is the
-# floor because a header key and an outgoing name are shared buffers there, which is what lets this
-# crate answer a response topic with the bytes the delivery already holds.
+# range too, so the requirement does not need revisiting once the core line settles. The floor
+# names rc.8 because that is the core line this crate is built and tested against.
 ruststream = { version = ">=0.7.0-rc.8, <0.8.0", default-features = false }
 
 rumqttc = "0.25"

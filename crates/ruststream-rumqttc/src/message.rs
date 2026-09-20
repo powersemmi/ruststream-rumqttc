@@ -8,7 +8,13 @@ use bytes::Bytes;
 use rumqttc::v5::AsyncClient;
 use rumqttc::v5::mqttbytes::QoS;
 use rumqttc::v5::mqttbytes::v5::{Publish, PublishProperties};
-use ruststream::{AckError, HeaderMap, IncomingMessage, OutgoingMessage};
+use ruststream::{AckError, HeaderMap, IncomingMessage, OutgoingMessage, Str};
+
+/// The header keys the MQTT 5 first-class properties map onto, built once so that mapping a
+/// delivery copies nothing for them.
+const CONTENT_TYPE: Str = Str::from_static("content-type");
+const REPLY_TO: Str = Str::from_static("reply-to");
+const CORRELATION_ID: Str = Str::from_static("correlation-id");
 
 /// A message delivered by an [`MqttSubscriber`](crate::MqttSubscriber).
 ///
@@ -54,13 +60,13 @@ impl MqttMessage {
                 headers.insert(name.clone(), value.clone());
             }
             if let Some(content_type) = &properties.content_type {
-                headers.insert("content-type", content_type.clone());
+                headers.insert(CONTENT_TYPE, content_type.clone());
             }
             if let Some(response_topic) = &properties.response_topic {
-                headers.insert("reply-to", response_topic.clone());
+                headers.insert(REPLY_TO, response_topic.clone());
             }
             if let Some(correlation) = &properties.correlation_data {
-                headers.insert("correlation-id", correlation.clone());
+                headers.insert(CORRELATION_ID, correlation.clone());
             }
         }
         let acker = match publish.qos {

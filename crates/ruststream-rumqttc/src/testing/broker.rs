@@ -256,12 +256,10 @@ impl Publisher for MqttTestPublisher {
         // suite is what covers it.
         let (qos, _retain) = MqttPublishOptions::resolve(options, self.qos, self.retain);
         let outcome = self.state.ensure_open().map(|()| {
-            self.state.publish(
-                msg.name(),
-                Bytes::copy_from_slice(msg.payload()),
-                msg.headers().clone(),
-                qos,
-            );
+            let headers = msg.headers().clone();
+            let name = msg.name();
+            self.state
+                .publish(name, msg.into_payload().freeze(), headers, qos);
         });
         ready(outcome)
     }

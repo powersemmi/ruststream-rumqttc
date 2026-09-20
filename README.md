@@ -62,7 +62,7 @@ use std::time::Duration;
 use ruststream_rumqttc::prelude::*;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Outgoing, Serialize)]
 struct Telemetry {
     device: String,
     temperature: f64,
@@ -110,7 +110,7 @@ fn app() -> impl App {
 
 ## Test it
 
-The `testing` feature ships an in-process transport: no server, the crate's own routing, the same lifecycle ladder. Mount the service on `MqttTestBroker` and drive it with the framework's `TestApp`, which runs the production dispatch path and settles the reaction before an assertion reads it. The routes line is the one above, character for character: `MqttFilter` opens the subscription here too, wildcard and share group included, and `Publish` pairs against this broker, so there is no in-process descriptor and no in-process policy to swap in. `Telemetry` and `Alert` carry both serde derives because the test injects one and reads the other back.
+The `testing` feature ships an in-process transport: no server, the crate's own routing, the same lifecycle ladder. Mount the service on `MqttTestBroker` and drive it with the framework's `TestApp`, which runs the production dispatch path and settles the reaction before an assertion reads it. The routes line is the one above, character for character: `MqttFilter` opens the subscription here too, wildcard and share group included, and `Publish` pairs against this broker, so there is no in-process descriptor and no in-process policy to swap in. `Telemetry` and `Alert` carry both serde derives because the test injects one and reads the other back, and `Telemetry` derives `Outgoing` so the injection can name the topic the reading arrives on.
 
 ```rust
 use ruststream::testing::TestApp;

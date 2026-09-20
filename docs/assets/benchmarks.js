@@ -24,7 +24,9 @@
 
   // The schema this page renders. A later revision may retype a field, and rendering it as if it
   // were this one would print wrong numbers instead of no numbers.
-  const SCHEMAS = [1];
+  // Schema 3 reports each loop as its best and worst round; a schema 1 document carried a
+  // median with its extremes, and both render.
+  const SCHEMAS = [1, 3];
   const TIMEOUT_MS = 8000;
   // Where the document sits when the page does not say. The English page is the one it sits
   // next to; a translated page carries the way back to it on the container.
@@ -66,6 +68,13 @@
     if (!measurement) {
       return "-";
     }
+    if (typeof measurement.best === "number") {
+      const best = number(measurement.best, lang) + " " + unit;
+      if (typeof measurement.worst !== "number") {
+        return best;
+      }
+      return best + " (" + number(measurement.worst, lang) + ")";
+    }
     const median = number(measurement.median, lang) + " " + unit;
     if (typeof measurement.min !== "number" || typeof measurement.max !== "number") {
       return median;
@@ -73,19 +82,26 @@
     return median + " (" + number(measurement.min, lang) + "-" + number(measurement.max, lang) + ")";
   }
 
-  const spread = (measurement) =>
-    typeof measurement?.min === "number" && typeof measurement?.max === "number"
+  // A schema 3 loop is its best and worst round; a schema 1 loop was a median with its extremes.
+  const figure = (measurement) =>
+    typeof measurement?.best === "number" ? measurement.best : measurement?.median;
+  const spread = (measurement) => {
+    if (typeof measurement?.best === "number" && typeof measurement?.worst === "number") {
+      return measurement.best - measurement.worst;
+    }
+    return typeof measurement?.min === "number" && typeof measurement?.max === "number"
       ? measurement.max - measurement.min
       : 0;
+  };
 
   // The honesty rule of the methodology: a difference smaller than the run-to-run spread is a
   // verdict, never a percentage. The document decides it for the headline column, whose verdict it
   // publishes; for the adapter column the same rule is applied here, to the spreads it publishes.
   function indistinguishable(raw, side) {
-    if (typeof raw?.median !== "number" || typeof side?.median !== "number") {
+    if (typeof figure(raw) !== "number" || typeof figure(side) !== "number") {
       return false;
     }
-    return Math.abs(raw.median - side.median) < Math.max(spread(raw), spread(side));
+    return Math.abs(figure(raw) - figure(side)) < Math.max(spread(raw), spread(side));
   }
 
   function difference(percent, decided, labels) {

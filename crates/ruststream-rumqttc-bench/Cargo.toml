@@ -1,0 +1,40 @@
+[package]
+name = "ruststream-rumqttc-bench"
+description = "The paired raw-versus-framework benchmark for ruststream-rumqttc. Never published."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[features]
+default = []
+# A benchmark measures what ships, and the framework's harness feature changes the dispatch path:
+# every delivery records what the handler saw and every handler call runs inside a task-local
+# scope. Nothing here enables this; it exists so that asking for it is the compile error in
+# `benches/paired.rs` rather than a number nobody can trust.
+testing = ["ruststream-rumqttc/testing"]
+
+# The benchmark lives in its own package so that the measured binary links the framework the way a
+# service does. `ruststream-rumqttc`'s own dev-dependencies pull `ruststream/conformance`, which
+# enables `ruststream/testing`, and a benchmark inside that package would be built against it.
+[dev-dependencies]
+ruststream-rumqttc.workspace = true
+# What a service needs of the core, and nothing else: the handler macro and the codec the runtime
+# decodes with. The two hand-written loops call the traits, which are ungated.
+ruststream = { workspace = true, features = ["macros", "json"] }
+bytes.workspace = true
+futures.workspace = true
+rumqttc.workspace = true
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time"] }
+
+[[bench]]
+name = "paired"
+harness = false

@@ -6,7 +6,13 @@ on:
   # No base filter: a pull request stacked on another one has a branch for its base, and a filter
   # naming `main` leaves it with no checks at all - which reads as a conflicting branch rather
   # than as a workflow that declined to run.
+  #
+  # A draft runs nothing: every job below declines while `draft` is true, so work can be opened
+  # for reading and the maintainer decides when CI spends its time on it. `ready_for_review` is
+  # what brings the workflow back at that moment, and it has to be listed because naming any type
+  # at all replaces the default set.
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
   contents: read
@@ -18,6 +24,7 @@ concurrency:
 jobs:
   rust:
     name: Build and test (${{ matrix.toolchain }})
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -49,22 +56,34 @@ jobs:
         if: matrix.toolchain == 'stable'
         run: cargo fmt --all -- --check
 
+      # The benchmark package is left out of every all-features leg on purpose: it is built with
+      # the feature set a service ships, and the framework's harness feature is a compile error
+      # in it. Its own leg follows each of them, so it stays linted and stays compiled.
       - name: cargo clippy
         if: matrix.toolchain == 'stable'
-        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+        run: cargo clippy --locked --workspace --exclude ruststream-rumqttc-bench --all-targets --all-features -- -D warnings
+
+      - name: cargo clippy (benchmarks)
+        if: matrix.toolchain == 'stable'
+        run: cargo clippy --locked -p ruststream-rumqttc-bench --all-targets -- -D warnings
 
       # Advisory, not a gate: surfaces a lint added by the next clippy release six weeks
       # before it turns the build red.
       - name: cargo clippy (beta, advisory)
         if: matrix.toolchain == 'beta'
         continue-on-error: true
-        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+        run: |
+          cargo clippy --locked --workspace --exclude ruststream-rumqttc-bench --all-targets --all-features -- -D warnings
+          cargo clippy --locked -p ruststream-rumqttc-bench --all-targets -- -D warnings
 
       - name: cargo check (no default features)
         run: cargo check --locked --workspace --no-default-features
 
       - name: cargo check (all features)
-        run: cargo check --locked --workspace --all-targets --all-features
+        run: cargo check --locked --workspace --exclude ruststream-rumqttc-bench --all-targets --all-features
+
+      - name: cargo check (benchmarks)
+        run: cargo check --locked -p ruststream-rumqttc-bench --all-targets
 
       # The handler-stub suite only: the live tests skip themselves without MQTT_TEST_URL, and
       # the broker-backed job below runs them against a real mosquitto.
@@ -83,6 +102,7 @@ jobs:
 
   features:
     name: Each feature alone
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -108,6 +128,7 @@ jobs:
 
   minimal-versions:
     name: Minimal versions
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -155,11 +176,13 @@ jobs:
         env:
           RUSTUP_TOOLCHAIN: "1.88"
         run: |
-          cargo check --locked --workspace --all-targets --all-features
+          cargo check --locked --workspace --exclude ruststream-rumqttc-bench --all-targets --all-features
+          cargo check --locked -p ruststream-rumqttc-bench --all-targets
           cargo test --locked --workspace --all-features --no-fail-fast
 
   broker-integration:
     name: Broker integration (mosquitto)
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -204,6 +227,7 @@ jobs:
 
   security:
     name: Security scans
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

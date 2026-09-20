@@ -19,8 +19,9 @@ on:
   pull_request:
     # `labeled` / `unlabeled` are here for the translation-parity job below: applying its
     # escape-hatch label has to re-run the check, or the label leaves a stale red run blocking
-    # the merge.
-    types: [opened, synchronize, reopened, labeled, unlabeled]
+    # the merge. `ready_for_review` is what brings the workflow back when a draft is marked
+    # ready, which is the first moment its jobs stop declining.
+    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
     paths: *docs-paths
   workflow_dispatch:
 
@@ -34,6 +35,9 @@ concurrency:
 jobs:
   build:
     name: Build site
+    # A draft runs nothing until it is marked ready for review; the same condition is on every
+    # job of the CI workflow.
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -62,6 +66,7 @@ jobs:
     # that was already right elsewhere. It suppresses this job only.
     if: >-
       github.event_name == 'pull_request'
+      && !github.event.pull_request.draft
       && !contains(github.event.pull_request.labels.*.name, 'docs-single-language')
     runs-on: ubuntu-latest
     steps:

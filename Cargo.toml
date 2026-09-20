@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/ruststream-rumqttc"]
+members = ["crates/ruststream-rumqttc", "crates/ruststream-rumqttc-bench"]
 
 [workspace.package]
 version = "0.7.0"

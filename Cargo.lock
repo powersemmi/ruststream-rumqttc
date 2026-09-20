@@ -544,6 +544,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "ruststream-rumqttc-bench"
+version = "0.7.0"
+dependencies = [
+ "bytes",
+ "futures",
+ "rumqttc",
+ "ruststream",
+ "ruststream-rumqttc",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "rustversion"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"

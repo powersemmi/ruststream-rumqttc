@@ -8,7 +8,7 @@ use rumqttc::v5::mqttbytes::valid_topic;
 #[cfg(feature = "asyncapi")]
 use ruststream::asyncapi::Bindings;
 use ruststream::runtime::{PublishBuilder, PublishSink};
-use ruststream::{OutgoingMessage, PairError, PublishPolicy, Publisher};
+use ruststream::{BytesMut, OutgoingMessage, PairError, PublishPolicy, Publisher, Take};
 
 #[cfg(feature = "asyncapi")]
 use crate::asyncapi;
@@ -25,7 +25,7 @@ async fn send(
     cell: &CoreCell,
     qos: Qos,
     retain: bool,
-    msg: OutgoingMessage<'_>,
+    msg: OutgoingMessage<'_, BytesMut>,
 ) -> Result<(), MqttError> {
     let core = cell.get().ok_or(MqttError::NotConnected)?;
     core.shared.ensure_open()?;
@@ -92,12 +92,16 @@ impl MqttPublisher {
 }
 
 impl Publisher for MqttPublisher {
+    /// The client keeps the payload: a PUBLISH packet is queued into the session, which holds
+    /// the `Bytes` until the broker acknowledges it.
+    type Payload = Take;
+
     type Error = MqttError;
     type Options = MqttPublishOptions;
 
     async fn publish(
         &self,
-        msg: OutgoingMessage<'_>,
+        msg: OutgoingMessage<'_, BytesMut>,
         options: Option<&Self::Options>,
     ) -> Result<(), Self::Error> {
         let (qos, retain) = MqttPublishOptions::resolve(options, self.qos, self.retain);

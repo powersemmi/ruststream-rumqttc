@@ -7,8 +7,8 @@ use std::sync::{Arc, OnceLock};
 use bytes::Bytes;
 use ruststream::testing::{Coordinator, TestableBroker};
 use ruststream::{
-    AddressedCopies, Broker, ConnectedBroker, DefaultPublish, OutgoingMessage, Publisher,
-    RawMessage, Subscribe,
+    AddressedCopies, Broker, BytesMut, ConnectedBroker, DefaultPublish, OutgoingMessage, Publisher,
+    RawMessage, Subscribe, Take,
 };
 
 use crate::error::MqttError;
@@ -237,12 +237,16 @@ pub struct MqttTestPublisher {
 }
 
 impl Publisher for MqttTestPublisher {
+    /// The same answer the real publisher gives: the recorded delivery keeps its payload, as a
+    /// queued PUBLISH packet keeps it.
+    type Payload = Take;
+
     type Error = MqttError;
     type Options = MqttPublishOptions;
 
     fn publish(
         &self,
-        msg: OutgoingMessage<'_>,
+        msg: OutgoingMessage<'_, BytesMut>,
         options: Option<&Self::Options>,
     ) -> impl Future<Output = Result<(), Self::Error>> {
         // The call's arguments are resolved over the policy's here exactly as the real publisher

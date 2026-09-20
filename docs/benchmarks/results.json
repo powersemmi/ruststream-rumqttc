@@ -1,0 +1,74 @@
+{
+  "schema": 1,
+  "crate": "ruststream-rumqttc",
+  "crate_version": "0.7.0",
+  "core_version": "0.7.0-rc.7",
+  "measured_at": "2026-09-20",
+  "environment": {
+    "cpu": "AMD Ryzen 9 7900X 12-Core Processor",
+    "architecture": "x86_64",
+    "cpu_frequency": "427-5912 MHz",
+    "cores": "12 physical, 24 logical",
+    "memory": "62.4 GiB",
+    "memory_speed": "unknown",
+    "os": "Linux 7.2.6-x64v3-xanmod1-1",
+    "broker": "eclipse-mosquitto:2 in Docker on localhost",
+    "round_trip": "39.8 microseconds, measured as a QoS 1 publish whose PUBACK the client waits for, averaged over 20,000 exchanges on a connection of its own",
+    "rustc": "1.98.1",
+    "profile": "bench, inheriting release (opt-level = 3, lto = false, codegen-units = 16)",
+    "features": "ruststream-rumqttc default (none), ruststream macros,json",
+    "rustflags": "none (the recipe clears RUSTFLAGS, so the numbers are not tied to this CPU)"
+  },
+  "scenarios": [
+    {
+      "name": "QoS 0 topic, 512 B JSON",
+      "unit": "msg/s",
+      "messages": 843380,
+      "pairs": 11,
+      "raw": {
+        "median": 157281,
+        "min": 151416,
+        "max": 158721
+      },
+      "adapter": {
+        "median": 157669,
+        "min": 150912,
+        "max": 160049
+      },
+      "framework": {
+        "median": 158346,
+        "min": 151232,
+        "max": 160025
+      },
+      "adapter_overhead_percent": -0.2,
+      "overhead_percent": -0.7,
+      "verdict": "indistinguishable",
+      "broker_bound": false
+    },
+    {
+      "name": "QoS 1 topic, 512 B JSON, ack each",
+      "unit": "msg/s",
+      "messages": 746698,
+      "pairs": 11,
+      "raw": {
+        "median": 122493,
+        "min": 118278,
+        "max": 124927
+      },
+      "adapter": {
+        "median": 121743,
+        "min": 119820,
+        "max": 125066
+      },
+      "framework": {
+        "median": 123270,
+        "min": 117042,
+        "max": 125024
+      },
+      "adapter_overhead_percent": 0.6,
+      "overhead_percent": -0.6,
+      "verdict": "indistinguishable",
+      "broker_bound": true
+    }
+  ]
+}

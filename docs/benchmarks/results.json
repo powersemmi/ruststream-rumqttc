@@ -1,9 +1,9 @@
 {
-  "schema": 1,
+  "schema": 3,
   "crate": "ruststream-rumqttc",
   "crate_version": "0.7.0",
-  "core_version": "0.7.0-rc.7",
-  "measured_at": "2026-09-20",
+  "core_version": "0.7.0-rc.9",
+  "measured_at": "2026-09-21",
   "environment": {
     "cpu": "AMD Ryzen 9 7900X 12-Core Processor",
     "architecture": "x86_64",
@@ -23,51 +23,45 @@
     {
       "name": "QoS 0 topic, 512 B JSON",
       "unit": "msg/s",
-      "messages": 773113,
-      "pairs": 11,
+      "messages": 737422,
+      "pairs": 3,
       "raw": {
-        "median": 155788,
-        "min": 152388,
-        "max": 157459
+        "best": 157900,
+        "worst": 156828
       },
       "adapter": {
-        "median": 155368,
-        "min": 150169,
-        "max": 158161
+        "best": 158139,
+        "worst": 156642
       },
       "framework": {
-        "median": 155291,
-        "min": 150473,
-        "max": 157087
+        "best": 158865,
+        "worst": 156327
       },
-      "adapter_overhead_percent": 0.3,
-      "overhead_percent": 0.3,
+      "adapter_overhead_percent": -0.2,
+      "overhead_percent": -0.6,
       "verdict": "indistinguishable",
       "broker_bound": false
     },
     {
       "name": "QoS 1 topic, 512 B JSON, ack each",
       "unit": "msg/s",
-      "messages": 748200,
-      "pairs": 11,
+      "messages": 756714,
+      "pairs": 3,
       "raw": {
-        "median": 123054,
-        "min": 118901,
-        "max": 124497
+        "best": 125659,
+        "worst": 125371
       },
       "adapter": {
-        "median": 122531,
-        "min": 115777,
-        "max": 123046
+        "best": 124930,
+        "worst": 123194
       },
       "framework": {
-        "median": 121833,
-        "min": 118037,
-        "max": 122856
+        "best": 124411,
+        "worst": 124264
       },
-      "adapter_overhead_percent": 0.4,
+      "adapter_overhead_percent": 0.6,
       "overhead_percent": 1.0,
-      "verdict": "indistinguishable",
+      "verdict": "measured",
       "broker_bound": true
     }
   ]

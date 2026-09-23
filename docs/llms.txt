@@ -1,0 +1,29 @@
+# ruststream-rumqttc
+
+> `ruststream-rumqttc` is the MQTT 5 broker crate for RustStream, a Rust framework for services that subscribe to message brokers and publish to them. Over the `rumqttc` client it subscribes a service to topics and topic filters, publishes with a declared quality of service and retain flag, and carries headers as MQTT 5 user properties, so non-Rust peers see plain MQTT messages.
+
+A subscription is a descriptor: `MqttTopic` for one topic, `MqttFilter` for a topic filter with wildcards, each with its own quality of service and share group; a bare string in `#[subscriber("..")]` is a topic. A routes file imports `ruststream_rumqttc::prelude::*`, which offers `MqttPublish` as `Publish`; a body that changes the quality of service or the retain flag of one message takes a step from `MqttPublishSteps`. An MQTT broker keeps one retained message per topic and the unacknowledged messages of a persistent session, and the framework's runtime supplies the rest, such as delayed retries.
+
+This site holds the entry pages. The crate's guide is its overview on docs.rs, and the framework itself is documented on the RustStream site.
+
+## Site
+
+- [Home](https://powersemmi.github.io/ruststream-rumqttc/latest/): what the crate does, the dependency lines and a first service
+- [Benchmarks](https://powersemmi.github.io/ruststream-rumqttc/latest/benchmarks/): what this crate and the framework's runtime cost over the raw `rumqttc` client, per quality of service, and how to re-measure it with `just bench`
+
+## Guide
+
+- [Overview](https://docs.rs/ruststream-rumqttc/latest/ruststream_rumqttc/index.html): the transport, its connection task and what MQTT keeps
+- [Subscribing](https://docs.rs/ruststream-rumqttc/latest/ruststream_rumqttc/index.html#subscribing): the two descriptors, wildcards, share groups and batches
+- [Acknowledgement](https://docs.rs/ruststream-rumqttc/latest/ruststream_rumqttc/index.html#acknowledgement): what each handler outcome means on a transport with no server-side retry
+- [Publishing](https://docs.rs/ruststream-rumqttc/latest/ruststream_rumqttc/index.html#publishing): the publish policy, the quality of service and retain flag of one message, headers and replies
+- [The prelude](https://docs.rs/ruststream-rumqttc/latest/ruststream_rumqttc/index.html#the-prelude): what a routes file and a handler file import
+- [The generated document](https://docs.rs/ruststream-rumqttc/latest/ruststream_rumqttc/index.html#the-generated-document): the MQTT bindings the `asyncapi` feature reports
+- [Testing](https://docs.rs/ruststream-rumqttc/latest/ruststream_rumqttc/index.html#testing): the in-process broker behind the `testing` feature, driven by `TestApp`
+- [Operations](https://docs.rs/ruststream-rumqttc/latest/ruststream_rumqttc/index.html#operations): authentication, TLS, sessions, last wills, keep-alive and packet limits
+
+## Optional
+
+- [API reference](https://docs.rs/ruststream-rumqttc): the full rustdoc of the crate
+- [RustStream llms.txt](https://powersemmi.github.io/ruststream/llms.txt): the index of the framework's own documentation
+- [Source](https://github.com/powersemmi/ruststream-rumqttc): the crate's repository

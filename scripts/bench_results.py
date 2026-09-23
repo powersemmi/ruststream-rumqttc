@@ -11,7 +11,8 @@ https://powersemmi.github.io/ruststream/latest/benchmarks/#publishing-results: s
 loop of the comparison as its best, median and worst round, and the `code` section.
 
 `--code` reads the other run instead: the summary `cargo bench -- --output-format=json` writes for
-the code-cost benches under `crates/ruststream-rumqttc/benches`, one JSON object per benchmark.
+the code-cost benches under `crates/ruststream-rumqttc-bench/benches`, one JSON object per
+benchmark, each a service on the broker of the compose stand.
 It writes the `code` section, one entry per scenario with instructions and allocations per
 message plus what starting the service cost once, by the core's method: every scenario is
 measured over one delivery, over MESSAGES and over twice MESSAGES, the slope between the last two
@@ -137,21 +138,21 @@ def environment(summary: dict) -> dict[str, str]:
     }
 
 
-# Deliveries per measured run of the code-cost benches, the default of their `MESSAGES`.
-CODE_MESSAGES = 1000
+# Deliveries per measured run of the code-cost benches, their `MESSAGES`.
+CODE_MESSAGES = 500
 
 # An instruction count below this on a code run means the measured region stopped matching its
 # frame and the run reported the process exit, not that the code got faster. The cold run handles
 # one delivery, so it is held to a lower floor.
-CODE_FLOOR = 100_000
+CODE_FLOOR = 1_000_000
 CODE_COLD_FLOOR = 1_000
 
 # The code table, in reading order: the published name, the benchmark as `file/function`, and
 # whether the benchmark's hard limit holds its allocation floor.
 CODE_SCENARIOS = [
-    ("consume, JSON decode into a small struct, ack each", "consume/service", True),
-    ("reply, encoded and published by this crate's publisher", "reply/service", True),
-    ("consume in batches of 64, assembled on the client", "batch/service", True),
+    ("QoS 1 topic, JSON decode into a small struct, ack each", "consume/service", True),
+    ("QoS 1 topic, reply published through this crate's publisher", "reply/service", True),
+    ("QoS 1 topic, batches of 64 assembled on the client", "batch/service", True),
 ]
 
 

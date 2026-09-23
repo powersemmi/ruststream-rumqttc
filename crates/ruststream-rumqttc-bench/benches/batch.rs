@@ -8,8 +8,8 @@
     clippy::must_use_candidate,
     clippy::needless_pass_by_value
 )]
-//! Consuming in batches of 64: the crate assembles the batch on the client, hands the handler a
-//! slice, and the runtime settles every delivery in it.
+//! Consuming in batches of 64 at `QoS` 1: the crate assembles the batch on the client, hands the
+//! handler a slice, and the runtime acknowledges every delivery in it.
 
 mod common;
 
@@ -17,9 +17,9 @@ use std::hint::black_box;
 
 use common::{Latch, MESSAGES, Order, Pending};
 use gungraun::{library_benchmark, library_benchmark_group, main};
-use ruststream::prelude::*;
+use ruststream_rumqttc::prelude::*;
 
-#[subscriber("orders")]
+#[subscriber(MqttTopic::new("bench/orders").qos(Qos::AtLeastOnce))]
 async fn consume(orders: &[Order], ctx: &mut Context<'_, (), Latch>) -> HandlerOutcome {
     for order in orders {
         black_box((order.id, order.quantity));
@@ -34,9 +34,10 @@ fn app(messages: usize) -> Pending {
     })
 }
 
-// The allocations come per batch rather than per delivery, so the floor is stated over a
-// thousand of them.
-#[library_benchmark(config = common::config_every(2_048, 1_000, 28))]
+// The allocations are the client's as much as the crate's, and a few of them move with how the
+// socket's reads split, so the floor is the highest count of three runs plus one percent, stated
+// over a thousand deliveries.
+#[library_benchmark(config = common::config_every(4_206, 1_000, 70))]
 #[bench::first(app(1))]
 #[bench::base(app(MESSAGES))]
 #[bench::twice(app(2 * MESSAGES))]

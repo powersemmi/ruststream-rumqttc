@@ -76,41 +76,41 @@
   ],
   "code": [
     {
-      "name": "consume, JSON decode into a small struct, ack each",
-      "messages": 1000,
+      "name": "QoS 1 topic, JSON decode into a small struct, ack each",
+      "messages": 500,
       "framework": {
-        "instructions": 2040.2,
-        "allocations": 0.0
+        "instructions": 11123.9,
+        "allocations": 4.2
       },
       "cold": {
-        "instructions": 18900,
-        "allocations": 23
+        "instructions": 3966445,
+        "allocations": 66
       },
       "gated": true
     },
     {
-      "name": "reply, encoded and published by this crate's publisher",
-      "messages": 1000,
+      "name": "QoS 1 topic, reply published through this crate's publisher",
+      "messages": 500,
       "framework": {
-        "instructions": 4789.3,
-        "allocations": 5.0
+        "instructions": 21363.3,
+        "allocations": 10.2
       },
       "cold": {
-        "instructions": 23159,
-        "allocations": 31
+        "instructions": 3975307,
+        "allocations": 73
       },
       "gated": true
     },
     {
-      "name": "consume in batches of 64, assembled on the client",
-      "messages": 1000,
+      "name": "QoS 1 topic, batches of 64 assembled on the client",
+      "messages": 500,
       "framework": {
-        "instructions": 2746.1,
-        "allocations": 2.0
+        "instructions": 11049.9,
+        "allocations": 4.2
       },
       "cold": {
-        "instructions": 28856,
-        "allocations": 32
+        "instructions": 3972863,
+        "allocations": 70
       },
       "gated": true
     }

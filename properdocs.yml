@@ -76,7 +76,8 @@ plugins:
         mqtt.md: https://docs.rs/ruststream-rumqttc/latest/ruststream_rumqttc/index.html
         ru/mqtt.md: https://docs.rs/ruststream-rumqttc/latest/ruststream_rumqttc/index.html
         zh/mqtt.md: https://docs.rs/ruststream-rumqttc/latest/ruststream_rumqttc/index.html
-  # Versioned docs are published with `mike` (see the Docs workflow and the version switcher).
+  # Versioned docs are published with `mike` (see the Deploy docs workflow and the version
+  # switcher).
   # Each translation is a tree of its own under `docs/<locale>/`, mirroring the English paths.
   # English stays at the docs root: a file outside a locale folder is the default language.
   #

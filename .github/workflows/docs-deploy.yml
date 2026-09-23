@@ -4,8 +4,8 @@ on:
   # The published site tracks releases, not main. A docs change merged today describes the
   # crate that will ship, not the one a reader has installed, so publishing it immediately puts
   # instructions for unreleased API in front of everyone on the current version. Deploying from
-  # the release keeps each documented version next to the code it documents; `docs.yml` still
-  # builds and lints every docs change on its PR, so nothing reaches main unchecked.
+  # the release keeps each documented version next to the code it documents; the CI workflow
+  # still builds and lints every docs change on its PR, so nothing reaches main unchecked.
   release:
     types: [published]
   # The escape hatch: a typo fix or a broken link worth publishing between releases, run
@@ -75,5 +75,9 @@ jobs:
       - name: Squash gh-pages history and push
         run: |
           git checkout gh-pages
-          git reset --hard "$(git commit-tree -m 'docs: deploy' 'HEAD^{tree}')"
+          # The llms.txt convention looks for the file at the site root, which mike leaves to the
+          # version directories, so the root carries a copy of the latest one.
+          cp latest/llms.txt llms.txt
+          git add llms.txt
+          git reset --hard "$(git commit-tree -m 'docs: deploy' "$(git write-tree)")"
           git push --force origin gh-pages

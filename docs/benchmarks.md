@@ -88,8 +88,8 @@ hundreds of thousands a run carries therefore sits outside every number here.
 QoS 2 is not measured. Its four-way handshake makes the broker's bookkeeping the subject, and a
 figure taken there would describe mosquitto rather than this crate.
 
-The numbers are a snapshot of one machine on one day. They are re-measured on demand, never in CI: a
-shared runner's noise is larger than the difference this page is about.
+The numbers are a snapshot of one machine on one day. They are re-measured by hand, on a machine
+given to the run alone: the difference this page is about is smaller than the noise of a shared one.
 
 ## Running it yourself
 

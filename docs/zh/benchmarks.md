@@ -25,9 +25,9 @@ tokio 运行时和构建。这套流程属于框架本身，写在
 
 ## 数字 { #the-numbers }
 
-三个交错轮次中的最佳值，括号里是最差的一轮。越大越好。
+三个交错轮次中的最佳值，括号里是中位的一轮。越大越好。
 
-<div id="benchmark-results" data-benchmark-results="../../benchmarks/results.json" data-benchmark-labels='{"loading": "正在加载公布的结果...", "scenario": "场景", "raw": "裸客户端", "adapter": "本 crate", "framework": "RustStream 服务", "adapterOverhead": "crate 开销", "overhead": "服务开销", "indistinguishable": "无法区分", "brokerBound": "受 Broker 限制", "machine": "机器", "os": "操作系统", "broker": "Broker", "roundTrip": "往返时延", "build": "构建", "versions": "版本", "measured": "测量于", "unavailable": "读不到结果。它们公布在 {url}。", "unknownSchema": "公布的结果声明的 schema 是 {schema}，这一页不渲染它。"}'></div>
+<div id="benchmark-results" data-benchmark-results="../../benchmarks/results.json" data-benchmark-labels='{"loading": "正在加载公布的结果...", "scenario": "场景", "raw": "裸客户端", "adapter": "本 crate", "framework": "RustStream 服务", "adapterOverhead": "crate 开销", "overhead": "服务开销", "indistinguishable": "无法区分", "brokerBound": "受 Broker 限制", "machine": "机器", "os": "操作系统", "broker": "Broker", "roundTrip": "往返时延", "build": "构建", "versions": "版本", "measured": "测量于", "instructions": "每条消息的指令数", "allocations": "每条消息的内存分配次数", "cold": "冷启动（指令 / 分配）", "unavailable": "读不到结果。它们公布在 {url}。", "unknownSchema": "公布的结果声明的 schema 是 {schema}，这一页不渲染它。"}'></div>
 
 表格由浏览器从上一次运行写下的文档读出，所以这一页上没有任何会过期的副本。
 
@@ -47,6 +47,25 @@ tokio 运行时和构建。这套流程属于框架本身，写在
 同一次运行的机器可读形式在
 [`benchmarks/results.json`](https://powersemmi.github.io/ruststream-rumqttc/latest/benchmarks/results.json)，
 框架的站点用它拼出跨 Broker 的汇总表。
+
+## crate 自身的代码 { #the-crates-own-code }
+
+<div id="benchmark-code"></div>
+
+第二张表是本 crate 自身在每条消息上的开销，是数出来的，不是计时得来的：指令数由 callgrind 统计，
+内存分配次数由 DHAT 统计。每个场景都是用户会写的那种服务，跑在本 crate 的进程内传输 `MqttTestBroker`
+上，所以数字里既没有套接字，也没有服务器。这个传输使用本 crate 的消息类型、主题过滤器匹配和发布器，
+其上是框架的分发。
+
+指令数和分配次数都是稳态下每条消息的值：1000 次投递的运行和 2000 次投递的运行之间的斜率。最后一列
+是启动服务并处理第一次投递一次性付出的开销。这些数字是绝对值，框架自身的开销也算在内；框架单独的开
+销由核心库在它的[基准测试页面](https://powersemmi.github.io/ruststream/latest/benchmarks/)上公布。
+
+同一个二进制文件多次运行，计数相差不到千分之一，所以本 crate 热路径上的任何改动都会在其中显出来，不论
+多小。
+`just bench-code` 在分配次数超过场景声明的下限时失败，加上 `--baseline=main` 时，指令数多出百分之
+二以上也算失败；改变开销的合并请求要附上自己的数字。进程内传输要用 `testing` 特性编译，它会把框架的
+测试钩子一起带进来；在测试之外这些钩子是空的，它们给一次投递增加的开销在每一行里都一样。
 
 ## 机器 { #the-machine }
 
@@ -86,3 +105,10 @@ just bench
 这个配方从 `docker-compose.test.yml` 起一套环境，跑完两个场景，再把它停掉，并用测到的结果重写
 `docs/benchmarks/results.json`。它需要独占这台机器。消息条数不是写死的：一次探测运行会把它定下
 来，使得每次被测的运行在跑它的那台机器上至少持续五秒。
+
+```bash
+just bench-code
+```
+
+这个配方在 valgrind 下统计代码表，并重写同一份文档里的 `code` 部分。它只需几秒，不需要启动环境，只要
+有 valgrind 和基准测试运行器：`cargo install --locked gungraun-runner --version =0.19.4`。

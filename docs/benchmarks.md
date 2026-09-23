@@ -78,9 +78,9 @@ hot path shows in it however small. `just bench-code` fails on an allocation abo
 and with `--baseline=main` on more than two percent more instructions, and a pull request that
 changes the cost cites its numbers. The in-process transport is compiled with the `testing`
 feature, which brings the framework's test hooks with it. On a single delivery they stay empty
-outside a test. On a batch the framework copies each payload for the harness's record whether a
-test runs or not, so the batch row counts one allocation per delivery that a production service
-does not make.
+outside a test. On a batch the framework copies each payload twice for the harness's records
+whether a test runs or not, so both allocations per message of the batch row are ones a production
+service does not make.
 
 ## The machine
 

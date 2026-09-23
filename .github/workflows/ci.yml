@@ -156,19 +156,13 @@ jobs:
       - name: Resolve minimal versions
         run: cargo +nightly update -Z minimal-versions
 
-      # Both are too-loose bounds in third-party manifests reached through this crate's own
-      # dependencies; drop each when the crate that declares it moves its floor.
-      #
-      # aws-lc-sys 0.21.0 (rustls' default crypto provider, reached through rumqttc's TLS
-      # transport) declares `cc = "1.0.83"` but its build script hands `Build::flag` a `String`,
-      # which that method only accepts from 1.1.x on.
+      # A too-loose bound in a third-party manifest reached through this crate's own
+      # dependencies; drop it when the crate that declares it moves its floor.
       #
       # tracing-attributes 0.1.13 (reached through `tracing`) declares `syn = "1.0"` but calls
       # `LitInt::base10_parse`, added in 1.0.4.
       - name: Pin dependencies whose declared bounds are too loose
-        run: |
-          cargo update -p cc --precise 1.1.5
-          cargo update -p syn@1.0.0 --precise 1.0.4
+        run: cargo update -p syn@1.0.0 --precise 1.0.4
 
       # Minimum dependencies on the minimum compiler: the worst case a user can assemble.
       # Resolution above needs nightly, so only this step drops to the floor.

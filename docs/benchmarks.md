@@ -62,25 +62,25 @@ cross-broker table, is at
 
 <div id="benchmark-code"></div>
 
-The second table is this crate's own cost per message, counted rather than timed: instructions
-under callgrind and allocations under DHAT. Each scenario is the service a user writes, started on
-`MqttTestBroker`, the crate's in-process transport, so no socket and no server are in the number.
-The transport runs the crate's message type, its topic-filter matching and its publisher, with the
-framework's dispatch above them.
+The second table is what a message costs on the service's thread, counted rather than timed:
+instructions under callgrind and allocations under DHAT. Each scenario is the service a user
+writes, started on `MqttBroker` against the mosquitto of the compose stand, every delivery at
+QoS 1. The crate drives the `rumqttc` event loop from a task of the service's runtime, so the count
+covers the framework, this crate and the client's work alike: the packet decode, the dispatch, the
+`PUBACK`, and for the reply the PUBLISH it sends. Waiting on the socket is not in it, since valgrind
+counts instructions and not time.
 
-Instructions and allocations are per message in the steady state: the slope between a run of 1000
-deliveries and a run of 2000. The last column is what starting the service and taking the first
-delivery cost once. The numbers are absolute, the framework's own cost included; the core publishes
-that cost alone on its [benchmarks page](https://powersemmi.github.io/ruststream/latest/benchmarks/).
+Instructions and allocations are per message in the steady state: the slope between a run of 500
+deliveries and a run of 1000, fed ahead of each run by a client of its own that is never counted.
+The last column is what starting the service - the connect, the subscription and the first
+delivery - cost once. The numbers are absolute; the core publishes the framework's own cost on its
+[benchmarks page](https://powersemmi.github.io/ruststream/latest/benchmarks/).
 
-A count repeats within a tenth of a percent between runs of one binary, so a change to the crate's
-hot path shows in it however small. `just bench-code` fails on an allocation above the floor a scenario declares,
+Three runs of one binary agree within a third of a percent on instructions and within a few
+allocations in four thousand, which is how the socket's reads split. `just bench-code` fails on an
+allocation above the floor a scenario declares - the highest count of three runs plus one percent -
 and with `--baseline=main` on more than two percent more instructions, and a pull request that
-changes the cost cites its numbers. The in-process transport is compiled with the `testing`
-feature, which brings the framework's test hooks with it. On a single delivery they stay empty
-outside a test. On a batch the framework copies each payload twice for the harness's records
-whether a test runs or not, so both allocations per message of the batch row are ones a production
-service does not make.
+changes the cost cites its numbers.
 
 ## The machine
 
@@ -130,6 +130,6 @@ seconds on whatever machine it is taken on.
 just bench-code
 ```
 
-The recipe counts the code table under valgrind and rewrites the `code` section of the same
-document. It takes seconds and needs no stand, only valgrind and the benchmark runner:
-`cargo install --locked gungraun-runner --version =0.19.4`.
+The recipe starts the same stand, counts the code table under valgrind, stops the stand and rewrites
+the `code` section of the same document. It takes about a minute and needs valgrind and the
+benchmark runner: `cargo install --locked gungraun-runner --version =0.19.4`.

@@ -56,9 +56,9 @@ whole suite against it with the live tests required, and stops the stand.
 
 `just bench` measures what this crate and the framework's runtime cost over the raw `rumqttc`
 client on the same stand and rewrites `docs/benchmarks/results.json`. It takes minutes and wants
-the machine to itself. `just bench-code` counts what this crate's own code costs per message, in instructions
-and allocations over the in-process transport, and rewrites the code table of the same document;
-it takes seconds.
+the machine to itself. `just bench-code` counts what a message costs on the service's thread, in instructions
+and allocations under valgrind, with the service on the same stand, and rewrites the code table of
+the same document; it takes about a minute.
 
 ## Testing against a local core
 

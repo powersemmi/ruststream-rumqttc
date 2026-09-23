@@ -77,8 +77,10 @@ A count repeats within a tenth of a percent between runs of one binary, so a cha
 hot path shows in it however small. `just bench-code` fails on an allocation above the floor a scenario declares,
 and with `--baseline=main` on more than two percent more instructions, and a pull request that
 changes the cost cites its numbers. The in-process transport is compiled with the `testing`
-feature, which brings the framework's test hooks with it; outside a test they stay empty, and what
-they add to a delivery is in every row alike.
+feature, which brings the framework's test hooks with it. On a single delivery they stay empty
+outside a test. On a batch the framework copies each payload for the harness's record whether a
+test runs or not, so the batch row counts one allocation per delivery that a production service
+does not make.
 
 ## The machine
 

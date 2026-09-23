@@ -8,7 +8,13 @@ use bytes::Bytes;
 use rumqttc::v5::AsyncClient;
 use rumqttc::v5::mqttbytes::QoS;
 use rumqttc::v5::mqttbytes::v5::{Publish, PublishProperties};
-use ruststream::{AckError, HeaderMap, IncomingMessage, OutgoingMessage};
+use ruststream::{AckError, HeaderMap, IncomingMessage, OutgoingMessage, Str};
+
+/// The header keys the MQTT 5 first-class properties map onto, built once so that mapping a
+/// delivery copies nothing for them.
+const CONTENT_TYPE: Str = Str::from_static("content-type");
+const REPLY_TO: Str = Str::from_static("reply-to");
+const CORRELATION_ID: Str = Str::from_static("correlation-id");
 
 /// A message delivered by an [`MqttSubscriber`](crate::MqttSubscriber).
 ///
@@ -54,13 +60,13 @@ impl MqttMessage {
                 headers.insert(name.clone(), value.clone());
             }
             if let Some(content_type) = &properties.content_type {
-                headers.insert("content-type", content_type.clone());
+                headers.insert(CONTENT_TYPE, content_type.clone());
             }
             if let Some(response_topic) = &properties.response_topic {
-                headers.insert("reply-to", response_topic.clone());
+                headers.insert(REPLY_TO, response_topic.clone());
             }
             if let Some(correlation) = &properties.correlation_data {
-                headers.insert("correlation-id", correlation.clone());
+                headers.insert(CORRELATION_ID, correlation.clone());
             }
         }
         let acker = match publish.qos {
@@ -140,7 +146,9 @@ fn is_text_media_type(content_type: &str) -> bool {
 /// there. A message whose media type is textual is published as UTF-8 (`1`), every other one as
 /// unspecified bytes (`0`), and the same header fills the MQTT 5 content type property, so a
 /// non-Rust peer reads both from the packet. A message that names no media type declares neither.
-pub(crate) fn to_wire_properties(msg: &OutgoingMessage<'_>) -> Option<PublishProperties> {
+pub(crate) fn to_wire_properties<Payload>(
+    msg: &OutgoingMessage<'_, Payload>,
+) -> Option<PublishProperties> {
     let mut properties = PublishProperties::default();
     let mut carries_properties = false;
     for (name, value) in msg.headers().iter() {
@@ -172,7 +180,8 @@ mod tests {
         headers.insert("reply-to", "replies/1");
         headers.insert("correlation-id", "corr-1");
         headers.insert("x-tenant", "acme");
-        let outgoing = OutgoingMessage::new("orders", b"{}".as_slice()).with_headers(headers);
+        let outgoing: OutgoingMessage<'_> =
+            OutgoingMessage::new("orders", b"{}".as_slice()).with_headers(headers);
 
         let properties = to_wire_properties(&outgoing).expect("properties built");
         assert_eq!(properties.content_type.as_deref(), Some("application/json"));
@@ -190,7 +199,7 @@ mod tests {
 
     #[test]
     fn plain_messages_stay_property_free() {
-        let outgoing = OutgoingMessage::new("orders", b"{}".as_slice());
+        let outgoing: OutgoingMessage<'_> = OutgoingMessage::new("orders", b"{}".as_slice());
         assert!(to_wire_properties(&outgoing).is_none());
     }
 
@@ -210,7 +219,8 @@ mod tests {
         ] {
             let mut headers = HeaderMap::new();
             headers.insert("content-type", content_type);
-            let outgoing = OutgoingMessage::new("orders", b"{}".as_slice()).with_headers(headers);
+            let outgoing: OutgoingMessage<'_> =
+                OutgoingMessage::new("orders", b"{}".as_slice()).with_headers(headers);
             let properties = to_wire_properties(&outgoing).expect("properties built");
             assert_eq!(
                 properties.payload_format_indicator,
@@ -227,7 +237,8 @@ mod tests {
     fn a_message_without_a_media_type_declares_no_payload_format() {
         let mut headers = HeaderMap::new();
         headers.insert("x-tenant", "acme");
-        let outgoing = OutgoingMessage::new("orders", b"{}".as_slice()).with_headers(headers);
+        let outgoing: OutgoingMessage<'_> =
+            OutgoingMessage::new("orders", b"{}".as_slice()).with_headers(headers);
 
         let properties = to_wire_properties(&outgoing).expect("properties built");
         assert_eq!(properties.payload_format_indicator, None);
@@ -240,7 +251,8 @@ mod tests {
     fn nothing_is_read_off_the_headers_on_the_way_to_the_wire() {
         let mut headers = HeaderMap::new();
         headers.insert("mqtt-qos", "2");
-        let outgoing = OutgoingMessage::new("states", b"online".as_slice()).with_headers(headers);
+        let outgoing: OutgoingMessage<'_> =
+            OutgoingMessage::new("states", b"online".as_slice()).with_headers(headers);
 
         let properties = to_wire_properties(&outgoing).expect("properties built");
         assert_eq!(

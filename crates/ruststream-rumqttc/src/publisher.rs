@@ -4,11 +4,12 @@ use std::fmt;
 use std::future::{Future, ready};
 
 use bytes::Bytes;
+use rumqttc::v5::mqttbytes::v5::PublishProperties;
 use rumqttc::v5::mqttbytes::valid_topic;
 #[cfg(feature = "asyncapi")]
 use ruststream::asyncapi::Bindings;
 use ruststream::runtime::{PublishBuilder, PublishSink};
-use ruststream::{OutgoingMessage, PairError, PublishPolicy, Publisher};
+use ruststream::{BytesMut, OutgoingMessage, PairError, PublishPolicy, Publisher, Take};
 
 #[cfg(feature = "asyncapi")]
 use crate::asyncapi;
@@ -25,7 +26,7 @@ async fn send(
     cell: &CoreCell,
     qos: Qos,
     retain: bool,
-    msg: OutgoingMessage<'_>,
+    msg: OutgoingMessage<'_, BytesMut>,
 ) -> Result<(), MqttError> {
     let core = cell.get().ok_or(MqttError::NotConnected)?;
     core.shared.ensure_open()?;
@@ -37,30 +38,31 @@ async fn send(
             reason: "not a valid MQTT topic (wildcards are subscribe-only)".to_owned(),
         });
     }
-    let properties = to_wire_properties(&msg);
-    let payload = Bytes::copy_from_slice(msg.payload());
+    let topic = msg.name();
+    let (payload, properties) = into_packet(msg);
     let outcome = match properties {
         Some(properties) => {
             core.client
-                .publish_bytes_with_properties(
-                    msg.name(),
-                    qos.to_client(),
-                    retain,
-                    payload,
-                    properties,
-                )
+                .publish_bytes_with_properties(topic, qos.to_client(), retain, payload, properties)
                 .await
         }
         None => {
             core.client
-                .publish_bytes(msg.name(), qos.to_client(), retain, payload)
+                .publish_bytes(topic, qos.to_client(), retain, payload)
                 .await
         }
     };
     outcome.map_err(|_| MqttError::Publish {
-        topic: msg.name().to_owned(),
+        topic: topic.to_owned(),
         reason: "the mqtt connection task has shut down".to_owned(),
     })
+}
+
+/// What a PUBLISH packet carries, taken out of the message in one move: the payload the session
+/// keeps and the MQTT 5 properties the headers map onto.
+fn into_packet(msg: OutgoingMessage<'_, BytesMut>) -> (Bytes, Option<PublishProperties>) {
+    let properties = to_wire_properties(&msg);
+    (msg.into_payload().freeze(), properties)
 }
 
 /// Publishes messages to MQTT topics through the shared connection.
@@ -92,12 +94,16 @@ impl MqttPublisher {
 }
 
 impl Publisher for MqttPublisher {
+    /// The client keeps the payload: a PUBLISH packet is queued into the session, which holds
+    /// the `Bytes` until the broker acknowledges it.
+    type Payload = Take;
+
     type Error = MqttError;
     type Options = MqttPublishOptions;
 
     async fn publish(
         &self,
-        msg: OutgoingMessage<'_>,
+        msg: OutgoingMessage<'_, BytesMut>,
         options: Option<&Self::Options>,
     ) -> Result<(), Self::Error> {
         let (qos, retain) = MqttPublishOptions::resolve(options, self.qos, self.retain);
@@ -361,10 +367,30 @@ impl PublishPolicy<ConnectedMqttTestBroker> for MqttPublish {
 #[cfg(test)]
 mod tests {
     use ruststream::runtime::PublishExt;
-    use ruststream::{Outgoing, Serialized};
+    use ruststream::{HeaderMap, Outgoing, Serialized};
 
     use super::*;
     use crate::broker::MqttBroker;
+
+    /// The packet is made of the buffer the publish wrote, not of a copy of it: the session keeps
+    /// the payload, so this crate hands it over.
+    #[test]
+    fn the_packet_carries_the_buffer_that_was_handed_in() {
+        let body = BytesMut::from(&br#"{"id":7}"#[..]);
+        let written_at = body.as_ptr();
+        let mut headers = HeaderMap::new();
+        headers.insert("content-type", "application/json");
+
+        let (payload, properties) =
+            into_packet(OutgoingMessage::produced("orders", body).with_headers(headers));
+
+        assert!(properties.is_some(), "the headers still map to properties");
+        assert_eq!(
+            payload.as_ptr(),
+            written_at,
+            "the packet must carry the buffer the publish wrote, not a copy of it",
+        );
+    }
 
     fn publisher() -> MqttPublisher {
         MqttBroker::new("mqtt://localhost:1883", "arguments").publisher()

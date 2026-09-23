@@ -1,0 +1,68 @@
+{
+  "schema": 3,
+  "crate": "ruststream-rumqttc",
+  "crate_version": "0.7.0",
+  "core_version": "0.7.0-rc.9",
+  "measured_at": "2026-09-21",
+  "environment": {
+    "cpu": "AMD Ryzen 9 7900X 12-Core Processor",
+    "architecture": "x86_64",
+    "cpu_frequency": "427-5912 MHz",
+    "cores": "12 physical, 24 logical",
+    "memory": "62.4 GiB",
+    "memory_speed": "unknown",
+    "os": "Linux 7.2.6-x64v3-xanmod1-1",
+    "broker": "eclipse-mosquitto:2 in Docker on localhost",
+    "round_trip": "39.3 microseconds, measured as a QoS 1 publish whose PUBACK the client waits for, averaged over 20,000 exchanges on a connection of its own",
+    "rustc": "1.98.1",
+    "profile": "bench, inheriting release (opt-level = 3, lto = false, codegen-units = 16)",
+    "features": "ruststream-rumqttc default (none), ruststream macros,json",
+    "rustflags": "none (the recipe clears RUSTFLAGS, so the numbers are not tied to this CPU)"
+  },
+  "scenarios": [
+    {
+      "name": "QoS 0 topic, 512 B JSON",
+      "unit": "msg/s",
+      "messages": 737422,
+      "pairs": 3,
+      "raw": {
+        "best": 157900,
+        "worst": 156828
+      },
+      "adapter": {
+        "best": 158139,
+        "worst": 156642
+      },
+      "framework": {
+        "best": 158865,
+        "worst": 156327
+      },
+      "adapter_overhead_percent": -0.2,
+      "overhead_percent": -0.6,
+      "verdict": "indistinguishable",
+      "broker_bound": false
+    },
+    {
+      "name": "QoS 1 topic, 512 B JSON, ack each",
+      "unit": "msg/s",
+      "messages": 756714,
+      "pairs": 3,
+      "raw": {
+        "best": 125659,
+        "worst": 125371
+      },
+      "adapter": {
+        "best": 124930,
+        "worst": 123194
+      },
+      "framework": {
+        "best": 124411,
+        "worst": 124264
+      },
+      "adapter_overhead_percent": 0.6,
+      "overhead_percent": 1.0,
+      "verdict": "measured",
+      "broker_bound": true
+    }
+  ]
+}

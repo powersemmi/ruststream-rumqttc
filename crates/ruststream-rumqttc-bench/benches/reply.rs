@@ -8,8 +8,9 @@
     clippy::must_use_candidate,
     clippy::needless_pass_by_value
 )]
-//! Replying: the handler returns a value, the runtime encodes it and hands it to this crate's
-//! publisher, which assembles the PUBLISH for the topic the reply type declares.
+//! Replying: a delivery at `QoS` 1 is decoded and acknowledged, and the value the handler returns
+//! is encoded and handed to this crate's publisher under its default policy, which sends the
+//! PUBLISH to the topic the reply type declares.
 
 mod common;
 
@@ -17,17 +18,17 @@ use std::hint::black_box;
 
 use common::{Latch, MESSAGES, Order, Pending};
 use gungraun::{library_benchmark, library_benchmark_group, main};
-use ruststream::prelude::*;
+use ruststream_rumqttc::prelude::*;
 use serde::Serialize;
 
 /// A reply with a destination of its own: the mount site adds nothing to it.
 #[derive(Debug, Serialize, Outgoing)]
-#[outgoing(name = "confirmations")]
+#[outgoing(name = "bench/confirmations")]
 struct Confirmation {
     id: u64,
 }
 
-#[subscriber("orders", publish)]
+#[subscriber(MqttTopic::new("bench/orders").qos(Qos::AtLeastOnce), publish)]
 async fn confirm(order: &Order, ctx: &mut Context<'_, (), Latch>) -> Confirmation {
     ctx.state().arrived();
     Confirmation {
@@ -41,7 +42,10 @@ fn app(messages: usize) -> Pending {
     })
 }
 
-#[library_benchmark(config = common::config(5, 36))]
+// The allocations are the client's as much as the crate's, and a few of them move with how the
+// socket's reads split, so the floor is the highest count of three runs plus one percent, stated
+// over a thousand deliveries.
+#[library_benchmark(config = common::config_every(10_295, 1_000, 73))]
 #[bench::first(app(1))]
 #[bench::base(app(MESSAGES))]
 #[bench::twice(app(2 * MESSAGES))]

@@ -8,8 +8,9 @@
     clippy::must_use_candidate,
     clippy::needless_pass_by_value
 )]
-//! Consuming a small JSON body: the subscription yields the crate's message, the dispatcher
-//! decodes it into a struct, the handler reads a field, and the runtime acks it.
+//! Consuming a small JSON body at `QoS` 1: the subscription yields the crate's message, the
+//! dispatcher decodes it into a struct, the handler reads a field, and the runtime acknowledges it
+//! with a `PUBACK`.
 
 mod common;
 
@@ -17,9 +18,9 @@ use std::hint::black_box;
 
 use common::{Latch, MESSAGES, Order, Pending};
 use gungraun::{library_benchmark, library_benchmark_group, main};
-use ruststream::prelude::*;
+use ruststream_rumqttc::prelude::*;
 
-#[subscriber("orders")]
+#[subscriber(MqttTopic::new("bench/orders").qos(Qos::AtLeastOnce))]
 async fn consume(order: &Order, ctx: &mut Context<'_, (), Latch>) -> HandlerOutcome {
     black_box((order.id, order.quantity));
     ctx.state().arrived();
@@ -32,7 +33,10 @@ fn app(messages: usize) -> Pending {
     })
 }
 
-#[library_benchmark(config = common::config(0, 24))]
+// The allocations are the client's as much as the crate's, and a few of them move with how the
+// socket's reads split, so the floor is the highest count of three runs plus one percent, stated
+// over a thousand deliveries.
+#[library_benchmark(config = common::config_every(4_189, 1_000, 66))]
 #[bench::first(app(1))]
 #[bench::base(app(MESSAGES))]
 #[bench::twice(app(2 * MESSAGES))]

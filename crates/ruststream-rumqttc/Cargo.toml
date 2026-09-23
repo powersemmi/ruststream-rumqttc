@@ -39,8 +39,6 @@ tokio.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-# The code-cost benchmarks (`benches/`): callgrind and DHAT through the runner the core pins.
-gungraun = "=0.19.4"
 # A raw client reads the PUBLISH packet the crate produced, which is the only way to assert a
 # protocol property the crate maps in one direction only.
 rumqttc.workspace = true
@@ -54,20 +52,3 @@ ruststream = { workspace = true, features = [
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time"] }
-
-# The code-cost benchmarks: one scenario per binary, each a service on the in-process transport.
-# `just bench-code` runs them under valgrind; `benches/common` is the shared setup.
-[[bench]]
-name = "consume"
-harness = false
-required-features = ["testing"]
-
-[[bench]]
-name = "reply"
-harness = false
-required-features = ["testing"]
-
-[[bench]]
-name = "batch"
-harness = false
-required-features = ["testing"]

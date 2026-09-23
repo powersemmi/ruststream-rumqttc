@@ -668,7 +668,6 @@ version = "0.7.0"
 dependencies = [
  "bytes",
  "futures",
- "gungraun",
  "rumqttc",
  "ruststream",
  "serde",
@@ -684,6 +683,7 @@ version = "0.7.0"
 dependencies = [
  "bytes",
  "futures",
+ "gungraun",
  "rumqttc",
  "ruststream",
  "ruststream-rumqttc",

@@ -20,6 +20,7 @@ use rumqttc::v5::mqttbytes::{QoS, matches};
 use rumqttc::v5::{AsyncClient, ConnectionError, Event, EventLoop, StateError};
 use tokio::sync::oneshot;
 
+use crate::broker::Link;
 use crate::error::MqttError;
 use crate::message::MqttMessage;
 use crate::registry::{DeliverySender, Registry, SubscribeRequest};
@@ -93,6 +94,10 @@ impl Shared {
 
     /// Holds a delivery no subscription matched, evicting the oldest when the buffer is full.
     fn hold(&self, message: MqttMessage, identifiers: &[usize]) {
+        // A held delivery waits for a subscription that may never open, so the test harness stops
+        // counting it as in flight: it is not a reaction the harness can wait for.
+        #[cfg(feature = "testing")]
+        let message = message.uncounted();
         let mut held = self.held.lock().expect("mqtt held mutex poisoned");
         if held.len() >= HELD_DELIVERIES
             && let Some((dropped, _)) = held.pop_front()
@@ -143,9 +148,15 @@ impl Shared {
     /// identifier (see [`Registry::join`]).
     // The registry guard spans the join and the backlog handover on purpose (see below).
     #[allow(clippy::significant_drop_tightening)]
+    // Without the `testing` feature a link has one variant, so the match on it has a single arm;
+    // it stays so that the in-process arm has its place when the feature is on.
+    #[cfg_attr(
+        not(feature = "testing"),
+        allow(clippy::infallible_destructuring_match)
+    )]
     pub(crate) async fn open(
         &self,
-        client: &AsyncClient,
+        link: &Link,
         wire_filter: &str,
         match_filter: &str,
         qos: QoS,
@@ -177,6 +188,33 @@ impl Shared {
             *held = unclaimed;
             joined
         };
+        let client = match link {
+            Link::Wire(client) => client,
+            #[cfg(feature = "testing")]
+            Link::InProcess(bus) => {
+                // The in-process server answers a subscribe as it takes it, and always accepts.
+                for request in &joined.requests {
+                    if request.refresh {
+                        if !self
+                            .registry
+                            .lock()
+                            .expect("mqtt registry mutex poisoned")
+                            .holds(&request.filter)
+                        {
+                            continue;
+                        }
+                        bus.subscribe(self, request);
+                        self.registry
+                            .lock()
+                            .expect("mqtt registry mutex poisoned")
+                            .identified(&request.filter, true);
+                    } else {
+                        bus.subscribe(self, request);
+                    }
+                }
+                return Ok(joined.member);
+            }
+        };
         let (done, wait) = oneshot::channel();
         let mut done = Some(done);
         for request in &joined.requests {
@@ -207,7 +245,7 @@ impl Shared {
                 match sent {
                     Ok(()) => break,
                     Err(_) if self.gone() => {
-                        self.release(joined.member, client);
+                        self.release(joined.member, link);
                         return Err(MqttError::Subscribe {
                             filter: match_filter.to_owned(),
                             reason: "the mqtt connection task has shut down".to_owned(),
@@ -261,15 +299,32 @@ impl Shared {
 
     /// Takes the local subscription `member` out, and unsubscribes its filter at the server when
     /// no other local subscription shares it.
-    pub(crate) fn release(&self, member: u64, client: &AsyncClient) {
+    pub(crate) fn release(&self, member: u64, link: &Link) {
+        self.release_with(member, |filter| link.unsubscribe(&filter));
+    }
+
+    /// Takes the local subscription `member` out, and hands its filter to `unsubscribe` when no
+    /// other local subscription shares it.
+    pub(crate) fn release_with(&self, member: u64, unsubscribe: impl FnOnce(String)) {
         let mut registry = self.registry.lock().expect("mqtt registry mutex poisoned");
         // Under the guard, so an open joining the same filter right now queues its subscribe
         // after this unsubscribe and the server ends up subscribed.
-        if let Some(filter) = registry.leave(member)
-            && let Err(err) = client.try_unsubscribe(filter.clone())
-        {
-            tracing::warn!(filter = %filter, error = %err, "mqtt unsubscribe failed");
+        if let Some(filter) = registry.leave(member) {
+            unsubscribe(filter);
         }
+    }
+
+    /// How many subscriptions to the server this connection holds for the plain filter
+    /// `match_filter`: one per wire filter, whatever number of local subscriptions share it.
+    #[cfg(feature = "testing")]
+    pub(crate) fn wire_filters(&self, match_filter: &str) -> usize {
+        self.registry
+            .lock()
+            .expect("mqtt registry mutex poisoned")
+            .wires
+            .iter()
+            .filter(|wire| wire.match_filter == match_filter)
+            .count()
     }
 
     /// Takes the local subscription `member` out after the server refused it, leaving the server
@@ -501,46 +556,54 @@ fn handle_incoming(conn: &mut Conn, packet: Packet) {
                 .as_ref()
                 .map_or(&[][..], |properties| &properties.subscription_identifiers);
             let client = &conn.client;
-            demultiplex(&conn.shared, client, topic, identifiers, |acknowledges| {
+            let dead = demultiplex(&conn.shared, topic, identifiers, |acknowledges| {
                 MqttMessage::new(
                     topic.to_owned(),
                     &publish,
-                    acknowledges.then(|| client.clone()),
+                    acknowledges.then(|| Link::Wire(client.clone())),
                 )
             });
+            for member in dead {
+                conn.shared
+                    .release_with(member, |filter| unsubscribe(client, &filter));
+            }
         }
         _ => {}
     }
 }
 
 /// Hands one PUBLISH packet the server sent this session to the subscriptions it belongs to (see
-/// [`Registry::route`]), holds it when none matches, and releases the subscriptions whose stream
-/// is gone.
+/// [`Registry::route`]), holds it when none matches, and answers the subscriptions whose stream
+/// is gone, for the caller to release through its transport.
 ///
 /// `identifiers` are the subscription identifiers the packet carries; `message` builds one
-/// delivery of the packet, told whether it is the one carrying the acknowledgement.
+/// delivery of the packet, told whether it is the one carrying the acknowledgement. The
+/// in-process mode hands its packets through here too, so both transports demultiplex alike.
 pub(crate) fn demultiplex(
     shared: &Shared,
-    client: &AsyncClient,
     topic: &str,
     identifiers: &[usize],
     message: impl FnMut(bool) -> MqttMessage,
-) {
+) -> Vec<u64> {
     let mut dead = Vec::new();
-    {
-        let mut registry = shared
-            .registry
-            .lock()
-            .expect("mqtt registry mutex poisoned");
-        if let Some(message) = registry.route(topic, identifiers, message, &mut dead) {
-            // Not an error: a resumed session flushes its backlog before the application has
-            // opened the subscription that owns it, so the delivery waits for that filter instead
-            // of being discarded. Held under the registry guard, so an open cannot slip in between
-            // the miss and the hold and leave the delivery waiting for a filter already there.
-            shared.hold(message, identifiers);
-        }
+    let mut registry = shared
+        .registry
+        .lock()
+        .expect("mqtt registry mutex poisoned");
+    if let Some(message) = registry.route(topic, identifiers, message, &mut dead) {
+        // Not an error: a resumed session flushes its backlog before the application has
+        // opened the subscription that owns it, so the delivery waits for that filter instead
+        // of being discarded. Held under the registry guard, so an open cannot slip in between
+        // the miss and the hold and leave the delivery waiting for a filter already there.
+        shared.hold(message, identifiers);
     }
-    for member in dead {
-        shared.release(member, client);
+    drop(registry);
+    dead
+}
+
+/// Takes the wire filter `filter` off the server, from a context that cannot wait for the answer.
+pub(crate) fn unsubscribe(client: &AsyncClient, filter: &str) {
+    if let Err(err) = client.try_unsubscribe(filter) {
+        tracing::warn!(filter = %filter, error = %err, "mqtt unsubscribe failed");
     }
 }

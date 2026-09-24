@@ -19,7 +19,7 @@ This site holds the entry pages. The crate's guide is its overview on docs.rs, a
 - [Publishing](https://docs.rs/ruststream-rumqttc/latest/ruststream_rumqttc/index.html#publishing): the publish policy, the quality of service and retain flag of one message, headers and replies
 - [The prelude](https://docs.rs/ruststream-rumqttc/latest/ruststream_rumqttc/index.html#the-prelude): what a routes file and a handler file import
 - [The generated document](https://docs.rs/ruststream-rumqttc/latest/ruststream_rumqttc/index.html#the-generated-document): the MQTT bindings the `asyncapi` feature reports
-- [Testing](https://docs.rs/ruststream-rumqttc/latest/ruststream_rumqttc/index.html#testing): the in-process broker behind the `testing` feature, driven by `TestApp`
+- [Testing](https://docs.rs/ruststream-rumqttc/latest/ruststream_rumqttc/index.html#testing): the production app under `TestApp`, `MqttBroker` in process behind the `testing` feature or against a live MQTT broker
 - [Operations](https://docs.rs/ruststream-rumqttc/latest/ruststream_rumqttc/index.html#operations): authentication, TLS, sessions, last wills, keep-alive and packet limits
 
 ## Optional

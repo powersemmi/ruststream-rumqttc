@@ -40,7 +40,7 @@ MQTT 5 is the primary target because two things the framework relies on exist on
 - **Per-message QoS and retain.** The mount site's policy declares both for every publish through it, and a step on the publish changes one message: `publisher.message(&state).retain(true).publish()`. The step fills a field of `MqttPublishOptions`, which the publisher resolves over its policy and hands to the client as the protocol fields they are - nothing rides a header, and a stepped publish keeps the codec and the slot of the mount site it left through.
 - **One glob per routes file.** `ruststream_rumqttc::prelude::*` carries the framework's prelude plus this crate's surface, with `MqttPublish` aliased to `Publish`, so a mount site reads the same whichever broker it runs on. A handler body imports `ruststream::prelude::*` alone and states a capability on its injected publisher, so it names no broker type at all - unless it adjusts a per-message argument, which is the one case a body says which broker it is on, by binding `Out<impl Publisher<Options = MqttPublishOptions>, Marker>`.
 - **The `mqtt` protocol binding in the generated document** (feature `asyncapi`). The server reports the client identity, the session settings and the last will's coordinates; a subscription reports the quality of service it reads at; a publish policy reports both arguments its packets carry. Credentials and the will's payload stay out.
-- **In-process test broker** (feature `testing`). `MqttTestBroker` reproduces the crate's core routing with no server, a service mounts on it and runs under the `TestApp` harness, and it answers the way a real broker does, which the crate's own tests hold it to.
+- **Tests run the production app** (feature `testing`). `TestApp::start(app())` connects `MqttBroker` in process, with no server, and `TestApp::start_live(app())` runs the same test against a real broker. The in-process mode reads the broker's own settings and answers the way a server does, which the crate's own tests hold it to.
 
 ## Install
 
@@ -111,28 +111,17 @@ fn app() -> impl App {
 
 ## Test it
 
-The `testing` feature ships an in-process transport: no server, the crate's own routing, the same lifecycle ladder. Mount the service on `MqttTestBroker` and drive it with the framework's `TestApp`, which runs the production dispatch path and settles the reaction before an assertion reads it. The routes line is the one above, character for character: `MqttFilter` opens the subscription here too, wildcard and share group included, and `Publish` pairs against this broker, so there is no in-process descriptor and no in-process policy to swap in. `Telemetry` and `Alert` carry both serde derives because the test injects one and reads the other back, and `Telemetry` derives `Outgoing` so the injection can name the topic the reading arrives on.
+The `testing` feature gives `MqttBroker` an in-process mode. A test hands the framework's `TestApp` the app `main` runs, and addresses the broker by its production type. `#[ruststream::app]` keeps `app()` next to the `main` it generates, so a test calls the same function. `TestApp::start` connects the broker in process, with no server, and drives the production dispatch path; each publish settles the reaction before an assertion reads it. `Telemetry` and `Alert` carry both serde derives because the test injects one and reads the other back, and `Telemetry` derives `Outgoing` so the injection can name the topic the reading arrives on.
 
 ```rust
 use ruststream::testing::TestApp;
 use ruststream_rumqttc::prelude::*;
-use ruststream_rumqttc::testing::MqttTestBroker;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_hot_reading_raises_an_alert() -> Result<(), Box<dyn std::error::Error>> {
-    let app = RustStream::new(AppInfo::new("telemetry", "0.1.0")).with_broker(
-        MqttTestBroker::new(),
-        |b| {
-            b.include(handle)
-                .out(DefaultSlot, Publish::default().qos(Qos::AtLeastOnce))
-                .out_retry(Publish::default())
-                .to("devices/retry/telemetry")
-                .build();
-        },
-    );
-    let tb = TestApp::start(app).await?;
+    let tb = TestApp::start(app()).await?;
 
-    tb.broker::<MqttTestBroker>()
+    tb.broker::<MqttBroker>()
         .message(&Telemetry {
             device: "dev42".to_owned(),
             temperature: 31.5,
@@ -141,21 +130,22 @@ async fn a_hot_reading_raises_an_alert() -> Result<(), Box<dyn std::error::Error
         .publish()
         .await?;
 
-    tb.broker::<MqttTestBroker>()
+    tb.broker::<MqttBroker>()
         .published::<Alert>("alerts")
         .assert_called_once()
         .with(&Alert {
             device: "dev42".to_owned(),
         });
+    tb.shutdown().await?;
     Ok(())
 }
 ```
 
-The wildcard resolves here the way it resolves on the wire, so the injection names the topic a device would publish to and the body sees it under that topic, never under the filter.
+The wildcard resolves here the way it resolves on the wire, so the injection names the topic a device would publish to and the body sees it under that topic, never under the filter. `TestApp::start_live(app())` runs the same body against a running broker.
 
-The compiling originals live in `crates/ruststream-rumqttc/tests/handlers_mqtt.rs`, next to the same harness reading back the per-message arguments a slot publish carried (`tb.out::<Marker>().with_options(..)`) and driving a batch handler.
+The compiling originals live in `crates/ruststream-rumqttc/tests/handlers_mqtt.rs`, next to the same harness reading back the per-message arguments a slot publish carried (`tb.out::<Marker>().with_options(..)`) and driving a batch handler; `tests/both_modes_mqtt.rs` runs one body in both modes.
 
-Protocol behaviour (QoS handshakes, shared groups, session redelivery, retained messages) is covered by the env-gated live suite instead: `just test-brokers` starts mosquitto and runs the integration tests plus the framework conformance lifecycle against it.
+A persistent session, the protocol handshakes and several connections sharing one server run only against a real broker: `just test-brokers` starts Mosquitto and runs the live suite, the framework conformance suites and the live half of the dual-mode tests against it.
 
 ## Layout
 
@@ -174,7 +164,7 @@ ruststream-rumqttc/
 
 ```bash
 just check          # fmt, clippy, feature checks
-just test           # handler-stub tests, no server
+just test           # in-process tests, no server
 just test-brokers   # live integration + conformance against mosquitto
 ```
 

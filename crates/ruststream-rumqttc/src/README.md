@@ -445,11 +445,11 @@ reports the media type of the position's codec in the `contentType` the framewor
 
 # Testing
 
-The `testing` feature ships [`MqttTestBroker`](crate::testing::MqttTestBroker), an in-process
-transport with no server and no network, described in [`testing`](crate::testing). A routes file
-mounts on it as written, both halves of it: the descriptors open subscriptions here and `Publish`
-pairs against it, so there is no in-process descriptor and no in-process policy to swap in. The
-harness itself is the framework's, documented at
+The `testing` feature gives [`MqttBroker`] an in-process mode, so a test runs the service's own
+app: the builder `main` runs, handed to the framework's `TestApp` unchanged. `TestApp::start`
+connects the broker in process, with no server, and a test addresses it by its production type,
+`tb.broker::<MqttBroker>()`. `TestApp::start_live` connects the same app to a running broker, and
+the same test body runs there. The harness itself is the framework's, documented at
 <https://docs.rs/ruststream/latest/ruststream/testing/index.html>.
 
 ```
@@ -457,7 +457,6 @@ harness itself is the framework's, documented at
 # mod demo {
 use ruststream::testing::TestApp;
 use ruststream_rumqttc::prelude::*;
-use ruststream_rumqttc::testing::MqttTestBroker;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize, Outgoing)]
@@ -484,48 +483,62 @@ async fn handle(telemetry: &Telemetry, Out(alerts): Out<impl Publisher>) -> Hand
     HandlerOutcome::ack()
 }
 
-pub async fn a_hot_reading_raises_an_alert() -> Result<(), Box<dyn std::error::Error>> {
-    let app = RustStream::new(AppInfo::new("telemetry", "0.1.0"))
-        .with_broker(MqttTestBroker::new(), |b| {
+/// The app `main` runs, and the one the tests hand the harness.
+pub fn app() -> impl App {
+    RustStream::new(AppInfo::new("telemetry", "0.1.0")).with_broker(
+        MqttBroker::new("mqtt://localhost:1883", "telemetry-svc"),
+        |b| {
             b.include(handle)
                 .out(DefaultSlot, Publish::default().qos(Qos::AtLeastOnce))
                 .out_retry(Publish::default())
                 .to("devices/retry/telemetry")
                 .build();
-        });
-    let tb = TestApp::start(app).await?;
+        },
+    )
+}
 
-    tb.broker::<MqttTestBroker>()
+pub async fn a_hot_reading_raises_an_alert() -> Result<(), Box<dyn std::error::Error>> {
+    let tb = TestApp::start(app()).await?;
+
+    tb.broker::<MqttBroker>()
         .message(&Telemetry { device: "dev42".to_owned(), temperature: 31.5 })
         .to("devices/dev42/telemetry")
         .publish()
         .await?;
 
-    tb.broker::<MqttTestBroker>()
+    tb.broker::<MqttBroker>()
         .published::<Alert>("alerts")
         .assert_called_once()
         .with(&Alert { device: "dev42".to_owned() });
+    tb.shutdown().await?;
     Ok(())
 }
 # }
 # #[cfg(feature = "testing")]
-# fn main() {
+# fn main() -> Result<(), Box<dyn std::error::Error>> {
 #     tokio::runtime::Builder::new_multi_thread()
 #         .enable_all()
-#         .build()
-#         .unwrap()
+#         .build()?
 #         .block_on(demo::a_hot_reading_raises_an_alert())
-#         .unwrap();
 # }
 # #[cfg(not(feature = "testing"))]
 # fn main() {}
 ```
 
-The wildcard resolves here the way it resolves on the wire, so the injection names the topic a
-device would publish to and the body sees it under that topic, never under the filter. What the
-stand-in leaves out is the protocol itself: the acknowledgement exchange behind an acknowledged
-`QoS`, retained messages, and the session that redelivers. Those are what the live suite against
-Eclipse Mosquitto covers, gated behind `MQTT_TEST_URL` and run by `just test-brokers`.
+The in-process mode has no settings of its own. It reads the broker's, and a publish goes through
+the same validation and the same mapping onto MQTT 5 properties as on the wire. It models the
+server this connection talks to. A publish reaches every subscription whose filter matches its
+topic, one packet per subscription, as Mosquitto sends them, and each packet is handed out the way
+the connection hands it out. So a share group takes one copy between its members, and two
+overlapping filters each receive the packet sent for them, told apart by the subscription
+identifier it names.
+A subscription outside a share group receives the retained messages its filter matches, a message
+larger than `max_packet_size` never arrives, and an acknowledgement after shutdown is refused.
+
+Each broker connected in process is a server of its own. A persistent session, its redelivery on
+resume and the last will, the receive-maximum window, the protocol handshakes behind `QoS` 1 and 2,
+and several connections sharing one server run only against a real broker. The live suite against
+Eclipse Mosquitto covers them; `just test-brokers` starts the stand and runs it.
 
 # Operations
 
@@ -551,8 +564,8 @@ Eclipse Mosquitto covers, gated behind `MQTT_TEST_URL` and run by `just test-bro
 
 Both are off by default; the crate's own surface needs neither.
 
-* `testing`: [`MqttTestBroker`](crate::testing::MqttTestBroker) and the framework's `testing`
-  feature with it.
+* `testing`: the in-process mode of [`MqttBroker`], which `TestApp::start` connects, and the
+  framework's `testing` feature with it.
 * `asyncapi`: the `mqtt` protocol bindings of the generated document, forwarding the framework's
   own `asyncapi` feature.
 

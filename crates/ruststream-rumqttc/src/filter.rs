@@ -25,8 +25,6 @@ use crate::asyncapi;
 use crate::broker::ConnectedMqttBroker;
 use crate::error::MqttError;
 use crate::subscriber::MqttSubscriber;
-#[cfg(feature = "testing")]
-use crate::testing::{ConnectedMqttTestBroker, MqttTestSubscriber};
 
 /// Delivery quality of service for a subscription or a publish policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -126,15 +124,6 @@ impl MqttFilter {
 
     pub(crate) const fn qos_value(&self) -> Qos {
         self.qos
-    }
-
-    /// Consumes the descriptor into what a subscription registry needs of it: the filter to match
-    /// on, the wire filter that names its share group, and the quality of service its deliveries
-    /// are settled under.
-    #[cfg(feature = "testing")]
-    pub(crate) fn into_parts(self) -> (String, Option<String>, Qos) {
-        let group = self.shared.as_ref().map(|_| self.wire_filter());
-        (self.filter, group, self.qos)
     }
 
     /// The filter as subscribed on the wire (`$share/<group>/<filter>` when shared).
@@ -320,89 +309,6 @@ impl SubscriptionSource<ConnectedMqttBroker> for MqttFilter {
     }
 
     async fn subscribe(self, connected: &ConnectedMqttBroker) -> Result<MqttSubscriber, MqttError> {
-        connected.subscribe_filter(self).await
-    }
-
-    /// The quality of service this subscription receives at, which is the consumer's own setting
-    /// and belongs to the operation rather than the channel.
-    #[cfg(feature = "asyncapi")]
-    fn operation_bindings(&self) -> Bindings {
-        asyncapi::receive_operation(self.qos_value())
-    }
-
-    /// The MQTT 5 properties every delivery on this subscription is mapped through.
-    #[cfg(feature = "asyncapi")]
-    fn message_bindings(&self) -> Bindings {
-        asyncapi::message()
-    }
-}
-
-/// The same descriptors open the subscription on the in-process broker, so what a service
-/// declares for production is what the harness mounts: no second descriptor type, and no name
-/// rewritten at the mount site.
-///
-/// Every part of the descriptor that decides what a handler sees is honoured there: the filter
-/// selects the same topics, [`shared`](MqttFilter::shared) makes the subscription a competing
-/// consumer rather than another copy, and [`qos`](MqttFilter::qos) decides whether a delivery can
-/// be settled at all - [`Qos::AtMostOnce`] reports
-/// [`AckError::Unsupported`](ruststream::AckError::Unsupported) in process exactly as it does on
-/// the wire. What is left is the protocol itself: the handshake behind an acknowledged `QoS`, the
-/// retained message, the session that redelivers. Those need a server, and the live suite is where
-/// they are checked.
-#[cfg(feature = "testing")]
-impl SubscriptionSource<ConnectedMqttTestBroker> for MqttTopic {
-    type Subscriber = MqttTestSubscriber;
-    type Copies = AddressedCopies;
-
-    fn name(&self) -> &str {
-        self.topic()
-    }
-
-    async fn subscribe(
-        self,
-        connected: &ConnectedMqttTestBroker,
-    ) -> Result<MqttTestSubscriber, MqttError> {
-        connected.subscribe_topic(self).await
-    }
-
-    /// The quality of service this subscription receives at, which is the consumer's own setting
-    /// and belongs to the operation rather than the channel.
-    #[cfg(feature = "asyncapi")]
-    fn operation_bindings(&self) -> Bindings {
-        asyncapi::receive_operation(self.qos_value())
-    }
-
-    /// The MQTT 5 properties every delivery on this subscription is mapped through.
-    #[cfg(feature = "asyncapi")]
-    fn message_bindings(&self) -> Bindings {
-        asyncapi::message()
-    }
-}
-
-/// The same answer as against a server, so a registration starts on both brokers or on neither.
-#[cfg(feature = "testing")]
-impl RedeliveryAddressed<ConnectedMqttTestBroker> for MqttTopic {
-    fn redelivery_address(
-        &self,
-        _connected: &ConnectedMqttTestBroker,
-    ) -> impl Future<Output = Result<RedeliveryAddress, MqttError>> + Send {
-        ready(self.address())
-    }
-}
-
-#[cfg(feature = "testing")]
-impl SubscriptionSource<ConnectedMqttTestBroker> for MqttFilter {
-    type Subscriber = MqttTestSubscriber;
-    type Copies = NamedCopies;
-
-    fn name(&self) -> &str {
-        self.filter()
-    }
-
-    async fn subscribe(
-        self,
-        connected: &ConnectedMqttTestBroker,
-    ) -> Result<MqttTestSubscriber, MqttError> {
         connected.subscribe_filter(self).await
     }
 

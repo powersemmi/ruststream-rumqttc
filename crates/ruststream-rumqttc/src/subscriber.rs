@@ -41,9 +41,7 @@ impl std::fmt::Debug for WireSubscriber {
 
 impl Drop for WireSubscriber {
     fn drop(&mut self) {
-        if let Some(wire_filter) = self.shared.remove(self.id) {
-            let _ = self.client.try_unsubscribe(wire_filter);
-        }
+        self.shared.release(self.id, &self.client);
     }
 }
 
@@ -63,7 +61,8 @@ impl Subscriber for WireSubscriber {
 ///
 /// Delivery back-pressure is the protocol's receive-maximum: the broker bounds unacked
 /// `QoS` 1/2 deliveries, so unsettled messages cap what sits in this subscriber's queue
-/// (`QoS` 0 has no such bound by design). Dropping the subscriber unsubscribes the filter.
+/// (`QoS` 0 has no such bound by design). Dropping the subscriber unsubscribes the filter once no
+/// other subscriber on this connection shares it.
 ///
 /// MQTT has no batch fetch - a PUBLISH packet carries one message - so the batches a `&[T]`
 /// handler consumes are assembled on the client by the framework's

@@ -8,35 +8,42 @@
 //! deliveries), never a stalled loop.
 
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use rumqttc::v5::mqttbytes::v5::{ConnectReturnCode, Packet, SubscribeReasonCode};
+use rumqttc::v5::mqttbytes::v5::{
+    ConnAck, ConnectReturnCode, Filter, Packet, RetainForwardRule, SubscribeProperties,
+    SubscribeReasonCode,
+};
 use rumqttc::v5::mqttbytes::{QoS, matches};
 use rumqttc::v5::{AsyncClient, ConnectionError, Event, EventLoop, StateError};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::oneshot;
 
 use crate::error::MqttError;
 use crate::message::MqttMessage;
+use crate::registry::{DeliverySender, Registry, SubscribeRequest};
 
-/// One live subscription: the wire filter (possibly `$share/...`), the stripped filter used
-/// for matching, and the channel deliveries flow through.
-pub(crate) struct SubEntry {
-    pub(crate) id: u64,
-    pub(crate) wire_filter: String,
-    pub(crate) match_filter: String,
-    pub(crate) qos: QoS,
-    pub(crate) tx: mpsc::UnboundedSender<Result<MqttMessage, MqttError>>,
+/// Who waits for the `SUBACK` of one subscribe.
+enum Awaiting {
+    /// A subscription being opened: its member and the caller waiting on the answer.
+    Open {
+        member: u64,
+        done: oneshot::Sender<Result<(), MqttError>>,
+    },
+    /// A filter already on the server, re-subscribed to gain an identifier; nobody waits.
+    Identify,
+    /// A filter subscribed again after the server lost the session; nobody waits.
+    Resubscribe,
 }
 
 /// A subscribe awaiting its `SUBACK`. The event loop emits the packet id after the request
-/// leaves, in issue order, so ids are assigned first-come-first-served.
+/// leaves, in issue order, so ids are assigned first-come-first-served; every subscribe enters
+/// this queue and the request channel under one guard, so the two orders are the same.
 struct PendingSub {
-    entry_id: u64,
     filter: String,
     pkid: Option<u16>,
-    done: oneshot::Sender<Result<(), MqttError>>,
+    awaiting: Awaiting,
 }
 
 /// How many deliveries matching no subscription are held before the oldest is dropped.
@@ -46,9 +53,13 @@ struct PendingSub {
 /// what the eviction exists for.
 const HELD_DELIVERIES: usize = 1024;
 
+/// How long an open waits before offering its subscribe again when the client's request queue is
+/// full: the queue drains only as fast as the connection task polls, which a reconnect pauses.
+const REQUEST_QUEUE_RETRY: Duration = Duration::from_millis(10);
+
 /// State shared between the connection task, the broker, and subscriber handles.
 pub(crate) struct Shared {
-    pub(crate) subs: Mutex<Vec<SubEntry>>,
+    registry: Mutex<Registry>,
     pending: Mutex<VecDeque<PendingSub>>,
     /// Deliveries no subscription matched yet. A session resumed with `clean_start(false)`
     /// flushes what it queued immediately after `CONNACK`, before the application has opened a
@@ -59,22 +70,23 @@ pub(crate) struct Shared {
     /// report that it waited.
     last_error: Mutex<Option<String>>,
     pub(crate) closed: AtomicBool,
-    next_id: AtomicU64,
-    /// Rotates local delivery across entries sharing one wire filter (a shared group
-    /// subscribed twice on this client is still one broker subscription).
-    round_robin: AtomicU64,
+    /// The connection task has stopped, so nothing drains the client's request queue any more.
+    exited: AtomicBool,
+    /// Whether the server's last `CONNACK` offered subscription identifiers.
+    identifiers: AtomicBool,
 }
 
 impl Shared {
     pub(crate) fn new() -> Self {
         Self {
-            subs: Mutex::new(Vec::new()),
+            registry: Mutex::new(Registry::default()),
             pending: Mutex::new(VecDeque::new()),
             held: Mutex::new(VecDeque::new()),
             last_error: Mutex::new(None),
             closed: AtomicBool::new(false),
-            next_id: AtomicU64::new(0),
-            round_robin: AtomicU64::new(0),
+            exited: AtomicBool::new(false),
+            // The protocol's default when the property is absent.
+            identifiers: AtomicBool::new(true),
         }
     }
 
@@ -118,72 +130,201 @@ impl Shared {
         Ok(())
     }
 
-    /// Registers a subscription and its pending `SUBACK` resolver; returns the entry id.
-    pub(crate) fn register(
-        &self,
-        wire_filter: String,
-        match_filter: String,
-        qos: QoS,
-        tx: mpsc::UnboundedSender<Result<MqttMessage, MqttError>>,
-        done: oneshot::Sender<Result<(), MqttError>>,
-    ) -> u64 {
-        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        {
-            // The registry guard spans the handover: a live delivery needs the same guard, so
-            // it cannot overtake the backlog this filter is about to receive.
-            let mut subs = self.subs.lock().expect("mqtt registry mutex poisoned");
-            {
-                let mut held = self.held.lock().expect("mqtt held mutex poisoned");
-                let mut unclaimed = VecDeque::with_capacity(held.len());
-                while let Some(message) = held.pop_front() {
-                    if matches(message.topic(), &match_filter) {
-                        let _ = tx.send(Ok(message));
-                    } else {
-                        unclaimed.push_back(message);
-                    }
-                }
-                *held = unclaimed;
-            }
-            subs.push(SubEntry {
-                id,
-                wire_filter: wire_filter.clone(),
-                match_filter,
-                qos,
-                tx,
-            });
-        }
-        self.pending
-            .lock()
-            .expect("mqtt pending mutex poisoned")
-            .push_back(PendingSub {
-                entry_id: id,
-                filter: wire_filter,
-                pkid: None,
-                done,
-            });
-        id
+    fn gone(&self) -> bool {
+        self.closed.load(Ordering::Acquire) || self.exited.load(Ordering::Acquire)
     }
 
-    pub(crate) fn remove(&self, id: u64) -> Option<String> {
-        let mut subs = self.subs.lock().expect("mqtt registry mutex poisoned");
-        subs.iter()
-            .position(|entry| entry.id == id)
-            .map(|index| subs.swap_remove(index).wire_filter)
+    /// Opens a local subscription on `wire_filter` and waits for the server's `SUBACK`; answers
+    /// the member id the subscriber releases on drop.
+    ///
+    /// A filter already on the server gains a member rather than a second subscription, and a
+    /// filter meeting another one on this connection is told apart from it by a subscription
+    /// identifier (see [`Registry::join`]).
+    // The registry guard spans the join and the backlog handover on purpose (see below).
+    #[allow(clippy::significant_drop_tightening)]
+    pub(crate) async fn open(
+        &self,
+        client: &AsyncClient,
+        wire_filter: &str,
+        match_filter: &str,
+        qos: QoS,
+        tx: DeliverySender,
+    ) -> Result<u64, MqttError> {
+        self.ensure_open()?;
+        let joined = {
+            // The registry guard spans the handover: a live delivery needs the same guard, so
+            // it cannot overtake the backlog this filter is about to receive.
+            let mut registry = self.registry.lock().expect("mqtt registry mutex poisoned");
+            let joined = registry.join(
+                wire_filter,
+                match_filter,
+                qos,
+                self.identifiers.load(Ordering::Relaxed),
+                tx.clone(),
+            )?;
+            let mut held = self.held.lock().expect("mqtt held mutex poisoned");
+            let mut unclaimed = VecDeque::with_capacity(held.len());
+            while let Some(message) = held.pop_front() {
+                if matches(message.topic(), match_filter) {
+                    let _ = tx.send(Ok(message));
+                } else {
+                    unclaimed.push_back(message);
+                }
+            }
+            *held = unclaimed;
+            joined
+        };
+        let (done, wait) = oneshot::channel();
+        let mut done = Some(done);
+        for request in &joined.requests {
+            let awaiting = if request.refresh {
+                Awaiting::Identify
+            } else {
+                Awaiting::Open {
+                    member: joined.member,
+                    done: done.take().expect("one request opens the member"),
+                }
+            };
+            let mut pending = PendingSub {
+                filter: request.filter.clone(),
+                pkid: None,
+                awaiting,
+            };
+            loop {
+                match self.send_subscribe(client, request, pending) {
+                    Ok(()) => break,
+                    Err(_) if self.gone() => {
+                        self.release(joined.member, client);
+                        return Err(MqttError::Subscribe {
+                            filter: match_filter.to_owned(),
+                            reason: "the mqtt connection task has shut down".to_owned(),
+                        });
+                    }
+                    Err(back) => {
+                        pending = back;
+                        tokio::time::sleep(REQUEST_QUEUE_RETRY).await;
+                    }
+                }
+            }
+        }
+        wait.await.map_err(|_| MqttError::Subscribe {
+            filter: match_filter.to_owned(),
+            reason: "the mqtt connection task has shut down".to_owned(),
+        })??;
+        Ok(joined.member)
+    }
+
+    /// Queues one subscribe and its `SUBACK` record under one guard, or hands the record back
+    /// when the client's request queue refuses it.
+    // The pending guard spans the send on purpose: it is what keeps the two orders the same.
+    #[allow(clippy::significant_drop_tightening)]
+    fn send_subscribe(
+        &self,
+        client: &AsyncClient,
+        request: &SubscribeRequest,
+        record: PendingSub,
+    ) -> Result<(), PendingSub> {
+        let mut filter = Filter::new(request.filter.clone(), request.qos);
+        if request.refresh {
+            filter.retain_forward_rule = RetainForwardRule::OnNewSubscribe;
+        }
+        let properties = request.identifier.map(|id| SubscribeProperties {
+            id: Some(id),
+            user_properties: Vec::new(),
+        });
+        let mut pending = self.pending.lock().expect("mqtt pending mutex poisoned");
+        let sent = match properties {
+            Some(properties) => client.try_subscribe_many_with_properties([filter], properties),
+            None => client.try_subscribe_many([filter]),
+        };
+        match sent {
+            Ok(()) => {
+                pending.push_back(record);
+                Ok(())
+            }
+            Err(_) => Err(record),
+        }
+    }
+
+    /// Takes the local subscription `member` out, and unsubscribes its filter at the server when
+    /// no other local subscription shares it.
+    pub(crate) fn release(&self, member: u64, client: &AsyncClient) {
+        let mut registry = self.registry.lock().expect("mqtt registry mutex poisoned");
+        // Under the guard, so an open joining the same filter right now queues its subscribe
+        // after this unsubscribe and the server ends up subscribed.
+        if let Some(filter) = registry.leave(member)
+            && let Err(err) = client.try_unsubscribe(filter.clone())
+        {
+            tracing::warn!(filter = %filter, error = %err, "mqtt unsubscribe failed");
+        }
+    }
+
+    /// Takes the local subscription `member` out after the server refused it, leaving the server
+    /// as it is: a refused subscribe changed nothing there.
+    fn forget(&self, member: u64) {
+        self.registry
+            .lock()
+            .expect("mqtt registry mutex poisoned")
+            .leave(member);
+    }
+
+    /// Reads what the server offers from a `CONNACK`, and subscribes again every filter a lost
+    /// session took with it.
+    fn connected(&self, client: &AsyncClient, connack: &ConnAck) {
+        let identifiers = connack
+            .properties
+            .as_ref()
+            .and_then(|properties| properties.subscription_identifiers_available)
+            .is_none_or(|available| available != 0);
+        self.identifiers.store(identifiers, Ordering::Relaxed);
+        // The client never resubscribes; the broker's session-present flag is the
+        // authoritative signal that our filters are gone.
+        if connack.session_present {
+            return;
+        }
+        let mut registry = self.registry.lock().expect("mqtt registry mutex poisoned");
+        registry.resubscribing(identifiers);
+        for wire in &registry.wires {
+            if !identifiers && wire.identifier.is_some() {
+                tracing::warn!(
+                    filter = %wire.filter,
+                    "mqtt server offers no subscription identifiers after a reconnect: a publish \
+                     this filter shares with another one on the connection may be delivered to \
+                     each of them more than once"
+                );
+            }
+            let request = SubscribeRequest {
+                filter: wire.filter.clone(),
+                qos: wire.qos,
+                identifier: wire.identifier.filter(|_| identifiers),
+                refresh: false,
+            };
+            let record = PendingSub {
+                filter: wire.filter.clone(),
+                pkid: None,
+                awaiting: Awaiting::Resubscribe,
+            };
+            if self.send_subscribe(client, &request, record).is_err() {
+                tracing::warn!(filter = %wire.filter, "mqtt resubscribe failed: the request queue is full");
+            }
+        }
     }
 
     fn broadcast_error(&self, reason: &str) {
         {
-            let subs = self.subs.lock().expect("mqtt registry mutex poisoned");
-            for entry in subs.iter() {
-                let _ = entry.tx.send(Err(MqttError::Receive(reason.to_owned())));
+            let registry = self.registry.lock().expect("mqtt registry mutex poisoned");
+            for member in registry.wires.iter().flat_map(|wire| &wire.members) {
+                let _ = member.tx.send(Err(MqttError::Receive(reason.to_owned())));
             }
         }
         let mut pending = self.pending.lock().expect("mqtt pending mutex poisoned");
         for sub in pending.drain(..) {
-            let _ = sub.done.send(Err(MqttError::Subscribe {
-                filter: sub.filter,
-                reason: reason.to_owned(),
-            }));
+            if let Awaiting::Open { done, .. } = sub.awaiting {
+                let _ = done.send(Err(MqttError::Subscribe {
+                    filter: sub.filter,
+                    reason: reason.to_owned(),
+                }));
+            }
         }
     }
 }
@@ -271,34 +412,16 @@ pub(crate) async fn run(mut conn: Conn) {
             }
         }
     }
+    conn.shared.exited.store(true, Ordering::Release);
 }
 
-// The registry guard intentionally spans grouping and delivery: entries must not move under
-// the borrowed group table.
-#[allow(clippy::significant_drop_tightening)]
 fn handle_incoming(conn: &mut Conn, packet: Packet) {
     match packet {
         Packet::ConnAck(connack) => {
             if let Some(done) = conn.first_connack.take() {
                 let _ = done.send(Ok(()));
             }
-            // The client never resubscribes; the broker's session-present flag is the
-            // authoritative signal that our filters are gone.
-            if !connack.session_present {
-                let subs = conn
-                    .shared
-                    .subs
-                    .lock()
-                    .expect("mqtt registry mutex poisoned");
-                for entry in subs.iter() {
-                    if let Err(err) = conn
-                        .client
-                        .try_subscribe(entry.wire_filter.clone(), entry.qos)
-                    {
-                        tracing::warn!(filter = %entry.wire_filter, error = %err, "mqtt resubscribe failed");
-                    }
-                }
-            }
+            conn.shared.connected(&conn.client, &connack);
         }
         Packet::SubAck(suback) => {
             let pending_sub = {
@@ -310,20 +433,47 @@ fn handle_incoming(conn: &mut Conn, packet: Packet) {
                 pending
                     .iter()
                     .position(|sub| sub.pkid == Some(suback.pkid))
-                    .map(|index| pending.remove(index).expect("index just found"))
+                    .and_then(|index| pending.remove(index))
             };
-            if let Some(sub) = pending_sub {
-                let outcome = match suback.return_codes.first() {
-                    Some(SubscribeReasonCode::Success(_)) => Ok(()),
-                    other => {
-                        conn.shared.remove(sub.entry_id);
-                        Err(MqttError::Subscribe {
-                            filter: sub.filter,
-                            reason: format!("broker rejected the subscription: {other:?}"),
-                        })
+            let Some(sub) = pending_sub else { return };
+            let refused = match suback.return_codes.first() {
+                Some(SubscribeReasonCode::Success(_)) => None,
+                other => Some(format!("broker rejected the subscription: {other:?}")),
+            };
+            match sub.awaiting {
+                Awaiting::Open { member, done } => {
+                    let outcome = match refused {
+                        None => Ok(()),
+                        Some(reason) => {
+                            conn.shared.forget(member);
+                            Err(MqttError::Subscribe {
+                                filter: sub.filter,
+                                reason,
+                            })
+                        }
+                    };
+                    let _ = done.send(outcome);
+                }
+                Awaiting::Identify => {
+                    conn.shared
+                        .registry
+                        .lock()
+                        .expect("mqtt registry mutex poisoned")
+                        .identified(&sub.filter, refused.is_none());
+                    if let Some(reason) = refused {
+                        tracing::warn!(
+                            filter = %sub.filter,
+                            reason,
+                            "mqtt server refused a subscription identifier: a publish this filter \
+                             shares with another one on the connection may reach both of them twice"
+                        );
                     }
-                };
-                let _ = sub.done.send(outcome);
+                }
+                Awaiting::Resubscribe => {
+                    if let Some(reason) = refused {
+                        tracing::warn!(filter = %sub.filter, reason, "mqtt resubscribe refused");
+                    }
+                }
             }
         }
         Packet::Publish(publish) => {
@@ -331,59 +481,51 @@ fn handle_incoming(conn: &mut Conn, packet: Packet) {
                 tracing::warn!("mqtt publish with non-utf8 topic dropped");
                 return;
             };
-            let topic = topic.to_owned();
-            let mut dead = Vec::new();
-            {
-                let subs = conn
-                    .shared
-                    .subs
-                    .lock()
-                    .expect("mqtt registry mutex poisoned");
-                // Entries sharing one wire filter are one broker subscription (a shared
-                // group subscribed twice on this client), so each such group receives one
-                // copy, rotated across its entries. The wire acknowledgement belongs to
-                // exactly one delivery; the first group carries it, genuinely different
-                // overlapping filters get settled copies.
-                let mut groups: Vec<(&str, Vec<&SubEntry>)> = Vec::new();
-                for entry in subs.iter() {
-                    if matches(&topic, &entry.match_filter) {
-                        match groups
-                            .iter_mut()
-                            .find(|(wire, _)| *wire == entry.wire_filter)
-                        {
-                            Some((_, entries)) => entries.push(entry),
-                            None => groups.push((&entry.wire_filter, vec![entry])),
-                        }
-                    }
-                }
-                if groups.is_empty() {
-                    // Not an error: a resumed session flushes its backlog before the
-                    // application has opened the subscription that owns it, so the delivery
-                    // waits for that filter instead of being discarded.
-                    conn.shared.hold(MqttMessage::new(
-                        topic.clone(),
-                        &publish,
-                        Some(conn.client.clone()),
-                    ));
-                }
-                let rotation =
-                    usize::try_from(conn.shared.round_robin.fetch_add(1, Ordering::Relaxed))
-                        .unwrap_or(0);
-                let mut acker = Some(conn.client.clone());
-                for (_, entries) in &groups {
-                    let entry = entries[rotation % entries.len()];
-                    let message = MqttMessage::new(topic.clone(), &publish, acker.take());
-                    if entry.tx.send(Ok(message)).is_err() {
-                        dead.push(entry.id);
-                    }
-                }
-            }
-            for id in dead {
-                if let Some(filter) = conn.shared.remove(id) {
-                    let _ = conn.client.try_unsubscribe(filter);
-                }
-            }
+            let identifiers = publish
+                .properties
+                .as_ref()
+                .map_or(&[][..], |properties| &properties.subscription_identifiers);
+            let client = &conn.client;
+            demultiplex(&conn.shared, client, topic, identifiers, |acknowledges| {
+                MqttMessage::new(
+                    topic.to_owned(),
+                    &publish,
+                    acknowledges.then(|| client.clone()),
+                )
+            });
         }
         _ => {}
+    }
+}
+
+/// Hands one PUBLISH packet the server sent this session to the subscriptions it belongs to (see
+/// [`Registry::route`]), holds it when none matches, and releases the subscriptions whose stream
+/// is gone.
+///
+/// `identifiers` are the subscription identifiers the packet carries; `message` builds one
+/// delivery of the packet, told whether it is the one carrying the acknowledgement.
+pub(crate) fn demultiplex(
+    shared: &Shared,
+    client: &AsyncClient,
+    topic: &str,
+    identifiers: &[usize],
+    message: impl FnMut(bool) -> MqttMessage,
+) {
+    let mut dead = Vec::new();
+    {
+        let mut registry = shared
+            .registry
+            .lock()
+            .expect("mqtt registry mutex poisoned");
+        if let Some(message) = registry.route(topic, identifiers, message, &mut dead) {
+            // Not an error: a resumed session flushes its backlog before the application has
+            // opened the subscription that owns it, so the delivery waits for that filter instead
+            // of being discarded. Held under the registry guard, so an open cannot slip in between
+            // the miss and the hold and leave the delivery waiting for a filter already there.
+            shared.hold(message);
+        }
+    }
+    for member in dead {
+        shared.release(member, client);
     }
 }

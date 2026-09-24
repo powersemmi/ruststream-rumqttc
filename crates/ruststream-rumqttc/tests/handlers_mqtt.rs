@@ -918,3 +918,52 @@ async fn a_naming_transform_returns_a_copy_to_the_topic_it_arrived_on() {
         .assert_called(2)
         .settled(HandlerOutcome::ack());
 }
+
+const READING: &str = "sensors/s1/reading";
+
+#[subscriber(MqttFilter::new("sensors/+/reading"))]
+async fn record_reading(telemetry: &Telemetry) {
+    let _ = telemetry.temperature;
+}
+
+#[subscriber(MqttFilter::new("sensors/#"))]
+async fn archive_sensor_traffic(telemetry: &Telemetry) {
+    let _ = telemetry.temperature;
+}
+
+/// Two handlers whose filters both match a topic each run once for a message published there.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn overlapping_filters_run_each_handler_once() {
+    let app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(
+        MqttTestBroker::new(),
+        |b| {
+            // A filter is no topic to send a deferred copy to, so each mount names one.
+            b.include(record_reading)
+                .out_retry(Publish::default())
+                .to(READING);
+            b.include(archive_sensor_traffic)
+                .out_retry(Publish::default())
+                .to(READING);
+        },
+    );
+
+    let tb = TestApp::start(app).await.expect("the harness starts");
+    let reading = Telemetry {
+        device: "s1".to_owned(),
+        temperature: 19.0,
+    };
+    tb.broker::<MqttTestBroker>()
+        .message(&reading)
+        .to(READING)
+        .publish()
+        .await
+        .expect("the injected reading is routed");
+
+    for filter in ["sensors/+/reading", "sensors/#"] {
+        tb.broker::<MqttTestBroker>()
+            .subscriber(filter)
+            .assert_called_once()
+            .with(&reading)
+            .settled(HandlerOutcome::ack());
+    }
+}

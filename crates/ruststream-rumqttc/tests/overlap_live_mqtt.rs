@@ -16,6 +16,8 @@ use ruststream_rumqttc::{
 };
 
 const RECV_TIMEOUT: Duration = Duration::from_secs(15);
+/// How long a read waits to be sure no further copy follows the last delivery it expected.
+const QUIET: Duration = Duration::from_millis(300);
 
 /// The live broker URL, or `None` when there is no stand; `RUSTSTREAM_REQUIRE_LIVE` turns the skip
 /// into a failure, so a job that means to run live cannot pass without running.
@@ -68,7 +70,8 @@ async fn publish_retained(connected: &ConnectedMqttBroker, topic: &str, payload:
 /// one, and answers the payloads in arrival order with whether each acknowledgement was accepted.
 ///
 /// The server sends one connection's packets in order, so every copy of what was published before
-/// `last` has arrived by the time `last` does: a duplicate cannot slip in after the read ends.
+/// `last` has arrived by the time `last` does; a second copy of `last` itself would come after it,
+/// so the read then checks that nothing more arrives.
 async fn read_through(subscriber: &mut MqttSubscriber, last: &str) -> Vec<(String, bool)> {
     let mut stream = pin!(subscriber.stream());
     let mut seen = Vec::new();
@@ -83,6 +86,11 @@ async fn read_through(subscriber: &mut MqttSubscriber, last: &str) -> Vec<(Strin
         let done = payload == last;
         seen.push((payload, acknowledged));
         if done {
+            let trailing = tokio::time::timeout(QUIET, stream.next()).await;
+            assert!(
+                trailing.is_err(),
+                "a delivery arrived after {last:?}: {seen:?} then more"
+            );
             return seen;
         }
     }

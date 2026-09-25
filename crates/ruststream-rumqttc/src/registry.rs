@@ -26,6 +26,7 @@ const MAX_IDENTIFIER: usize = 268_435_455;
 /// One local subscription on a wire filter.
 pub(crate) struct Member {
     pub(crate) id: u64,
+    pub(crate) qos: QoS,
     pub(crate) tx: DeliverySender,
 }
 
@@ -93,7 +94,13 @@ impl Registry {
         let met = self.wires.iter().filter(|wire| {
             wire.filter != filter && filters_overlap(&wire.match_filter, match_filter)
         });
-        if !identifiers_available && let Some(wire) = met.clone().next() {
+        // Joining a filter already on the server adds no wire subscription, so it meets nothing
+        // it did not meet before.
+        let exists = self.wires.iter().any(|wire| wire.filter == filter);
+        if !identifiers_available
+            && !exists
+            && let Some(wire) = met.clone().next()
+        {
             return Err(MqttError::Subscribe {
                 filter: filter.to_owned(),
                 reason: format!(
@@ -104,17 +111,22 @@ impl Registry {
                 ),
             });
         }
-        let meets_another = met.count() > 0;
+        let meets_another = identifiers_available && met.count() > 0;
 
         let member = self.next_member;
         self.next_member += 1;
         let mut requests = Vec::new();
         let index = if let Some(index) = self.wires.iter().position(|wire| wire.filter == filter) {
             let wire = &mut self.wires[index];
-            wire.members.push(Member { id: member, tx });
-            // A subscribe replaces the server's subscription on the same filter, so the last one
-            // decides the quality of service, as it did when each member subscribed on its own.
-            wire.qos = qos;
+            wire.members.push(Member {
+                id: member,
+                qos,
+                tx,
+            });
+            // A subscribe replaces the server's subscription on the same filter, so it asks for
+            // the highest quality of service a member needs: a member that acknowledges must
+            // never be handed a delivery it cannot acknowledge.
+            wire.qos = higher(wire.qos, qos);
             index
         } else {
             self.wires.push(Wire {
@@ -123,7 +135,11 @@ impl Registry {
                 qos,
                 identifier: None,
                 unnamed_on_server: false,
-                members: vec![Member { id: member, tx }],
+                members: vec![Member {
+                    id: member,
+                    qos,
+                    tx,
+                }],
             });
             self.wires.len() - 1
         };
@@ -154,8 +170,9 @@ impl Registry {
         let wire = &self.wires[index];
         requests.push(SubscribeRequest {
             filter: wire.filter.clone(),
-            qos,
-            identifier: wire.identifier,
+            qos: wire.qos,
+            // A server that offers no identifiers may refuse a subscribe carrying one.
+            identifier: wire.identifier.filter(|_| identifiers_available),
             refresh: false,
         });
         Ok(Joined { member, requests })
@@ -170,9 +187,33 @@ impl Registry {
             .position(|wire| wire.members.iter().any(|entry| entry.id == member))?;
         let wire = &mut self.wires[index];
         wire.members.retain(|entry| entry.id != member);
+        if let Some(qos) = wire.members.iter().map(|entry| entry.qos).reduce(higher) {
+            // What a later subscribe of the filter asks for (a reconnect's) follows the members
+            // that remain.
+            wire.qos = qos;
+        }
         wire.members
             .is_empty()
             .then(|| self.wires.swap_remove(index).filter)
+    }
+
+    /// Whether the wire filter `filter` is on the server for a local subscription.
+    pub(crate) fn holds(&self, filter: &str) -> bool {
+        self.wires.iter().any(|wire| wire.filter == filter)
+    }
+
+    /// Whether a held delivery naming `identifiers` belongs to the wire filter `filter`: one
+    /// naming none belongs to any filter its topic matches, one naming some to the filter they
+    /// name, by its identifier now or the one derived from it.
+    pub(crate) fn claims(&self, filter: &str, identifiers: &[usize]) -> bool {
+        identifiers.is_empty()
+            || self
+                .wires
+                .iter()
+                .find(|wire| wire.filter == filter)
+                .and_then(|wire| wire.identifier)
+                .is_some_and(|identifier| identifiers.contains(&identifier))
+            || identifiers.contains(&derived_identifier(filter))
     }
 
     /// Records the server's answer to the subscribe that attached an identifier to `filter`: from
@@ -200,14 +241,7 @@ impl Registry {
     /// filter the identifier the server still holds for it from the previous one, and a packet
     /// queued under the old identifier reaches the filter it was sent for.
     fn free_identifier(&self, filter: &str) -> usize {
-        // FNV-1a: stable across processes and releases, unlike the standard library's hasher.
-        let hash = filter
-            .bytes()
-            .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
-                (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
-            });
-        let range = MAX_IDENTIFIER as u64;
-        let mut identifier = usize::try_from(hash % range).unwrap_or(0) + 1;
+        let mut identifier = derived_identifier(filter);
         while self
             .wires
             .iter()
@@ -226,9 +260,11 @@ impl Registry {
     /// belongs to the matching filters the server holds without one (including a filter whose
     /// identifier is still on its way to the server). Each such filter receives one copy,
     /// rotated across its members, and the first copy carries the acknowledgement. A packet the
-    /// rule leaves with no filter (an identifier from a previous process that no filter carries
-    /// now) goes to every filter its topic matches. A packet no filter matches at all is answered
-    /// back, for the caller to hold.
+    /// rule leaves with no filter goes, when it names identifiers, to the matching filter whose
+    /// derived identifier it names (a filter a previous process identified that carries none
+    /// now), and is otherwise answered back to be held for the filter it names, which has not
+    /// opened yet; one naming none goes to every filter its topic matches. A packet no filter
+    /// matches at all is answered back, for the caller to hold.
     pub(crate) fn route(
         &mut self,
         topic: &str,
@@ -264,7 +300,10 @@ impl Registry {
         }
         if !delivered {
             for wire in &self.wires {
-                if matches(topic, &wire.match_filter) {
+                let named = identifiers.is_empty()
+                    || (wire.identifier.is_none()
+                        && identifiers.contains(&derived_identifier(&wire.filter)));
+                if named && matches(topic, &wire.match_filter) {
                     deliver(wire);
                     delivered = true;
                 }
@@ -272,6 +311,28 @@ impl Registry {
         }
         (!delivered).then(|| message(true))
     }
+}
+
+/// The higher of two qualities of service.
+const fn higher(left: QoS, right: QoS) -> QoS {
+    if (left as u8) >= (right as u8) {
+        left
+    } else {
+        right
+    }
+}
+
+/// The identifier a filter is given first: derived from the filter, so a process that resumes a
+/// persistent session assigns it the identifier the server still holds from the previous one.
+fn derived_identifier(filter: &str) -> usize {
+    // FNV-1a: stable across processes and releases, unlike the standard library's hasher.
+    let hash = filter
+        .bytes()
+        .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+            (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
+        });
+    let range = MAX_IDENTIFIER as u64;
+    usize::try_from(hash % range).unwrap_or(0) + 1
 }
 
 /// Whether some topic matches both filters.
@@ -487,12 +548,61 @@ mod tests {
     }
 
     #[test]
-    fn an_identifier_no_filter_carries_falls_back_to_the_topic() {
+    fn an_identifier_a_previous_process_gave_a_filter_still_reaches_it() {
         let mut registry = Registry::default();
         let (_, mut plain) = join(&mut registry, "a/b", "a/b", true).expect("joins");
 
-        assert!(route(&mut registry, &packet("a/b", vec![42])).is_none());
+        let previous = derived_identifier("a/b");
+        assert!(route(&mut registry, &packet("a/b", vec![previous])).is_none());
         assert_eq!(drain(&mut plain), 1);
+    }
+
+    #[test]
+    fn a_packet_for_a_filter_not_open_yet_is_held_for_it() {
+        let mut registry = Registry::default();
+        let (_, mut open) = join(&mut registry, "a/+", "a/+", true).expect("joins");
+
+        let later = derived_identifier("a/#");
+        assert!(
+            route(&mut registry, &packet("a/b", vec![later])).is_some(),
+            "held for the filter it names"
+        );
+        assert_eq!(
+            drain(&mut open),
+            0,
+            "an overlapping filter does not take it"
+        );
+        assert!(!registry.claims("a/+", &[later]));
+        join(&mut registry, "a/#", "a/#", true).expect("joins");
+        assert!(registry.claims("a/#", &[later]));
+    }
+
+    #[test]
+    fn a_member_keeps_the_quality_of_service_it_asked_for() {
+        let mut registry = Registry::default();
+        let (_, _acknowledging) = join(&mut registry, "a/b", "a/b", true).expect("joins");
+        let (fire_tx, _fire_rx) = mpsc::unbounded_channel::<Result<MqttMessage, MqttError>>();
+        let fire = registry
+            .join("a/b", "a/b", QoS::AtMostOnce, true, fire_tx)
+            .expect("joins");
+        assert_eq!(
+            fire.requests[0].qos,
+            QoS::AtLeastOnce,
+            "the highest member's"
+        );
+        registry.leave(fire.member);
+        assert_eq!(registry.wires[0].qos, QoS::AtLeastOnce);
+    }
+
+    #[test]
+    fn a_member_joins_its_filter_without_identifiers_and_sends_none() {
+        let mut registry = Registry::default();
+        join(&mut registry, "a/+", "a/+", true).expect("joins");
+        join(&mut registry, "a/#", "a/#", true).expect("joins");
+        let (joined, _rx) =
+            join(&mut registry, "a/+", "a/+", false).expect("an existing filter gains a member");
+        assert_eq!(joined.requests.len(), 1, "nothing is re-subscribed");
+        assert_eq!(joined.requests[0].identifier, None);
     }
 
     #[test]

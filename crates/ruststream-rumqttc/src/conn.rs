@@ -64,7 +64,8 @@ pub(crate) struct Shared {
     /// Deliveries no subscription matched yet. A session resumed with `clean_start(false)`
     /// flushes what it queued immediately after `CONNACK`, before the application has opened a
     /// single subscription, so they wait here for the filter they belong to.
-    held: Mutex<VecDeque<MqttMessage>>,
+    /// With the subscription identifiers each named, which decide the filter that claims it.
+    held: Mutex<VecDeque<(MqttMessage, Vec<usize>)>>,
     /// The last failure the connection task decided to retry, as it read on the wire. A retry
     /// leaves no other trace, so without this a startup that never reaches a `CONNACK` can only
     /// report that it waited.
@@ -91,10 +92,10 @@ impl Shared {
     }
 
     /// Holds a delivery no subscription matched, evicting the oldest when the buffer is full.
-    fn hold(&self, message: MqttMessage) {
+    fn hold(&self, message: MqttMessage, identifiers: &[usize]) {
         let mut held = self.held.lock().expect("mqtt held mutex poisoned");
         if held.len() >= HELD_DELIVERIES
-            && let Some(dropped) = held.pop_front()
+            && let Some((dropped, _)) = held.pop_front()
         {
             tracing::warn!(
                 topic = %dropped.topic(),
@@ -102,7 +103,7 @@ impl Shared {
                 "mqtt delivery dropped: no subscription matches its topic and the hold buffer is full"
             );
         }
-        held.push_back(message);
+        held.push_back((message, identifiers.to_vec()));
     }
 
     /// Records the failure a retry is about to hide.
@@ -164,11 +165,13 @@ impl Shared {
             )?;
             let mut held = self.held.lock().expect("mqtt held mutex poisoned");
             let mut unclaimed = VecDeque::with_capacity(held.len());
-            while let Some(message) = held.pop_front() {
-                if matches(message.topic(), match_filter) {
+            while let Some((message, identifiers)) = held.pop_front() {
+                if matches(message.topic(), match_filter)
+                    && registry.claims(wire_filter, &identifiers)
+                {
                     let _ = tx.send(Ok(message));
                 } else {
-                    unclaimed.push_back(message);
+                    unclaimed.push_back((message, identifiers));
                 }
             }
             *held = unclaimed;
@@ -191,7 +194,17 @@ impl Shared {
                 awaiting,
             };
             loop {
-                match self.send_subscribe(client, request, pending) {
+                // A refresh goes out under the registry guard, and only while its filter is still
+                // held: a release that took the filter off the server first would otherwise see
+                // the refresh subscribe it again, for no local subscription.
+                let sent = {
+                    let registry = self.registry.lock().expect("mqtt registry mutex poisoned");
+                    if request.refresh && !registry.holds(&request.filter) {
+                        break;
+                    }
+                    self.send_subscribe(client, request, pending)
+                };
+                match sent {
                     Ok(()) => break,
                     Err(_) if self.gone() => {
                         self.release(joined.member, client);
@@ -418,10 +431,12 @@ pub(crate) async fn run(mut conn: Conn) {
 fn handle_incoming(conn: &mut Conn, packet: Packet) {
     match packet {
         Packet::ConnAck(connack) => {
+            // Recorded before `connect` wakes: a subscription opened right after it reads whether
+            // the server offers identifiers.
+            conn.shared.connected(&conn.client, &connack);
             if let Some(done) = conn.first_connack.take() {
                 let _ = done.send(Ok(()));
             }
-            conn.shared.connected(&conn.client, &connack);
         }
         Packet::SubAck(suback) => {
             let pending_sub = {
@@ -463,7 +478,7 @@ fn handle_incoming(conn: &mut Conn, packet: Packet) {
                     if let Some(reason) = refused {
                         tracing::warn!(
                             filter = %sub.filter,
-                            reason,
+                            reason = %reason,
                             "mqtt server refused a subscription identifier: a publish this filter \
                              shares with another one on the connection may reach both of them twice"
                         );
@@ -522,7 +537,7 @@ pub(crate) fn demultiplex(
             // opened the subscription that owns it, so the delivery waits for that filter instead
             // of being discarded. Held under the registry guard, so an open cannot slip in between
             // the miss and the hold and leave the delivery waiting for a filter already there.
-            shared.hold(message);
+            shared.hold(message, identifiers);
         }
     }
     for member in dead {

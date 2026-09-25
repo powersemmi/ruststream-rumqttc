@@ -83,10 +83,21 @@ impl MqttMessage {
         self
     }
 
-    /// This delivery, no longer counted by the test harness.
+    /// This delivery, no longer counted by the test harness while it is held.
     #[cfg(feature = "testing")]
     pub(crate) fn uncounted(mut self) -> Self {
-        self.in_flight = None;
+        if let Some(in_flight) = &mut self.in_flight {
+            in_flight.suspend();
+        }
+        self
+    }
+
+    /// A held delivery a subscription takes, counted again until it is dropped.
+    #[cfg(feature = "testing")]
+    pub(crate) fn recounted(mut self) -> Self {
+        if let Some(in_flight) = &mut self.in_flight {
+            in_flight.resume();
+        }
         self
     }
 

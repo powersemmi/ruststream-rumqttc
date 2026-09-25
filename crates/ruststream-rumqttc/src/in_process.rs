@@ -43,18 +43,42 @@ use crate::registry::SubscribeRequest;
 
 /// The harness's count of one delivery in flight: counted when it is made, released when it is
 /// dropped, whether it was settled or not.
-pub(crate) struct InFlight(Coordinator);
+pub(crate) struct InFlight {
+    coordinator: Coordinator,
+    /// Whether the harness counts the delivery now: a held delivery is not counted until a
+    /// subscription takes it.
+    counted: bool,
+}
 
 impl InFlight {
     fn new(coordinator: &Coordinator) -> Self {
         coordinator.enqueued();
-        Self(coordinator.clone())
+        Self {
+            coordinator: coordinator.clone(),
+            counted: true,
+        }
+    }
+
+    /// Stops counting the delivery, which waits for a subscription that may never open.
+    pub(crate) fn suspend(&mut self) {
+        if std::mem::take(&mut self.counted) {
+            self.coordinator.consumed();
+        }
+    }
+
+    /// Counts the delivery again, now that a subscription takes it.
+    pub(crate) fn resume(&mut self) {
+        if !std::mem::replace(&mut self.counted, true) {
+            self.coordinator.enqueued();
+        }
     }
 }
 
 impl Drop for InFlight {
     fn drop(&mut self) {
-        self.0.consumed();
+        if self.counted {
+            self.coordinator.consumed();
+        }
     }
 }
 
@@ -186,7 +210,9 @@ impl Bus {
         let subscription =
             ServerSubscription::new(request.filter.clone(), request.qos, request.identifier);
         let identifier = subscription.identifier;
-        let retained: Vec<Publish> = {
+        // The retained messages go out under the server's lock: a publish on another thread
+        // waits for them, so the subscription never reads a newer value before an older one.
+        let dead = {
             let mut server = self.server();
             // A share group hands a retained message to none of its members.
             let retained = if subscription.shared || request.refresh {
@@ -212,18 +238,29 @@ impl Bus {
                 Some(held) => *held = subscription,
                 None => server.subscriptions.push(subscription),
             }
-            retained
+            let dead: Vec<u64> = retained
+                .iter()
+                .flat_map(|packet| self.hand_over(shared, packet, identifier))
+                .collect();
+            drop(server);
+            dead
         };
-        for packet in retained {
-            self.send(shared, &packet, identifier);
-        }
+        self.forget(shared, dead);
     }
 
-    /// Drops the session's subscription to `wire_filter`.
-    pub(crate) fn unsubscribe(&self, wire_filter: &str) {
-        self.server()
-            .subscriptions
-            .retain(|held| held.wire_filter != wire_filter);
+    /// Takes the local subscription `member` out, and drops the session's subscription to its
+    /// wire filter when no other local subscription shares it.
+    ///
+    /// The server's lock is taken first, as a delivery takes it before the registry's, so the
+    /// member leaves and the server drops the filter in one step: an open joining the same filter
+    /// meanwhile finds it either still there or gone from both.
+    pub(crate) fn release(&self, shared: &Shared, member: u64) {
+        let mut server = self.server();
+        shared.release_with(member, |wire_filter| {
+            server
+                .subscriptions
+                .retain(|held| held.wire_filter != wire_filter);
+        });
     }
 
     /// Takes a publish of this session, already validated and mapped onto its packet.
@@ -305,6 +342,26 @@ impl Bus {
     /// Sends one packet to the session for the subscription carrying `identifier`, which
     /// demultiplexes it as the connection task does.
     fn send(self: &Arc<Self>, shared: &Shared, packet: &Publish, identifier: Option<usize>) {
+        let dead = self.hand_over(shared, packet, identifier);
+        self.forget(shared, dead);
+    }
+
+    /// Releases the local subscriptions whose streams have gone.
+    fn forget(&self, shared: &Shared, dead: Vec<u64>) {
+        for member in dead {
+            self.release(shared, member);
+        }
+    }
+
+    /// Hands one packet for the subscription carrying `identifier` to the session's
+    /// subscriptions, answering the local subscriptions whose streams have gone. Takes no server
+    /// lock, so it runs under one.
+    fn hand_over(
+        self: &Arc<Self>,
+        shared: &Shared,
+        packet: &Publish,
+        identifier: Option<usize>,
+    ) -> Vec<u64> {
         let mut sized = packet.clone();
         if sized.qos != QoS::AtMostOnce {
             // A packet id is two bytes of the packet a server sends at `QoS` 1 and 2.
@@ -319,23 +376,20 @@ impl Bus {
                 max_packet_size = self.max_packet_size,
                 "mqtt in-process delivery discarded: larger than the session accepts"
             );
-            return;
+            return Vec::new();
         }
         let Ok(topic) = std::str::from_utf8(&packet.topic) else {
-            return;
+            return Vec::new();
         };
         let coordinator = self.coordinator.get();
-        let dead = demultiplex(shared, topic, identifier.as_slice(), |acknowledges| {
+        demultiplex(shared, topic, identifier.as_slice(), |acknowledges| {
             MqttMessage::new(
                 topic.to_owned(),
                 packet,
                 acknowledges.then(|| Link::InProcess(Arc::clone(self))),
             )
             .counted(coordinator.map(InFlight::new))
-        });
-        for member in dead {
-            shared.release_with(member, |wire_filter| self.unsubscribe(&wire_filter));
-        }
+        })
     }
 }
 

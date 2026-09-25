@@ -180,6 +180,10 @@ impl Shared {
                 if matches(message.topic(), match_filter)
                     && registry.claims(wire_filter, &identifiers)
                 {
+                    // Counted again: the subscription's reaction to it is one the harness waits
+                    // for.
+                    #[cfg(feature = "testing")]
+                    let message = message.recounted();
                     let _ = tx.send(Ok(message));
                 } else {
                     unclaimed.push_back((message, identifiers));
@@ -300,17 +304,21 @@ impl Shared {
     /// Takes the local subscription `member` out, and unsubscribes its filter at the server when
     /// no other local subscription shares it.
     pub(crate) fn release(&self, member: u64, link: &Link) {
-        self.release_with(member, |filter| link.unsubscribe(&filter));
+        match link {
+            Link::Wire(client) => self.release_with(member, |filter| unsubscribe(client, &filter)),
+            #[cfg(feature = "testing")]
+            Link::InProcess(bus) => bus.release(self, member),
+        }
     }
 
-    /// Takes the local subscription `member` out, and hands its filter to `unsubscribe` when no
-    /// other local subscription shares it.
-    pub(crate) fn release_with(&self, member: u64, unsubscribe: impl FnOnce(String)) {
+    /// Takes the local subscription `member` out, and hands its filter to `take_off` when no other
+    /// local subscription shares it.
+    pub(crate) fn release_with(&self, member: u64, take_off: impl FnOnce(String)) {
         let mut registry = self.registry.lock().expect("mqtt registry mutex poisoned");
         // Under the guard, so an open joining the same filter right now queues its subscribe
         // after this unsubscribe and the server ends up subscribed.
         if let Some(filter) = registry.leave(member) {
-            unsubscribe(filter);
+            take_off(filter);
         }
     }
 
@@ -602,7 +610,7 @@ pub(crate) fn demultiplex(
 }
 
 /// Takes the wire filter `filter` off the server, from a context that cannot wait for the answer.
-pub(crate) fn unsubscribe(client: &AsyncClient, filter: &str) {
+fn unsubscribe(client: &AsyncClient, filter: &str) {
     if let Err(err) = client.try_unsubscribe(filter) {
         tracing::warn!(filter = %filter, error = %err, "mqtt unsubscribe failed");
     }

@@ -33,7 +33,7 @@ use tokio::sync::{OnceCell, mpsc, oneshot};
 
 #[cfg(feature = "asyncapi")]
 use crate::asyncapi::{self, MqttLastWill, MqttServer};
-use crate::conn::{self, Conn, Shared, run};
+use crate::conn::{Conn, Shared, run};
 use crate::error::MqttError;
 use crate::filter::{MqttFilter, MqttTopic, Qos};
 #[cfg(feature = "testing")]
@@ -72,16 +72,6 @@ impl std::fmt::Debug for Link {
 }
 
 impl Link {
-    /// Drops the server's subscription to `wire_filter`, from a context that cannot wait for the
-    /// answer (a subscriber's `Drop`).
-    pub(crate) fn unsubscribe(&self, wire_filter: &str) {
-        match self {
-            Self::Wire(client) => conn::unsubscribe(client, wire_filter),
-            #[cfg(feature = "testing")]
-            Self::InProcess(bus) => bus.unsubscribe(wire_filter),
-        }
-    }
-
     /// Acknowledges the delivery `publish` to the server.
     pub(crate) async fn ack(&self, publish: &Publish) -> Result<(), AckError> {
         let acknowledged = match self {

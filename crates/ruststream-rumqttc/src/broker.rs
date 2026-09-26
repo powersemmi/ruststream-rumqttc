@@ -57,6 +57,9 @@ pub(crate) enum Link {
 // The zero-cost promise of the in-process mode, held by the compiler: a build without it gives
 // the link exactly the size of the client it wraps, and every handle holding a link keeps its
 // size with it.
+/// How long shutdown waits for the connection task to write what was queued before it.
+const SHUTDOWN_FLUSH: Duration = Duration::from_secs(5);
+
 #[cfg(not(feature = "testing"))]
 const _: () = assert!(size_of::<Link>() == size_of::<AsyncClient>());
 #[cfg(not(feature = "testing"))]
@@ -88,11 +91,24 @@ impl Link {
         }
     }
 
-    /// Closes the session with a clean `DISCONNECT`.
-    async fn disconnect(&self) {
+    /// Closes the session with a clean `DISCONNECT`, and returns once the connection task has
+    /// flushed it.
+    async fn disconnect(&self, shared: &Shared) {
         match self {
             Self::Wire(client) => {
                 let _ = client.disconnect().await;
+                // An acknowledgement reports success once it is queued, so the session is closed
+                // only when the task has written the queue up to the DISCONNECT, or has lost the
+                // connection. The bound covers a broker that stops reading.
+                if tokio::time::timeout(SHUTDOWN_FLUSH, shared.stopped())
+                    .await
+                    .is_err()
+                {
+                    tracing::warn!(
+                        timeout = ?SHUTDOWN_FLUSH,
+                        "mqtt shutdown stopped waiting for the connection task to flush its queue"
+                    );
+                }
             }
             #[cfg(feature = "testing")]
             Self::InProcess(bus) => bus.close(),
@@ -366,6 +382,9 @@ impl Broker for MqttBroker {
                     }
                     Err(_) => {
                         shared.closed.store(true, Ordering::Release);
+                        // A task still dialing would otherwise connect later and run unowned;
+                        // the queued DISCONNECT is what stops a task that got through.
+                        let _ = client.try_disconnect();
                         // Everything the task retried is gone by now, so the wait is all there
                         // would be to report: a wrong port, an unreachable host and a handshake
                         // the broker refused after the fact would all read the same.
@@ -561,8 +580,9 @@ impl ConnectedBroker for ConnectedMqttBroker {
             );
         }
         // A clean DISCONNECT lets the broker publish no last will and expire the session per
-        // policy; the connection task sees the closed flag and exits.
-        self.link.disconnect().await;
+        // policy; the connection task exits once it has flushed it, after every acknowledgement
+        // queued before it.
+        self.link.disconnect(&self.shared).await;
         Ok(())
     }
 }

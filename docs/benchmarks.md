@@ -31,9 +31,9 @@ be a different concurrency shape rather than a different consumer.
 
 ## The numbers
 
-The best of three interleaved rounds, with the slowest round in parentheses. Higher is better.
+The best of three interleaved rounds, with the median round in parentheses. Higher is better.
 
-<div id="benchmark-results" data-benchmark-labels='{"loading": "Loading the published results...", "scenario": "Scenario", "raw": "Raw client", "adapter": "This crate", "framework": "RustStream service", "adapterOverhead": "Crate overhead", "overhead": "Service overhead", "indistinguishable": "indistinguishable", "brokerBound": "broker-bound", "machine": "Machine", "os": "OS", "broker": "Broker", "roundTrip": "Round trip", "build": "Build", "versions": "Versions", "measured": "Measured", "unavailable": "No results could be read. They are published at {url}.", "unknownSchema": "The published results declare schema {schema}, which this page does not render."}'></div>
+<div id="benchmark-results" data-benchmark-labels='{"loading": "Loading the published results...", "scenario": "Scenario", "raw": "Raw client", "adapter": "This crate", "framework": "RustStream service", "adapterOverhead": "Crate overhead", "overhead": "Service overhead", "indistinguishable": "indistinguishable", "brokerBound": "broker-bound", "machine": "Machine", "os": "OS", "broker": "Broker", "roundTrip": "Round trip", "build": "Build", "versions": "Versions", "measured": "Measured", "codeMeasured": "Code costs measured", "instructions": "Instructions per message", "allocations": "Allocations per message", "cold": "Cold start (instructions / allocations)", "unavailable": "No results could be read. They are published at {url}.", "unknownSchema": "The published results declare schema {schema}, which this page does not render."}'></div>
 
 The table is read in your browser from the document the last run wrote, so nothing on this page is a
 copy that could have gone stale.
@@ -57,6 +57,30 @@ that work rather than a measurement of it.
 The machine-readable form of the same run, which the framework's site reads to build its
 cross-broker table, is at
 [`benchmarks/results.json`](https://powersemmi.github.io/ruststream-rumqttc/latest/benchmarks/results.json).
+
+## The crate's own code
+
+<div id="benchmark-code"></div>
+
+The second table is what a message costs on the service's thread, counted rather than timed:
+instructions under callgrind and allocations under DHAT. Each scenario is the service a user
+writes, started on `MqttBroker` against the mosquitto of the compose stand, every delivery at
+QoS 1. The crate drives the `rumqttc` event loop from a task of the service's runtime, so the count
+covers the framework, this crate and the client's work alike: the packet decode, the dispatch, the
+`PUBACK`, and for the reply the PUBLISH it sends. Waiting on the socket is not in it, since valgrind
+counts instructions and not time.
+
+Instructions and allocations are per message in the steady state: the slope between a run of 500
+deliveries and a run of 1000, fed ahead of each run by a client of its own that is never counted.
+The last column is what starting the service - the connect, the subscription and the first
+delivery - cost once. The numbers are absolute; the core publishes the framework's own cost on its
+[benchmarks page](https://powersemmi.github.io/ruststream/latest/benchmarks/).
+
+Three runs of one binary agree within a third of a percent on instructions and within a few
+allocations in four thousand, which is how the socket's reads split. `just bench-code` fails on an
+allocation above the floor a scenario declares - the highest count of three runs plus one percent -
+and with `--baseline=main` on more than two percent more instructions, and a pull request that
+changes the cost cites its numbers.
 
 ## The machine
 
@@ -101,3 +125,11 @@ The recipe starts the stand from `docker-compose.test.yml`, runs both scenarios,
 rewrites `docs/benchmarks/results.json` with what it measured. It wants the machine to itself. The
 message count is not fixed: a probe run sets it so that every measured run lasts at least five
 seconds on whatever machine it is taken on.
+
+```bash
+just bench-code
+```
+
+The recipe starts the same stand, counts the code table under valgrind, stops the stand and rewrites
+the `code` section of the same document. It takes about a minute and needs valgrind and the
+benchmark runner: `cargo install --locked gungraun-runner --version =0.19.4`.

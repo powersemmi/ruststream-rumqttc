@@ -486,7 +486,7 @@ fn handle_incoming(conn: &mut Conn, packet: Packet) {
                 }
                 Awaiting::Resubscribe => {
                     if let Some(reason) = refused {
-                        tracing::warn!(filter = %sub.filter, reason, "mqtt resubscribe refused");
+                        tracing::warn!(filter = %sub.filter, reason = %reason, "mqtt resubscribe refused");
                     }
                 }
             }

@@ -8,17 +8,19 @@
 //! deliveries), never a stalled loop.
 
 use std::collections::VecDeque;
+use std::pin::pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use rumqttc::Outgoing;
 use rumqttc::v5::mqttbytes::v5::{
     ConnAck, ConnectReturnCode, Filter, Packet, RetainForwardRule, SubscribeProperties,
     SubscribeReasonCode,
 };
 use rumqttc::v5::mqttbytes::{QoS, matches};
 use rumqttc::v5::{AsyncClient, ConnectionError, Event, EventLoop, StateError};
-use tokio::sync::oneshot;
+use tokio::sync::{Notify, oneshot};
 
 use crate::broker::Link;
 use crate::error::MqttError;
@@ -74,6 +76,8 @@ pub(crate) struct Shared {
     pub(crate) closed: AtomicBool,
     /// The connection task has stopped, so nothing drains the client's request queue any more.
     exited: AtomicBool,
+    /// Wakes a shutdown waiting for the connection task to flush what was queued before it.
+    stopped: Notify,
     /// Whether the server's last `CONNACK` offered subscription identifiers.
     identifiers: AtomicBool,
 }
@@ -87,6 +91,7 @@ impl Shared {
             last_error: Mutex::new(None),
             closed: AtomicBool::new(false),
             exited: AtomicBool::new(false),
+            stopped: Notify::new(),
             // The protocol's default when the property is absent.
             identifiers: AtomicBool::new(true),
         }
@@ -134,6 +139,18 @@ impl Shared {
             return Err(MqttError::NotConnected);
         }
         Ok(())
+    }
+
+    /// Resolves once the connection task has stopped.
+    pub(crate) async fn stopped(&self) {
+        let notified = self.stopped.notified();
+        let mut notified = pin!(notified);
+        // Registered before the flag is read, so a task that stops in between still wakes us.
+        notified.as_mut().enable();
+        if self.exited.load(Ordering::Acquire) {
+            return;
+        }
+        notified.await;
     }
 
     fn gone(&self) -> bool {
@@ -444,15 +461,12 @@ pub(crate) async fn run(mut conn: Conn) {
     // backoff is ours to own.
     let mut backoff = Duration::from_millis(100);
     loop {
-        if conn.shared.closed.load(Ordering::Acquire) {
-            break;
-        }
         match conn.eventloop.poll().await {
             Ok(Event::Incoming(packet)) => {
                 backoff = Duration::from_millis(100);
                 handle_incoming(&mut conn, packet);
             }
-            Ok(Event::Outgoing(rumqttc::Outgoing::Subscribe(pkid))) => {
+            Ok(Event::Outgoing(Outgoing::Subscribe(pkid))) => {
                 // The loop emits packet ids in issue order; hand this one to the oldest
                 // pending subscribe without one.
                 let mut pending = conn
@@ -464,6 +478,9 @@ pub(crate) async fn run(mut conn: Conn) {
                     sub.pkid = Some(pkid);
                 }
             }
+            // The requests channel is FIFO, so every acknowledgement queued before shutdown is
+            // on the wire once the DISCONNECT that shutdown queued last has been flushed.
+            Ok(Event::Outgoing(Outgoing::Disconnect)) => break,
             Ok(Event::Outgoing(_)) => {}
             Err(err) => {
                 if conn.shared.closed.load(Ordering::Acquire) {
@@ -489,6 +506,7 @@ pub(crate) async fn run(mut conn: Conn) {
         }
     }
     conn.shared.exited.store(true, Ordering::Release);
+    conn.shared.stopped.notify_waiters();
 }
 
 fn handle_incoming(conn: &mut Conn, packet: Packet) {

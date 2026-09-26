@@ -215,6 +215,14 @@
       results.crate + " " + results.crate_version + ", ruststream " + results.core_version,
     );
     row(labels.measured, results.measured_at);
+    const coded = results.code_measured;
+    if (coded) {
+      row(
+        labels.codeMeasured,
+        results.crate + " " + coded.crate_version + ", ruststream " + coded.core_version + ", " +
+          coded.measured_at,
+      );
+    }
     return element;
   }
 

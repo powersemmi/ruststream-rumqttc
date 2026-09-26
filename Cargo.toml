@@ -14,10 +14,10 @@ authors = ["RustStream contributors"]
 [workspace.dependencies]
 ruststream-rumqttc = { path = "crates/ruststream-rumqttc" }
 # The lower bound names the pre-release so cargo admits it: a range that mentions no pre-release
-# excludes every pre-release, so `>=0.7.0` would skip 0.7.0-rc.9. The final 0.7.0 satisfies this
+# excludes every pre-release, so `>=0.7.0` would skip 0.7.0-rc.10. The final 0.7.0 satisfies this
 # range too, so the requirement does not need revisiting once the core line settles. The floor
-# names rc.9 because that is the core line this crate is built and tested against.
-ruststream = { version = ">=0.7.0-rc.9, <0.8.0", default-features = false }
+# names rc.10 because that is the core line this crate is built and tested against.
+ruststream = { version = ">=0.7.0-rc.10, <0.8.0", default-features = false }
 
 rumqttc = "0.25"
 bytes = "1"

@@ -5,10 +5,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::Stream;
-use rumqttc::v5::AsyncClient;
 use ruststream::{BatchSubscriber, BufferedSubscriber, Subscriber};
 use tokio::sync::mpsc;
 
+use crate::broker::Link;
 use crate::conn::Shared;
 use crate::error::MqttError;
 use crate::message::MqttMessage;
@@ -20,16 +20,19 @@ use crate::message::MqttMessage;
 /// next packet rather than an in-process one. The batch size is the registration's, and arrives
 /// per subscription as the argument of [`BatchSubscriber::batches`].
 ///
-/// The in-process test broker batches with the same deadline, so a batch handler behaves the same
-/// under the harness as it does on a server.
+/// The in-process mode batches with the same deadline, so a batch handler behaves the same under
+/// the harness as it does on a server.
 pub(crate) const BATCH_MAX_WAIT: Duration = Duration::from_millis(20);
 
-/// The wire half of a subscription: whatever the connection task demultiplexed onto this
-/// filter's channel, one delivery at a time, which is all the protocol offers.
+/// The wire half of a subscription: whatever the connection demultiplexed onto this filter's
+/// channel, one delivery at a time, which is all the protocol offers.
+///
+/// The in-process mode demultiplexes onto the same channel through the same registry, so this is
+/// the one subscriber of both transports; only the link its `Drop` unsubscribes through differs.
 struct WireSubscriber {
     id: u64,
     shared: Arc<Shared>,
-    client: AsyncClient,
+    link: Link,
     rx: mpsc::UnboundedReceiver<Result<MqttMessage, MqttError>>,
 }
 
@@ -41,7 +44,7 @@ impl std::fmt::Debug for WireSubscriber {
 
 impl Drop for WireSubscriber {
     fn drop(&mut self) {
-        self.shared.release(self.id, &self.client);
+        self.shared.release(self.id, &self.link);
     }
 }
 
@@ -87,7 +90,7 @@ impl MqttSubscriber {
         filter: String,
         id: u64,
         shared: Arc<Shared>,
-        client: AsyncClient,
+        link: Link,
         rx: mpsc::UnboundedReceiver<Result<MqttMessage, MqttError>>,
     ) -> Self {
         Self {
@@ -95,7 +98,7 @@ impl MqttSubscriber {
             buffered: BufferedSubscriber::new(WireSubscriber {
                 id,
                 shared,
-                client,
+                link,
                 rx,
             })
             .max_wait(BATCH_MAX_WAIT),

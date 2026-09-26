@@ -5,16 +5,30 @@
 //! One shared cell remains so publishers can be handed out while the application is still
 //! being assembled, before `connect` runs.
 
+// Without the `testing` feature a link has one variant, so a `match` on it has a single arm; the
+// matches stay so that the in-process arm has its place when the feature is on.
+#![cfg_attr(
+    not(feature = "testing"),
+    allow(clippy::infallible_destructuring_match)
+)]
+
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use rumqttc::Transport;
-use rumqttc::v5::mqttbytes::v5::LastWill;
+#[cfg(feature = "testing")]
+use rumqttc::v5::mqttbytes::matches;
+use rumqttc::v5::mqttbytes::v5::{LastWill, Publish};
 use rumqttc::v5::{AsyncClient, MqttOptions};
+#[cfg(feature = "testing")]
+use ruststream::testing::{Coordinator, InProcess, TestableBroker};
 use ruststream::{
-    AddressedCopies, Broker, ConnectedBroker, DefaultPublish, DescribeServer, ServerSpec, Subscribe,
+    AckError, AddressedCopies, Broker, ConnectedBroker, DefaultPublish, DescribeServer, ServerSpec,
+    Subscribe,
 };
+#[cfg(feature = "testing")]
+use ruststream::{OutgoingMessage, RawMessage};
 use tokio::sync::{OnceCell, mpsc, oneshot};
 
 #[cfg(feature = "asyncapi")]
@@ -22,12 +36,73 @@ use crate::asyncapi::{self, MqttLastWill, MqttServer};
 use crate::conn::{Conn, Shared, run};
 use crate::error::MqttError;
 use crate::filter::{MqttFilter, MqttTopic, Qos};
+#[cfg(feature = "testing")]
+use crate::in_process::Bus;
 use crate::publisher::{MqttPublish, MqttPublisher};
 use crate::subscriber::MqttSubscriber;
 
-/// The live connection state shared by the connected form and every handle derived from it.
+/// What a connected broker and every handle derived from it speak over: the live client, or,
+/// under the `testing` feature, the in-process transport the test harness connected instead.
+///
+/// Without the feature there is one variant, so the type is the client handle itself and every
+/// `match` on it is irrefutable: a production build carries no second transport and no branch to
+/// it.
+#[derive(Clone)]
+pub(crate) enum Link {
+    Wire(AsyncClient),
+    #[cfg(feature = "testing")]
+    InProcess(Arc<Bus>),
+}
+
+// The zero-cost promise of the in-process mode, held by the compiler: a build without it gives
+// the link exactly the size of the client it wraps, and every handle holding a link keeps its
+// size with it.
+#[cfg(not(feature = "testing"))]
+const _: () = assert!(size_of::<Link>() == size_of::<AsyncClient>());
+#[cfg(not(feature = "testing"))]
+const _: () = assert!(size_of::<Core>() == size_of::<(AsyncClient, Arc<Shared>)>());
+#[cfg(not(feature = "testing"))]
+const _: () =
+    assert!(size_of::<Option<(Link, Publish)>>() == size_of::<Option<(AsyncClient, Publish)>>());
+
+impl std::fmt::Debug for Link {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Link").finish_non_exhaustive()
+    }
+}
+
+impl Link {
+    /// Acknowledges the delivery `publish` to the server.
+    pub(crate) async fn ack(&self, publish: &Publish) -> Result<(), AckError> {
+        let acknowledged = match self {
+            Self::Wire(client) => client.ack(publish).await.is_ok(),
+            #[cfg(feature = "testing")]
+            Self::InProcess(bus) => bus.is_open(),
+        };
+        if acknowledged {
+            Ok(())
+        } else {
+            Err(AckError::Broker(Box::from(
+                "the mqtt connection task has shut down",
+            )))
+        }
+    }
+
+    /// Closes the session with a clean `DISCONNECT`.
+    async fn disconnect(&self) {
+        match self {
+            Self::Wire(client) => {
+                let _ = client.disconnect().await;
+            }
+            #[cfg(feature = "testing")]
+            Self::InProcess(bus) => bus.close(),
+        }
+    }
+}
+
+/// The connection state shared by the connected form and every handle derived from it.
 pub(crate) struct Core {
-    pub(crate) client: AsyncClient,
+    pub(crate) link: Link,
     pub(crate) shared: Arc<Shared>,
 }
 
@@ -306,16 +381,49 @@ impl Broker for MqttBroker {
                         return Err(MqttError::Connect(Box::from(reason)));
                     }
                 }
-                Ok::<_, MqttError>(Core { client, shared })
+                Ok::<_, MqttError>(Core {
+                    link: Link::Wire(client),
+                    shared,
+                })
             })
             .await?;
         Ok(ConnectedMqttBroker {
-            client: core.client.clone(),
+            link: core.link.clone(),
             shared: Arc::clone(&core.shared),
             cell: self.cell,
         })
     }
 }
+
+/// The in-process mode: the connected form a test runs the production app against, carrying the
+/// in-process transport in place of the client and every setting of this broker.
+///
+/// The options are built as `connect` builds them, so a configuration a service could not connect
+/// with is not one a test can connect with either.
+#[cfg(feature = "testing")]
+impl InProcess for MqttBroker {
+    async fn connect_in_process(self) -> Result<Self::Connected, Self::Error> {
+        self.options()?;
+        let max_packet_size = self.max_packet_size;
+        let core = self
+            .cell
+            .get_or_try_init(async || {
+                Ok::<_, MqttError>(Core {
+                    link: Link::InProcess(Bus::new(max_packet_size)),
+                    shared: Arc::new(Shared::new()),
+                })
+            })
+            .await?;
+        Ok(ConnectedMqttBroker {
+            link: core.link.clone(),
+            shared: Arc::clone(&core.shared),
+            cell: self.cell,
+        })
+    }
+}
+
+#[cfg(feature = "testing")]
+ruststream::register_testable_broker!(MqttBroker);
 
 impl MqttBroker {
     /// The session this broker opens, as the `mqtt` server binding describes it.
@@ -366,9 +474,10 @@ impl DescribeServer for MqttBroker {
     }
 }
 
-/// The typed witness that `connect` succeeded: holds the live client directly.
+/// The typed witness that `connect` succeeded: holds the live client directly, or the in-process
+/// transport when the test harness connected it.
 pub struct ConnectedMqttBroker {
-    client: AsyncClient,
+    link: Link,
     shared: Arc<Shared>,
     // Keeps the cell of publishers handed out before connect alive and filled.
     cell: CoreCell,
@@ -419,23 +528,18 @@ impl ConnectedMqttBroker {
         self.shared.ensure_open()?;
 
         let wire_filter = topic.wire_filter();
+        let qos = topic.qos_value().to_client();
         let (tx, rx) = mpsc::unbounded_channel();
         let id = self
             .shared
-            .open(
-                &self.client,
-                &wire_filter,
-                topic.filter(),
-                topic.qos_value().to_client(),
-                tx,
-            )
+            .open(&self.link, &wire_filter, topic.filter(), qos, tx)
             .await?;
 
         Ok(MqttSubscriber::new(
             topic.filter().to_owned(),
             id,
             Arc::clone(&self.shared),
-            self.client.clone(),
+            self.link.clone(),
             rx,
         ))
     }
@@ -458,7 +562,7 @@ impl ConnectedBroker for ConnectedMqttBroker {
         }
         // A clean DISCONNECT lets the broker publish no last will and expire the session per
         // policy; the connection task sees the closed flag and exits.
-        let _ = self.client.disconnect().await;
+        self.link.disconnect().await;
         Ok(())
     }
 }
@@ -477,6 +581,85 @@ impl Subscribe for ConnectedMqttBroker {
 
 impl DefaultPublish for ConnectedMqttBroker {
     type Policy = MqttPublish;
+}
+
+/// The harness's view of the in-process transport: what it injects, what it reads back, the
+/// coordinator it counts the in-flight deliveries with, and which subscriptions a publish reaches.
+///
+/// # Panics
+///
+/// `inject` and `published` panic on a broker connected with `connect`: the harness drives only
+/// the transport `connect_in_process` produced, and a live connection has no log to read and no
+/// synchronous way to take a message.
+#[cfg(feature = "testing")]
+impl TestableBroker for ConnectedMqttBroker {
+    fn install_coordinator(&self, coordinator: Coordinator) {
+        if let Link::InProcess(bus) = &self.link {
+            bus.install(coordinator);
+        }
+    }
+
+    fn inject(&self, message: OutgoingMessage<'_>) {
+        let bus = self.bus("inject");
+        // An external producer is another client of the server, so its publish goes through the
+        // server's routing like any other, at the default quality of service and not retained.
+        if let Err(err) = bus.inject(&self.shared, &message) {
+            panic!(
+                "the injected message to {:?} is not one a server takes: {err}",
+                message.name()
+            );
+        }
+    }
+
+    fn published(&self, name: &str) -> Vec<RawMessage> {
+        self.bus("published").published(name)
+    }
+
+    /// Every subscription whose topic filter matches the destination, by the match the
+    /// connection demultiplexes deliveries with; the subscriptions this connection opened on one
+    /// wire filter (the members of one share group, or one filter subscribed twice) are one
+    /// subscription to the server and take one delivery between them.
+    fn routes(&self, destination: &str, subscriptions: &[&str]) -> Vec<usize> {
+        let mut taken: Vec<(&str, usize)> = Vec::new();
+        subscriptions
+            .iter()
+            .enumerate()
+            .filter(|(_, filter)| matches(destination, filter))
+            .filter_map(|(position, filter)| {
+                // A filter this connection has not opened answers by its name alone.
+                let copies = match self.shared.wire_filters(filter) {
+                    0 => usize::MAX,
+                    copies => copies,
+                };
+                let index = taken
+                    .iter()
+                    .position(|(name, _)| name == filter)
+                    .unwrap_or_else(|| {
+                        taken.push((filter, 0));
+                        taken.len() - 1
+                    });
+                let seen = &mut taken[index].1;
+                (*seen < copies).then(|| {
+                    *seen += 1;
+                    position
+                })
+            })
+            .collect()
+    }
+}
+
+#[cfg(feature = "testing")]
+impl ConnectedMqttBroker {
+    /// The in-process transport, which is all the harness drives.
+    fn bus(&self, what: &str) -> &Arc<Bus> {
+        match &self.link {
+            Link::InProcess(bus) => bus,
+            Link::Wire(_) => panic!(
+                "TestableBroker::{what} reached a broker connected with `connect`; the harness \
+                 drives the connection `connect_in_process` produces"
+            ),
+        }
+    }
 }
 
 #[cfg(test)]

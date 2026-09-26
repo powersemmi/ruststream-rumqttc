@@ -8,7 +8,8 @@ You can subscribe to topic filters with wildcards, choose the quality of service
 messages, and set up sessions and last wills. The quality of service and the retain flag are
 declared once for a publisher, and changed on a single publish where one message needs to differ. A
 shared subscription splits a topic's messages between competing consumers. With the `testing`
-feature you can run a service's handlers against an in-process broker, with no server.
+feature your tests run the service's own app, with `MqttBroker` in process and no server, or
+against a running broker.
 
 ```toml
 ruststream = { version = "0.7", features = ["macros", "json"] }
@@ -28,8 +29,8 @@ The crate's guide is its rustdoc. The [crate overview](https://docs.rs/ruststrea
 docs.rs covers [subscribing][subscribing] with the two descriptors, wildcards, share groups and
 batches; [acknowledgement][ack] and what each handler outcome means on a transport with no
 server-side retry; [publishing][publishing], including the quality of service and the retain flag
-of a single message; [the generated document][asyncapi]; [testing][testing] against the in-process
-broker; and [the connection settings][operations].
+of a single message; [the generated document][asyncapi]; [testing][testing] the production app, in
+process or against a live broker; and [the connection settings][operations].
 
 <div class="grid cards" markdown>
 

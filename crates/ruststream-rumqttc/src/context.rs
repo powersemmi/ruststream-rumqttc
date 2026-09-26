@@ -8,8 +8,6 @@
 use ruststream::{BuildContext, ContextField, Field};
 
 use crate::message::MqttMessage;
-#[cfg(feature = "testing")]
-use crate::testing::MqttTestMessage;
 
 /// The per-delivery context of this broker.
 ///
@@ -84,15 +82,6 @@ impl ContextField for DeliveryTopic {
 
 impl BuildContext<MqttMessage> for MqttContext {
     fn build(msg: &MqttMessage) -> Self {
-        Self::new(msg.topic())
-    }
-}
-
-/// The in-process transport carries the publish topic the way the wire does, so a handler and a
-/// transform read the same value under both brokers.
-#[cfg(feature = "testing")]
-impl BuildContext<MqttTestMessage> for MqttContext {
-    fn build(msg: &MqttTestMessage) -> Self {
         Self::new(msg.topic())
     }
 }

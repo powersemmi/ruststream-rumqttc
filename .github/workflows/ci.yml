@@ -327,6 +327,7 @@ jobs:
           --test conformance_mqtt
           --test handlers_live_mqtt
           --test overlap_live_mqtt
+          --test both_modes_mqtt
           -- --test-threads=1
 
       - name: Cleanup

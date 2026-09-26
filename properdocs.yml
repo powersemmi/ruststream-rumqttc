@@ -1,5 +1,5 @@
 site_name: ruststream-rumqttc
-site_description: The MQTT 5 broker for RustStream - topic filters with QoS and shared groups, retained publishes, and an in-process test broker.
+site_description: The MQTT 5 broker for RustStream - topic filters with QoS and shared groups, retained publishes, and an in-process mode that runs the production app in tests.
 site_url: https://powersemmi.github.io/ruststream-rumqttc/
 repo_url: https://github.com/powersemmi/ruststream-rumqttc
 repo_name: powersemmi/ruststream-rumqttc

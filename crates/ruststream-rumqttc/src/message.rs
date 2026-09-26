@@ -5,10 +5,13 @@
 //! format is invented and non-Rust peers see plain MQTT messages.
 
 use bytes::Bytes;
-use rumqttc::v5::AsyncClient;
 use rumqttc::v5::mqttbytes::QoS;
 use rumqttc::v5::mqttbytes::v5::{Publish, PublishProperties};
 use ruststream::{AckError, HeaderMap, IncomingMessage, OutgoingMessage, Str};
+
+use crate::broker::Link;
+#[cfg(feature = "testing")]
+use crate::in_process::InFlight;
 
 /// The header keys the MQTT 5 first-class properties map onto, built once so that mapping a
 /// delivery copies nothing for them.
@@ -40,7 +43,12 @@ pub struct MqttMessage {
     topic: String,
     /// `None` when this delivery carries no acknowledgement: `QoS` 0, or a fanned-out copy on
     /// an overlapping filter (the wire ack belongs to exactly one delivery).
-    acker: Option<(AsyncClient, Publish)>,
+    acker: Option<(Link, Publish)>,
+    /// The test harness's count of this delivery, released when the delivery is dropped, settled
+    /// or not. Only a delivery of the in-process mode carries one, and only with the `testing`
+    /// feature is the field there at all.
+    #[cfg(feature = "testing")]
+    in_flight: Option<InFlight>,
 }
 
 impl std::fmt::Debug for MqttMessage {
@@ -53,32 +61,44 @@ impl std::fmt::Debug for MqttMessage {
 }
 
 impl MqttMessage {
-    pub(crate) fn new(topic: String, publish: &Publish, client: Option<AsyncClient>) -> Self {
-        let mut headers = HeaderMap::new();
-        if let Some(properties) = &publish.properties {
-            for (name, value) in &properties.user_properties {
-                headers.insert(name.clone(), value.clone());
-            }
-            if let Some(content_type) = &properties.content_type {
-                headers.insert(CONTENT_TYPE, content_type.clone());
-            }
-            if let Some(response_topic) = &properties.response_topic {
-                headers.insert(REPLY_TO, response_topic.clone());
-            }
-            if let Some(correlation) = &properties.correlation_data {
-                headers.insert(CORRELATION_ID, correlation.clone());
-            }
-        }
+    pub(crate) fn new(topic: String, publish: &Publish, link: Option<Link>) -> Self {
         let acker = match publish.qos {
             QoS::AtMostOnce => None,
-            _ => client.map(|client| (client, publish.clone())),
+            _ => link.map(|link| (link, publish.clone())),
         };
         Self {
             payload: publish.payload.clone(),
-            headers,
+            headers: headers_of(publish),
             topic,
             acker,
+            #[cfg(feature = "testing")]
+            in_flight: None,
         }
+    }
+
+    /// This delivery, counted by the test harness until it is dropped.
+    #[cfg(feature = "testing")]
+    pub(crate) fn counted(mut self, in_flight: Option<InFlight>) -> Self {
+        self.in_flight = in_flight;
+        self
+    }
+
+    /// This delivery, no longer counted by the test harness while it is held.
+    #[cfg(feature = "testing")]
+    pub(crate) fn uncounted(mut self) -> Self {
+        if let Some(in_flight) = &mut self.in_flight {
+            in_flight.suspend();
+        }
+        self
+    }
+
+    /// A held delivery a subscription takes, counted again until it is dropped.
+    #[cfg(feature = "testing")]
+    pub(crate) fn recounted(mut self) -> Self {
+        if let Some(in_flight) = &mut self.in_flight {
+            in_flight.resume();
+        }
+        self
     }
 
     /// The topic this message was published to (the real topic, never a `$share` filter).
@@ -98,13 +118,10 @@ impl IncomingMessage for MqttMessage {
     }
 
     async fn ack(self) -> Result<(), AckError> {
-        let Some((client, publish)) = self.acker else {
+        let Some((link, publish)) = self.acker else {
             return Err(AckError::Unsupported);
         };
-        client
-            .ack(&publish)
-            .await
-            .map_err(|_| AckError::Broker(Box::from("the mqtt connection task has shut down")))
+        link.ack(&publish).await
     }
 
     async fn nack(self, requeue: bool) -> Result<(), AckError> {
@@ -116,6 +133,27 @@ impl IncomingMessage for MqttMessage {
             self.ack().await
         }
     }
+}
+
+/// The headers a PUBLISH packet carries: its user properties, plus the well-known headers its
+/// first-class properties hold.
+pub(crate) fn headers_of(publish: &Publish) -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    if let Some(properties) = &publish.properties {
+        for (name, value) in &properties.user_properties {
+            headers.insert(name.clone(), value.clone());
+        }
+        if let Some(content_type) = &properties.content_type {
+            headers.insert(CONTENT_TYPE, content_type.clone());
+        }
+        if let Some(response_topic) = &properties.response_topic {
+            headers.insert(REPLY_TO, response_topic.clone());
+        }
+        if let Some(correlation) = &properties.correlation_data {
+            headers.insert(CORRELATION_ID, correlation.clone());
+        }
+    }
+    headers
 }
 
 /// Whether a media type names text on the wire.

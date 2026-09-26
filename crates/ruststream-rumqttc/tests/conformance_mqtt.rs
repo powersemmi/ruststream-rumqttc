@@ -1,19 +1,30 @@
-//! Conformance: every suite this broker's capabilities justify, run twice where it can be - once
-//! against the in-process transport and once against a real server (gated behind `MQTT_TEST_URL`).
+//! Conformance: every suite this broker's capabilities justify, run twice over the same production
+//! broker - once connected in process and once against a real server (gated behind
+//! `MQTT_TEST_URL`).
 //!
-//! Running them in process is what says the stand-in obeys the framework's own definition of a
-//! broker rather than a convenient subset of it; running them live is what says the stand-in is
-//! not lying. The routing suite is in-process only by construction: it drives
-//! [`TestableBroker`](ruststream::testing::TestableBroker), which no server implements.
+//! Running them in process is what says the in-process mode obeys the framework's own definition
+//! of a broker rather than a convenient subset of it; running them live is what says it is not
+//! lying. The routing suite is in-process only by construction: it drives
+//! [`TestableBroker`](ruststream::testing::TestableBroker) through the in-process transport.
 //!
 //! Start one with `just brokers-up` (mosquitto), then:
 //! `MQTT_TEST_URL=mqtt://127.0.0.1:1883 cargo test --all-features`.
 
 #![cfg(feature = "testing")]
 
+use ruststream::conformance::harness::InProcessBroker;
 use ruststream::conformance::{capabilities, harness};
-use ruststream_rumqttc::testing::MqttTestBroker;
 use ruststream_rumqttc::{MqttBroker, MqttTopic};
+
+/// The production broker a service builds; the in-process passes dial nothing.
+fn broker() -> MqttBroker {
+    MqttBroker::new("mqtt://localhost:1883", "conformance")
+}
+
+/// The production broker, connected in process by the suites that take any broker.
+fn in_process() -> InProcessBroker<MqttBroker> {
+    InProcessBroker::new(broker())
+}
 
 /// The live broker URL, or `None` when there is no stand to run against.
 ///
@@ -37,11 +48,11 @@ fn test_url() -> Option<String> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn mqtt_test_broker_passes_conformance_suite() {
-    harness::run_suite(MqttTestBroker::new).await;
+async fn the_in_process_mode_passes_conformance_suite() {
+    harness::run_suite(broker).await;
 }
 
-/// The ladder the framework defines, walked on the transport a service's tests actually run on:
+/// The ladder the framework defines, walked on the in-process mode a service's tests run on:
 /// synchronous construction, `connect`, a subscription opened through the crate's own descriptor,
 /// a publish it receives and settles, `shutdown` - and then the assertion that gives the suite its
 /// teeth here, that a publisher handed out before the shutdown reports the closed connection
@@ -50,7 +61,7 @@ async fn mqtt_test_broker_passes_conformance_suite() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_in_process_broker_passes_lifecycle() {
     harness::lifecycle(
-        MqttTestBroker::new,
+        in_process,
         |name| MqttTopic::new(name),
         |connected| connected.publisher(),
     )
@@ -79,7 +90,7 @@ async fn mqtt_broker_passes_lifecycle() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_in_process_broker_passes_the_redelivery_address_suite() {
     harness::redelivery_address(
-        MqttTestBroker::new,
+        in_process,
         |name| MqttTopic::new(name),
         |connected| connected.publisher(),
     )
@@ -106,7 +117,7 @@ async fn mqtt_broker_passes_the_redelivery_address_suite() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_in_process_broker_passes_the_batch_suite() {
     capabilities::batches(
-        MqttTestBroker::new,
+        in_process,
         |name| MqttTopic::new(name),
         |connected| connected.publisher(),
     )

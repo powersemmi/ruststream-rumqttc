@@ -6,8 +6,8 @@
 
 你可以订阅带通配符的主题过滤器、选择服务质量、发布保留消息，以及配置会话和遗嘱消息。服务质量和
 保留标志在发布者上声明一次；某一条消息需要不同取值时，在这一次发布上改。共享订阅把一个主题的消息
-分给互相竞争的消费者。打开 `testing` feature，你可以让服务的处理器跑在进程内 Broker 上，不需要
-服务器。
+分给互相竞争的消费者。打开 `testing` feature，测试直接运行服务自己的应用：`MqttBroker` 在进程内
+运行，不需要服务器，也可以对着运行中的 Broker。
 
 ```toml
 ruststream = { version = "0.7", features = ["macros", "json"] }
@@ -26,7 +26,8 @@ serde = { version = "1", features = ["derive"] }
 这个 crate 的指南就是它的 rustdoc。docs.rs 上的 [crate 概览](https://docs.rs/ruststream-rumqttc)
 讲了[订阅][subscribing]，包括两个描述符、通配符、共享组和批；[确认][ack]，以及在没有服务端重投的
 传输上每个处理器结果的含义；[发布][publishing]，包括单条消息的服务质量和保留标志；
-[生成的文档][asyncapi]；在进程内 Broker 上做的[测试][testing]；还有[连接设置][operations]。
+[生成的文档][asyncapi]；对生产应用做的[测试][testing]，在进程内运行，或对着运行中的 Broker；
+还有[连接设置][operations]。
 
 <div class="grid cards" markdown>
 

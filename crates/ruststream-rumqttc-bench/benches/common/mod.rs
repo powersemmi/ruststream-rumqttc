@@ -86,30 +86,30 @@ pub const MESSAGES: usize = 500;
 /// The measurement configuration every scenario shares.
 ///
 /// `steady` is what one delivery allocates in the steady state and `cold` what starting the
-/// service and taking the first delivery allocate once; together they are the hard limit the
-/// longest run of the scenario (twice [`MESSAGES`] deliveries) is held to, so the run fails when
-/// the path allocates more than it does today. Both are floors the code is held to, so a number
+/// service and taking the first delivery allocate once; together they are the hard limit a run of
+/// `messages` deliveries is held to, each run its own, so a run fails when the path allocates more
+/// than it does today. Both are floors the code is held to, so a number
 /// that goes down is lowered here in the same change. The instruction limit is relative:
 /// `just bench-code --save-baseline=main` records a baseline and `just bench-code
 /// --baseline=main` compares against it.
-pub fn config(steady: u64, cold: u64) -> LibraryBenchmarkConfig {
-    config_every(steady, 1, cold)
+pub fn config(steady: u64, cold: u64, messages: usize) -> LibraryBenchmarkConfig {
+    config_every(steady, 1, cold, messages)
 }
 
 /// The same for a scenario whose allocations do not come one per delivery: `steady` blocks per
 /// `per` deliveries, as a batch handler allocates per batch.
-pub fn config_every(steady: u64, per: u64, cold: u64) -> LibraryBenchmarkConfig {
+pub fn config_every(steady: u64, per: u64, cold: u64, messages: usize) -> LibraryBenchmarkConfig {
     let mut config = LibraryBenchmarkConfig::default();
     config
         .tool(callgrind().soft_limits([(EventKind::Ir, 2f64)]))
-        .tool(dhat().hard_limits([(DhatMetric::TotalBlocks, blocks(steady, per, cold))]));
+        .tool(dhat().hard_limits([(DhatMetric::TotalBlocks, blocks(steady, per, cold, messages))]));
     config
 }
 
-/// The limit: the cold part once, plus the steady rate over the longest run of the scenario,
-/// which is twice [`MESSAGES`]. The division rounds up.
-const fn blocks(steady: u64, per: u64, cold: u64) -> u64 {
-    cold + (steady * 2 * MESSAGES as u64).div_ceil(per)
+/// The limit: the cold part once, plus the steady rate over the run's own deliveries. The
+/// division rounds up.
+const fn blocks(steady: u64, per: u64, cold: u64, messages: usize) -> u64 {
+    cold + (steady * messages as u64).div_ceil(per)
 }
 
 /// Callgrind collecting inside the measured region alone.

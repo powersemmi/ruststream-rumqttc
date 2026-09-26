@@ -37,10 +37,10 @@ fn app(messages: usize) -> Pending {
 // The allocations are the client's as much as the crate's, and a few of them move with how the
 // socket's reads split, so the floor is the highest count of three runs plus one percent, stated
 // over a thousand deliveries.
-#[library_benchmark(config = common::config_every(4_206, 1_000, 70))]
-#[bench::first(app(1))]
-#[bench::base(app(MESSAGES))]
-#[bench::twice(app(2 * MESSAGES))]
+#[library_benchmark]
+#[bench::first(args = (app(1)), config = common::config_every(4_206, 1_000, 70, 1))]
+#[bench::base(args = (app(MESSAGES)), config = common::config_every(4_206, 1_000, 70, MESSAGES))]
+#[bench::twice(args = (app(2 * MESSAGES)), config = common::config_every(4_206, 1_000, 70, 2 * MESSAGES))]
 fn service(app: Pending) {
     common::start_and_drain(app);
 }

@@ -243,6 +243,13 @@ def main() -> int:
         document = previous
         document["schema"] = 3
         document["code"] = code_section(source)
+        # The code costs carry their own provenance: the paired numbers beside them may come
+        # from another run, on another version, on another day.
+        document["code_measured"] = {
+            "crate_version": crate_version(),
+            "core_version": core_version(),
+            "measured_at": date.today().isoformat(),
+        }
         document.setdefault("environment", {})["valgrind"] = valgrind()
     else:
         summary = json.loads(source.read_text(encoding="utf-8"))
@@ -257,6 +264,8 @@ def main() -> int:
         }
         if "code" in previous:
             document["code"] = previous["code"]
+            if "code_measured" in previous:
+                document["code_measured"] = previous["code_measured"]
             if "valgrind" in previous.get("environment", {}):
                 document["environment"]["valgrind"] = previous["environment"]["valgrind"]
     out.parent.mkdir(parents=True, exist_ok=True)

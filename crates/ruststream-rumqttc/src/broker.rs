@@ -420,30 +420,16 @@ impl ConnectedMqttBroker {
 
         let wire_filter = topic.wire_filter();
         let (tx, rx) = mpsc::unbounded_channel();
-        let (done, wait) = oneshot::channel();
-        let id = self.shared.register(
-            wire_filter.clone(),
-            topic.filter().to_owned(),
-            topic.qos_value().to_client(),
-            tx,
-            done,
-        );
-        if self
-            .client
-            .subscribe(wire_filter, topic.qos_value().to_client())
-            .await
-            .is_err()
-        {
-            self.shared.remove(id);
-            return Err(MqttError::Subscribe {
-                filter: topic.filter().to_owned(),
-                reason: "the mqtt connection task has shut down".to_owned(),
-            });
-        }
-        wait.await.map_err(|_| MqttError::Subscribe {
-            filter: topic.filter().to_owned(),
-            reason: "the mqtt connection task has shut down".to_owned(),
-        })??;
+        let id = self
+            .shared
+            .open(
+                &self.client,
+                &wire_filter,
+                topic.filter(),
+                topic.qos_value().to_client(),
+                tx,
+            )
+            .await?;
 
         Ok(MqttSubscriber::new(
             topic.filter().to_owned(),

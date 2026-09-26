@@ -14,7 +14,7 @@ This site holds the entry pages. The crate's guide is its overview on docs.rs, a
 ## Guide
 
 - [Overview](https://docs.rs/ruststream-rumqttc/latest/ruststream_rumqttc/index.html): the transport, its connection task and what MQTT keeps
-- [Subscribing](https://docs.rs/ruststream-rumqttc/latest/ruststream_rumqttc/index.html#subscribing): the two descriptors, wildcards, share groups and batches
+- [Subscribing](https://docs.rs/ruststream-rumqttc/latest/ruststream_rumqttc/index.html#subscribing): the two descriptors, wildcards, share groups, several subscriptions on one connection, and batches
 - [Acknowledgement](https://docs.rs/ruststream-rumqttc/latest/ruststream_rumqttc/index.html#acknowledgement): what each handler outcome means on a transport with no server-side retry
 - [Publishing](https://docs.rs/ruststream-rumqttc/latest/ruststream_rumqttc/index.html#publishing): the publish policy, the quality of service and retain flag of one message, headers and replies
 - [The prelude](https://docs.rs/ruststream-rumqttc/latest/ruststream_rumqttc/index.html#the-prelude): what a routes file and a handler file import

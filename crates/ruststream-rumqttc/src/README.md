@@ -102,9 +102,21 @@ delivery arrived on, never the filter that matched it.
 forget, `AtLeastOnce` is acknowledged with `PUBACK`, `ExactlyOnce` is the four-packet handshake.
 `MqttTopic::new("jobs").shared("workers")` subscribes `$share/workers/jobs`, which is how MQTT
 expresses competing consumers; the group name belongs to the subscribed filter only, and
-`topic()`, `filter()` and the delivered topic stay the plain form. Two members of one group on a
-single connection are one subscription to the broker, so the crate hands their deliveries out in
-turn. Dropping a subscriber unsubscribes its filter.
+`topic()`, `filter()` and the delivered topic stay the plain form.
+
+Several subscriptions on one connection each receive a message once:
+
+* The same filter opened twice, a share group's two members or one topic under two handlers, is
+  one subscription to the server. The crate hands its deliveries out in turn, and the filter stays
+  subscribed until the last of its subscribers is dropped.
+* Filters that differ but can match the same topic, `devices/+/telemetry` next to `devices/#` or a
+  share group next to a plain subscription on its filter, are separate subscriptions, and each
+  receives a message once. The crate tells the server's copies apart with MQTT 5 subscription
+  identifiers, which it attaches only to a filter that meets another one on the connection.
+* Subscription identifiers are optional for a server, and its `CONNACK` says whether it offers
+  them. On a server that does not, opening a filter that meets another one on the same connection
+  returns an error naming both, before anything is subscribed. Two brokers with their own client
+  ids keep such filters apart.
 
 A `&[T]` handler takes `.batch(n)` at the mount site, as on any broker. A PUBLISH packet carries
 one message, so the crate assembles the batches on the client: a batch closes when it holds the
@@ -133,8 +145,9 @@ own quality of service:
 * `nack(requeue = true)` reports `Unsupported` too. MQTT has no negative acknowledgement.
 * `nack(requeue = false)` acknowledges: dropping is the protocol's only terminal answer.
 
-When two overlapping filters both match a message the acknowledgement belongs to exactly one
-delivery, and the copies report `Unsupported`.
+A server usually sends overlapping filters a packet each, and each delivery settles its own. When
+it sends one packet for both, the acknowledgement belongs to one delivery, and the other reports
+`Unsupported`.
 
 `HandlerOutcome::retry()` asks the broker to redeliver, and on MQTT nothing can ask. The runtime
 logs the refused negative acknowledgement and moves on, so the delivery is never acknowledged: at

@@ -11,6 +11,7 @@ mod filter;
 mod message;
 pub mod prelude;
 mod publisher;
+mod registry;
 mod subscriber;
 #[cfg(feature = "testing")]
 pub mod testing;

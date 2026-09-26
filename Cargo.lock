@@ -526,6 +526,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "rtrb"
+version = "0.3.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fae8ee26b0371a29a77d2b2d6b3ae13aa81def6f9bf1b1b92a32d279a5e709b7"
+
+[[package]]
 name = "rumqttc"
 version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -625,14 +631,15 @@ dependencies = [
 
 [[package]]
 name = "ruststream"
-version = "0.7.0-rc.9"
+version = "0.7.0-rc.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d3b260376befcdc90332cc0e3a5a186468e18dec33ddb05babfb0df3ceee143c"
+checksum = "29c5225d1e10cfee3d33e4aea9998f6f97829d3266a75418ac76d916ccb2c6d6"
 dependencies = [
  "bytes",
  "bytes-utils",
  "futures",
  "inventory",
+ "rtrb",
  "ruststream-macros",
  "schemars",
  "serde",
@@ -646,9 +653,9 @@ dependencies = [
 
 [[package]]
 name = "ruststream-macros"
-version = "0.7.0-rc.9"
+version = "0.7.0-rc.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "10dfb7de97be1f1cee98a6d0ec714f4e4720038efbab1584320e7526e2672919"
+checksum = "2d409c9c91ab27cc9316c31c2625f0b75dedda1b1d2fbcad8713b7bd017ce163"
 dependencies = [
  "proc-macro2",
  "quote",

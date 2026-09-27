@@ -10,6 +10,7 @@ use rumqttc::v5::mqttbytes::v5::{Publish, PublishProperties};
 use ruststream::{AckError, HeaderMap, IncomingMessage, OutgoingMessage, Str};
 
 use crate::broker::Link;
+use crate::filter::Qos;
 #[cfg(feature = "testing")]
 use crate::in_process::InFlight;
 
@@ -41,6 +42,7 @@ pub struct MqttMessage {
     payload: Bytes,
     headers: HeaderMap,
     topic: String,
+    qos: Qos,
     /// `None` when this delivery carries no acknowledgement: `QoS` 0, or a fanned-out copy on
     /// an overlapping filter (the wire ack belongs to exactly one delivery).
     acker: Option<(Link, Publish)>,
@@ -70,6 +72,7 @@ impl MqttMessage {
             payload: publish.payload.clone(),
             headers: headers_of(publish),
             topic,
+            qos: Qos::from_client(publish.qos),
             acker,
             #[cfg(feature = "testing")]
             in_flight: None,
@@ -105,6 +108,16 @@ impl MqttMessage {
     #[must_use]
     pub fn topic(&self) -> &str {
         &self.topic
+    }
+
+    /// The quality of service this message was delivered at: the lesser of the one it was
+    /// published with and the one its subscription asked for.
+    ///
+    /// A delivery at [`Qos::AtMostOnce`] carries no acknowledgement, so `ack` reports
+    /// [`AckError::Unsupported`] for it.
+    #[must_use]
+    pub const fn qos(&self) -> Qos {
+        self.qos
     }
 }
 

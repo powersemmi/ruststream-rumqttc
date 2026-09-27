@@ -145,7 +145,7 @@ The wildcard resolves here the way it resolves on the wire, so the injection nam
 
 The compiling originals live in `crates/ruststream-rumqttc/tests/handlers_mqtt.rs`, next to the same harness reading back the per-message arguments a slot publish carried (`tb.out::<Marker>().with_options(..)`) and driving a batch handler; `tests/both_modes_mqtt.rs` runs one body in both modes.
 
-A persistent session, the protocol handshakes and several connections sharing one server run only against a real broker: `just test-brokers` starts Mosquitto and runs the live suite, the framework conformance suites and the live half of the dual-mode tests against it.
+A persistent session, the protocol handshakes and several connections sharing one server run only against a real broker: `just test-brokers` starts Mosquitto and runs the live suite, the live half of the dual-mode tests and the framework conformance suites against it. The conformance suites also run in process under `just test`, and the live run holds the in-process mode to the server's own answers: what it delivers, settles and refuses.
 
 ## Layout
 

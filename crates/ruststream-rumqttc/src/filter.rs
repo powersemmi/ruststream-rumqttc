@@ -12,7 +12,7 @@ use std::borrow::Cow;
 use std::fmt;
 use std::future::{Future, ready};
 
-use rumqttc::v5::mqttbytes::{valid_filter, valid_topic};
+use rumqttc::v5::mqttbytes::{QoS, valid_filter, valid_topic};
 #[cfg(feature = "asyncapi")]
 use ruststream::asyncapi::Bindings;
 use ruststream::{
@@ -40,11 +40,19 @@ pub enum Qos {
 }
 
 impl Qos {
-    pub(crate) fn to_client(self) -> rumqttc::v5::mqttbytes::QoS {
+    pub(crate) const fn from_client(qos: QoS) -> Self {
+        match qos {
+            QoS::AtMostOnce => Self::AtMostOnce,
+            QoS::AtLeastOnce => Self::AtLeastOnce,
+            QoS::ExactlyOnce => Self::ExactlyOnce,
+        }
+    }
+
+    pub(crate) fn to_client(self) -> QoS {
         match self {
-            Self::AtMostOnce => rumqttc::v5::mqttbytes::QoS::AtMostOnce,
-            Self::AtLeastOnce => rumqttc::v5::mqttbytes::QoS::AtLeastOnce,
-            Self::ExactlyOnce => rumqttc::v5::mqttbytes::QoS::ExactlyOnce,
+            Self::AtMostOnce => QoS::AtMostOnce,
+            Self::AtLeastOnce => QoS::AtLeastOnce,
+            Self::ExactlyOnce => QoS::ExactlyOnce,
         }
     }
 

@@ -339,17 +339,27 @@ impl Shared {
         }
     }
 
-    /// How many subscriptions to the server this connection holds for the plain filter
-    /// `match_filter`: one per wire filter, whatever number of local subscriptions share it.
+    /// Which of the local subscriptions opened on the plain filter `match_filter` receive the next
+    /// publish to a topic it matches, by their rank in the order they opened: one per wire filter
+    /// (a share group and a plain subscription on one filter are two), the member whose turn it is.
+    /// Empty when this connection holds no subscription on the filter.
     #[cfg(feature = "testing")]
-    pub(crate) fn wire_filters(&self, match_filter: &str) -> usize {
-        self.registry
-            .lock()
-            .expect("mqtt registry mutex poisoned")
-            .wires
-            .iter()
-            .filter(|wire| wire.match_filter == match_filter)
-            .count()
+    pub(crate) fn next_takers(&self, match_filter: &str) -> Vec<usize> {
+        let registry = self.registry.lock().expect("mqtt registry mutex poisoned");
+        let wires = || {
+            registry
+                .wires
+                .iter()
+                .filter(|wire| wire.match_filter == match_filter)
+        };
+        // Member ids grow in the order the subscriptions opened.
+        let mut opened: Vec<u64> = wires()
+            .flat_map(|wire| wire.members.iter().map(|member| member.id))
+            .collect();
+        opened.sort_unstable();
+        wires()
+            .filter_map(|wire| opened.binary_search(&wire.upcoming()).ok())
+            .collect()
     }
 
     /// Takes the local subscription `member` out after the server refused it, leaving the server

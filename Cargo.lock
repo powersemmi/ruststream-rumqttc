@@ -121,7 +121,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -425,6 +425,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "rtrb"
+version = "0.3.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fae8ee26b0371a29a77d2b2d6b3ae13aa81def6f9bf1b1b92a32d279a5e709b7"
+
+[[package]]
 name = "rumqttc"
 version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -515,14 +521,15 @@ dependencies = [
 
 [[package]]
 name = "ruststream"
-version = "0.7.0-rc.9"
+version = "0.7.0-rc.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d3b260376befcdc90332cc0e3a5a186468e18dec33ddb05babfb0df3ceee143c"
+checksum = "868604a9138c3f9ddde617b1fc056e0f5f5925c7d7989e5f207fd96f45f17a16"
 dependencies = [
  "bytes",
  "bytes-utils",
  "futures",
  "inventory",
+ "rtrb",
  "ruststream-macros",
  "schemars",
  "serde",
@@ -536,9 +543,9 @@ dependencies = [
 
 [[package]]
 name = "ruststream-macros"
-version = "0.7.0-rc.9"
+version = "0.7.0-rc.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "10dfb7de97be1f1cee98a6d0ec714f4e4720038efbab1584320e7526e2672919"
+checksum = "915a47a2359e57c0b7b9ca54acd9e827f4c0128071d09a18cfb0742fb8f205df"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -787,18 +794,18 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "2.0.20"
+version = "2.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ec86235f5fcc2a73650310756d2ac5b138a5780bbbdfae3eeccec992c435ba4f"
+checksum = "09e52cb86a36cede5cb101bf8908837b3e4c6e5e59fe7fd85c23fb56200d189e"
 dependencies = [
  "thiserror-impl",
 ]
 
 [[package]]
 name = "thiserror-impl"
-version = "2.0.20"
+version = "2.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc04cd3e1236dd4a98afca4569f2deb3f120e5422a4023be2cb683f8486292af"
+checksum = "fe5197923287db20a58125f0bc85c062f7f2c892de97b18c356f9efb14b28524"
 dependencies = [
  "proc-macro2",
  "quote",

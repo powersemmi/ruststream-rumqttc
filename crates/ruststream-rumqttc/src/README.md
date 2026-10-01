@@ -178,6 +178,8 @@ nowhere to go instead of losing every delayed message.
 
 ```
 # mod demo {
+use std::time::Duration;
+
 use ruststream::runtime::{Names, Outgoing, PublishContext};
 use ruststream_rumqttc::prelude::*;
 use serde::Deserialize;
@@ -190,7 +192,12 @@ struct Reading {
 
 #[subscriber(MqttTopic::new("devices/dev42/telemetry").qos(Qos::AtLeastOnce))]
 async fn store(reading: &Reading) -> HandlerOutcome {
-    HandlerOutcome::retry_after(std::time::Duration::from_secs(5))
+    if reading.temperature.is_nan() {
+        // A sensor glitch: ask for the reading again in five seconds.
+        return HandlerOutcome::retry_after(Duration::from_secs(5));
+    }
+    println!("{}: {}", reading.device, reading.temperature);
+    HandlerOutcome::ack()
 }
 
 #[subscriber(MqttFilter::new("devices/+/commands").qos(Qos::AtLeastOnce))]
@@ -374,6 +381,7 @@ it once at the mount site, through a publish transform over the position:
 # mod demo {
 use ruststream::runtime::{Outgoing, Reads};
 use ruststream_rumqttc::prelude::*;
+use serde::{Deserialize, Serialize};
 
 /// States the media type of every message this position sends, which is what fills the content
 /// type property and decides the payload format indicator. It reads nothing about the delivery,
@@ -386,6 +394,40 @@ impl<K: ContextKind, Options> PublishTransform<K, Options> for Json {
     fn apply(&self, out: &mut Outgoing<'_>, _options: &mut Option<Options>, _cx: &K::View<'_>) {
         out.headers_mut().insert("content-type", "application/json");
     }
+}
+
+#[derive(Deserialize)]
+struct Telemetry {
+    device: String,
+    temperature: f64,
+}
+
+#[derive(Serialize, Outgoing)]
+#[outgoing(name = "devices/state")]
+struct DeviceState {
+    device: String,
+    hot: bool,
+}
+
+#[subscriber(MqttFilter::new("devices/+/telemetry"), publish)]
+async fn track(telemetry: &Telemetry) -> DeviceState {
+    DeviceState { device: telemetry.device.clone(), hot: telemetry.temperature > 30.0 }
+}
+
+#[ruststream::app]
+fn app() -> impl App {
+    RustStream::new(AppInfo::new("states", "0.1.0")).with_broker(
+        MqttBroker::new("mqtt://localhost:1883", "states-svc"),
+        |b| {
+            // Every reply now carries the content type property and the payload format
+            // indicator 1, so a peer reads the body as UTF-8 JSON.
+            b.include(track)
+                .out_reply(Publish::default())
+                .transform(Json)
+                .out_retry(Publish::default())
+                .to("devices/retry/telemetry");
+        },
+    )
 }
 # }
 # fn main() {}
@@ -460,6 +502,8 @@ the same test body runs there. The harness itself is the framework's, documented
 ```
 # #[cfg(feature = "testing")]
 # mod demo {
+use std::error::Error;
+
 use ruststream::testing::TestApp;
 use ruststream_rumqttc::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -502,7 +546,7 @@ pub fn app() -> impl App {
     )
 }
 
-pub async fn a_hot_reading_raises_an_alert() -> Result<(), Box<dyn std::error::Error>> {
+pub async fn a_hot_reading_raises_an_alert() -> Result<(), Box<dyn Error>> {
     let tb = TestApp::start(app()).await?;
 
     tb.broker::<MqttBroker>()

@@ -87,12 +87,35 @@ fn validate_share_group(group: Option<&String>) -> Result<(), MqttError> {
 /// subscription that names a single topic and answers for its own copies.
 ///
 /// ```
-/// use ruststream_rumqttc::{MqttFilter, Qos};
+/// # mod demo {
+/// use ruststream_rumqttc::prelude::*;
+/// use serde::Deserialize;
 ///
-/// let fleet = MqttFilter::new("devices/+/telemetry")
-///     .qos(Qos::AtLeastOnce)
-///     .shared("workers");
-/// # let _ = fleet;
+/// #[derive(Deserialize)]
+/// struct Telemetry {
+///     temperature: f64,
+/// }
+///
+/// #[subscriber(MqttFilter::new("devices/+/telemetry").qos(Qos::AtLeastOnce).shared("workers"))]
+/// async fn record(telemetry: &Telemetry, Ctx(topic): Ctx<DeliveryTopic>) -> HandlerOutcome {
+///     println!("{topic}: {}", telemetry.temperature);
+///     HandlerOutcome::ack()
+/// }
+///
+/// #[ruststream::app]
+/// fn app() -> impl App {
+///     RustStream::new(AppInfo::new("fleet", "0.1.0")).with_broker(
+///         MqttBroker::new("mqtt://localhost:1883", "fleet-svc"),
+///         |b| {
+///             // The filter names no single topic, so the mount site says where a retry copy goes.
+///             b.include(record)
+///                 .out_retry(Publish::default())
+///                 .to("devices/retry/telemetry");
+///         },
+///     )
+/// }
+/// # }
+/// # fn main() {}
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[must_use]
@@ -173,12 +196,35 @@ impl FromName for MqttFilter {
 /// subscription written with `+` or `#` cannot do - [`MqttFilter`] is the descriptor for those.
 ///
 /// ```
-/// use ruststream_rumqttc::{MqttTopic, Qos};
+/// # mod demo {
+/// use ruststream_rumqttc::prelude::*;
+/// use serde::Deserialize;
 ///
-/// let source = MqttTopic::new("devices/dev42/telemetry")
-///     .qos(Qos::AtLeastOnce)
-///     .shared("workers");
-/// # let _ = source;
+/// #[derive(Deserialize)]
+/// struct Command {
+///     action: String,
+/// }
+///
+/// #[subscriber(MqttTopic::new("devices/dev42/commands").qos(Qos::AtLeastOnce).shared("workers"))]
+/// async fn execute(command: &Command) -> HandlerOutcome {
+///     println!("running {}", command.action);
+///     HandlerOutcome::ack()
+/// }
+///
+/// #[ruststream::app]
+/// fn app() -> impl App {
+///     RustStream::new(AppInfo::new("commands", "0.1.0")).with_broker(
+///         MqttBroker::new("mqtt://localhost:1883", "commands-svc"),
+///         |b| {
+///             // A topic addresses its own retry copies, so the mount site names no destination.
+///             b.include(execute)
+///                 .max_attempts(nonzero!(5u32))
+///                 .dead_letter("dead/commands");
+///         },
+///     )
+/// }
+/// # }
+/// # fn main() {}
 /// ```
 #[derive(Clone, PartialEq, Eq)]
 #[must_use]

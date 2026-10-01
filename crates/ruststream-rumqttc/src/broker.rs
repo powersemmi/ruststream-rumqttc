@@ -139,14 +139,38 @@ pub(crate) type CoreCell = Arc<OnceCell<Core>>;
 /// # Examples
 ///
 /// ```
+/// # mod demo {
 /// use std::time::Duration;
-/// use ruststream_rumqttc::MqttBroker;
 ///
-/// let broker = MqttBroker::new("mqtt://localhost:1883", "orders-svc")
-///     .credentials("user", "pass")
-///     .keep_alive(Duration::from_secs(30))
-///     .clean_start(false);
-/// # let _ = broker;
+/// use ruststream_rumqttc::prelude::*;
+/// use serde::Deserialize;
+///
+/// #[derive(Deserialize)]
+/// struct Order {
+///     id: u64,
+/// }
+///
+/// #[subscriber(MqttTopic::new("orders/created"))]
+/// async fn confirm(order: &Order) -> HandlerOutcome {
+///     println!("order {} confirmed", order.id);
+///     HandlerOutcome::ack()
+/// }
+///
+/// #[ruststream::app]
+/// fn app() -> impl App {
+///     RustStream::new(AppInfo::new("orders", "0.1.0")).with_broker(
+///         MqttBroker::new("mqtt://localhost:1883", "orders-svc")
+///             .credentials("user", "pass")
+///             .keep_alive(Duration::from_secs(30))
+///             .clean_start(false)
+///             .session_expiry(Duration::from_secs(3600)),
+///         |b| {
+///             b.include(confirm);
+///         },
+///     )
+/// }
+/// # }
+/// # fn main() {}
 /// ```
 #[derive(Debug, Clone)]
 #[must_use]

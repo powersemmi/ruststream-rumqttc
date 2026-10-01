@@ -156,10 +156,74 @@ impl Publisher for MqttPublisher {
 /// # Examples
 ///
 /// ```
-/// use ruststream_rumqttc::{MqttPublishOptions, Qos};
+/// # #[cfg(feature = "testing")]
+/// # mod demo {
+/// use std::error::Error;
 ///
-/// let options = MqttPublishOptions::default().qos(Qos::ExactlyOnce).retain(true);
-/// # let _ = options;
+/// use ruststream::testing::TestApp;
+/// use ruststream_rumqttc::prelude::*;
+/// use serde::{Deserialize, Serialize};
+///
+/// #[derive(Deserialize, Serialize, Outgoing)]
+/// struct Telemetry {
+///     temperature: f64,
+/// }
+///
+/// #[derive(Outgoing, Serialized)]
+/// #[outgoing(name = "devices/dev42/state")]
+/// struct DeviceState(Vec<u8>);
+///
+/// #[derive(OutSlot)]
+/// #[publishes(DeviceState)]
+/// struct States;
+///
+/// #[subscriber("devices/dev42/telemetry")]
+/// async fn announce(
+///     telemetry: &Telemetry,
+///     Out(states): Out<impl Publisher<Options = MqttPublishOptions>, States>,
+/// ) -> HandlerOutcome {
+///     let state: &[u8] = if telemetry.temperature > 30.0 { b"hot" } else { b"ok" };
+///     if states.message(&DeviceState(state.to_vec())).retain(true).publish().await.is_err() {
+///         return HandlerOutcome::retry();
+///     }
+///     HandlerOutcome::ack()
+/// }
+///
+/// pub fn app() -> impl App {
+///     RustStream::new(AppInfo::new("states", "0.1.0")).with_broker(
+///         MqttBroker::new("mqtt://localhost:1883", "states-svc"),
+///         |b| {
+///             b.include(announce).out(States, Publish::default()).build();
+///         },
+///     )
+/// }
+///
+/// pub async fn the_state_is_published_retained() -> Result<(), Box<dyn Error>> {
+///     let tb = TestApp::start(app()).await?;
+///
+///     tb.broker::<MqttBroker>()
+///         .message(&Telemetry { temperature: 31.5 })
+///         .to("devices/dev42/telemetry")
+///         .publish()
+///         .await?;
+///
+///     tb.out::<States>()
+///         .assert_called_once()
+///         .with_raw(b"hot")
+///         .with_options(&MqttPublishOptions::default().retain(true));
+///     tb.shutdown().await?;
+///     Ok(())
+/// }
+/// # }
+/// # #[cfg(feature = "testing")]
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// #     tokio::runtime::Builder::new_multi_thread()
+/// #         .enable_all()
+/// #         .build()?
+/// #         .block_on(demo::the_state_is_published_retained())
+/// # }
+/// # #[cfg(not(feature = "testing"))]
+/// # fn main() {}
 /// ```
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[must_use]
@@ -207,8 +271,9 @@ impl MqttPublishOptions {
 /// # Examples
 ///
 /// ```
-/// use ruststream::runtime::PublishExt;
-/// use ruststream::{Outgoing, Serialized};
+/// # mod demo {
+/// use ruststream::runtime::PublishError;
+/// use ruststream_rumqttc::MqttError;
 /// use ruststream_rumqttc::prelude::*;
 ///
 /// // An MQTT state is bytes on the wire rather than an encoded model, so the type carries its
@@ -217,16 +282,29 @@ impl MqttPublishOptions {
 /// #[outgoing(name = "devices/dev42/state")]
 /// struct DeviceState(Vec<u8>);
 ///
-/// # async fn demo() -> Result<(), Box<dyn std::error::Error>> {
-/// let publisher = MqttBroker::new("mqtt://localhost:1883", "states").publisher();
-/// publisher
-///     .message(&DeviceState(b"online".to_vec()))
-///     .retain(true)
-///     .qos(Qos::ExactlyOnce)
-///     .publish()
-///     .await?;
-/// # Ok(())
+/// #[ruststream::app]
+/// fn app() -> impl App {
+///     RustStream::new(AppInfo::new("states", "0.1.0")).with_broker(
+///         MqttBroker::new("mqtt://localhost:1883", "states-svc"),
+///         |b| {
+///             // The policy publishes plain; this one announcement is retained and exactly once,
+///             // so a subscriber that joins later still sees the device online.
+///             b.after_startup(
+///                 Publish::default(),
+///                 async move |publisher| -> Result<(), PublishError<MqttError>> {
+///                     publisher
+///                         .message(&DeviceState(b"online".to_vec()))
+///                         .retain(true)
+///                         .qos(Qos::ExactlyOnce)
+///                         .publish()
+///                         .await
+///                 },
+///             );
+///         },
+///     )
+/// }
 /// # }
+/// # fn main() {}
 /// ```
 pub trait MqttPublishSteps {
     /// Sends this one message at `qos` instead of the publisher's own.
@@ -264,10 +342,44 @@ where
 /// # Examples
 ///
 /// ```
-/// use ruststream_rumqttc::{MqttPublish, Qos};
+/// # mod demo {
+/// use ruststream_rumqttc::{MqttBroker, MqttFilter, MqttPublish, Qos};
+/// use ruststream::prelude::*;
+/// use serde::{Deserialize, Serialize};
 ///
-/// let policy = MqttPublish::default().qos(Qos::ExactlyOnce).retain(true);
-/// # let _ = policy;
+/// #[derive(Deserialize)]
+/// struct Telemetry {
+///     device: String,
+///     temperature: f64,
+/// }
+///
+/// #[derive(Serialize, Outgoing)]
+/// #[outgoing(name = "devices/state")]
+/// struct DeviceState {
+///     device: String,
+///     hot: bool,
+/// }
+///
+/// #[subscriber(MqttFilter::new("devices/+/telemetry"), publish)]
+/// async fn track(telemetry: &Telemetry) -> DeviceState {
+///     DeviceState { device: telemetry.device.clone(), hot: telemetry.temperature > 30.0 }
+/// }
+///
+/// #[ruststream::app]
+/// fn app() -> impl App {
+///     RustStream::new(AppInfo::new("states", "0.1.0")).with_broker(
+///         MqttBroker::new("mqtt://localhost:1883", "states-svc"),
+///         |b| {
+///             // Every reply is retained, so a dashboard that starts later reads the last state.
+///             b.include(track)
+///                 .out_reply(MqttPublish::default().qos(Qos::ExactlyOnce).retain(true))
+///                 .out_retry(MqttPublish::default())
+///                 .to("devices/retry/telemetry");
+///         },
+///     )
+/// }
+/// # }
+/// # fn main() {}
 /// ```
 #[derive(Debug, Clone, Copy, Default)]
 #[must_use]

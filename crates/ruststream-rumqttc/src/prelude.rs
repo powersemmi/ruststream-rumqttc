@@ -16,14 +16,49 @@
 //! # Examples
 //!
 //! ```
+//! # mod demo {
 //! use ruststream_rumqttc::prelude::*;
+//! use serde::{Deserialize, Serialize};
 //!
-//! let broker = MqttBroker::new("mqtt://localhost:1883", "telemetry-svc");
-//! let topic = MqttFilter::new("devices/+/telemetry")
-//!     .qos(Qos::AtLeastOnce)
-//!     .shared("workers");
-//! let policy = Publish::default().qos(Qos::ExactlyOnce).retain(true);
-//! # let _ = (broker, topic, policy);
+//! #[derive(Deserialize)]
+//! struct Telemetry {
+//!     device: String,
+//!     temperature: f64,
+//! }
+//!
+//! #[derive(Serialize, Outgoing)]
+//! #[outgoing(name = "alerts")]
+//! struct Alert {
+//!     device: String,
+//! }
+//!
+//! #[subscriber(MqttFilter::new("devices/+/telemetry").qos(Qos::AtLeastOnce).shared("workers"))]
+//! async fn check(telemetry: &Telemetry, Out(alerts): Out<impl Publisher>) -> HandlerOutcome {
+//!     if telemetry.temperature <= 30.0 {
+//!         return HandlerOutcome::ack();
+//!     }
+//!     let alert = Alert { device: telemetry.device.clone() };
+//!     if alerts.message(&alert).publish().await.is_err() {
+//!         return HandlerOutcome::retry();
+//!     }
+//!     HandlerOutcome::ack()
+//! }
+//!
+//! #[ruststream::app]
+//! fn app() -> impl App {
+//!     RustStream::new(AppInfo::new("telemetry", "0.1.0")).with_broker(
+//!         MqttBroker::new("mqtt://localhost:1883", "telemetry-svc"),
+//!         |b| {
+//!             b.include(check)
+//!                 .out(DefaultSlot, Publish::default().qos(Qos::ExactlyOnce))
+//!                 .out_retry(Publish::default())
+//!                 .to("devices/retry/telemetry")
+//!                 .build();
+//!         },
+//!     )
+//! }
+//! # }
+//! # fn main() {}
 //! ```
 
 // Importing this prelude is itself a service's statement of which broker it runs on, which is why

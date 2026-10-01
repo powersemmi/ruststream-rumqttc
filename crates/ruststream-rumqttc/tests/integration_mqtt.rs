@@ -733,7 +733,7 @@ async fn a_publish_maps_its_headers_onto_the_packets_own_properties() {
         "unspecified bytes is what the protocol says about a binary media type"
     );
     assert_eq!(properties.response_topic, None);
-    assert!(properties.user_properties.is_empty());
+    assert_eq!(properties.user_properties, Vec::new());
 
     connected
         .publisher()

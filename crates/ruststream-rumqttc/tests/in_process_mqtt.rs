@@ -457,7 +457,10 @@ async fn routes_answers_every_matching_filter_and_one_member_of_a_group() {
     let subscriptions = ["jobs/+", "jobs/+", "jobs/#", "other"];
     assert_eq!(connected.routes("jobs/print", &subscriptions), [0, 2]);
     assert_eq!(connected.routes("jobs", &subscriptions), [2]);
-    assert!(connected.routes("elsewhere", &subscriptions).is_empty());
+    assert_eq!(
+        connected.routes("elsewhere", &subscriptions),
+        Vec::<usize>::new()
+    );
 
     // The group's members take its deliveries in turn, and the answer follows the turn.
     connected

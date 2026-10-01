@@ -10,6 +10,6 @@
     "Cap redeliveries with `.max_attempts(n).dead_letter(topic)` right after `include`; MQTT counts no attempts, so the count travels in the framework's retry-count header and the dead-letter topic must match no filter the service reads.",
     "A `&[T]` handler takes `.batch(n)` at the mount site; a PUBLISH packet carries one message, so the crate fills batches on the client and closes a partial one 20 ms after its first delivery.",
     "MQTT offers no transactions, no partitions, no position to seek to and no correlated `request(..)`, so a responder is an ordinary handler that reads `ctx.headers().reply_to()` and publishes the answer there.",
-    "Test with `ruststream::testing::TestApp` over `ruststream_rumqttc::testing::MqttTestBroker` (feature `testing`), which routes by topic-filter match and honours share groups and quality of service but models neither retained messages nor session redelivery."
+    "Test the production app: with feature `testing`, hand the builder `main` runs to `ruststream::testing::TestApp::start`, which connects `MqttBroker` in process, and address it as `tb.broker::<MqttBroker>()`; `TestApp::start_live` runs the same test against a real MQTT broker, which is where a persistent session, the receive-maximum window and the protocol handshakes are exercised."
   ]
 }

@@ -1,40 +1,28 @@
-//! The framework's dispatch over a real MQTT connection: what a deferred retry, a spent cap and a
-//! declared reply do once the copies travel through a broker instead of an in-process channel.
+//! A declared reply over a real MQTT connection, read off the wire by a client of the test's own:
+//! where the answer goes and which MQTT 5 properties it carries, which only the packet a broker
+//! delivers can show.
 //!
-//! MQTT defers nothing and counts nothing, so every one of these runs on the runtime's own
-//! fallback: the copy is an ordinary publish and the attempt number is an ordinary header, which
-//! means both have to survive a wire. `handlers_mqtt.rs` covers the same declarations on the
-//! in-process transport, where the seam between the crate and the framework is the subject.
+//! The retry fallback over a real connection runs in `both_modes_mqtt.rs`, where each test body
+//! runs in process and against the stand alike.
 //!
 //! Start a broker with `just brokers-up` (mosquitto), then:
 //! `MQTT_TEST_URL=mqtt://127.0.0.1:1883 cargo test --all-features -- --test-threads=1`.
 
-use std::convert::Infallible;
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use rumqttc::v5::mqttbytes::QoS;
 use rumqttc::v5::mqttbytes::v5::{Packet, Publish as PublishPacket};
 use rumqttc::v5::{AsyncClient, Event, EventLoop, MqttOptions};
-// The derive and the value a publish transform reads share the name in different
-// namespaces: the prelude carries the macro `ruststream::Outgoing`, and this is the type
-// `runtime::Outgoing`.
-use ruststream::runtime::{Outgoing, PublishContext, RETRY_COUNT_HEADER};
 use ruststream::{ConnectedBroker, ServerSpec};
 use ruststream_rumqttc::ConnectedMqttBroker;
 use ruststream_rumqttc::prelude::*;
 use serde::{Deserialize, Serialize};
-use tokio::sync::Notify;
 
 const RECV_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// How long an assertion of absence waits before it counts as absence. It follows a delivery that
 /// did arrive, so what is being timed is a broker that already had its answer ready.
 const QUIET: Duration = Duration::from_millis(500);
-
-/// Long enough to be a delay the runtime actually waits out, short enough to keep the suite
-/// quick. The clock is the real one here: a paused clock would stop the connection's timers too.
-const RETRY_DELAY: Duration = Duration::from_millis(300);
 
 /// The live broker URL, or `None` when there is no stand to run against.
 ///
@@ -64,180 +52,6 @@ async fn connect(url: &str, id: &str) -> ConnectedMqttBroker {
         .connect()
         .await
         .expect("broker connects")
-}
-
-/// What each delivery said about the attempts spent on it, in the order they arrived.
-type Attempts = Arc<Mutex<Vec<Option<String>>>>;
-
-/// The topic each delivery arrived on, in the order they arrived.
-type Topics = Arc<Mutex<Vec<String>>>;
-
-/// The service's state: what the run recorded, and how it says it is over.
-#[derive(Clone, FromRef)]
-struct Run {
-    attempts: Attempts,
-    topics: Topics,
-    done: Arc<Notify>,
-}
-
-impl Run {
-    fn new() -> Self {
-        Self {
-            attempts: Attempts::default(),
-            topics: Topics::default(),
-            done: Arc::new(Notify::new()),
-        }
-    }
-}
-
-#[derive(Debug, Deserialize, Serialize, Outgoing)]
-#[outgoing(name = "live/retry/deferred")]
-struct Reading {
-    device: String,
-}
-
-/// Defers its first delivery and settles the copy, so one subscription runs both legs of the
-/// fallback and the count it reads is the one that travelled.
-#[subscriber(MqttTopic::new("live/retry/deferred").qos(Qos::AtLeastOnce))]
-async fn defer_once(
-    reading: &Reading,
-    ctx: &mut Context,
-    State(attempts): State<Attempts>,
-    State(done): State<Arc<Notify>>,
-) -> HandlerOutcome {
-    let _ = &reading.device;
-    let attempt = ctx.headers().get_str(RETRY_COUNT_HEADER).map(str::to_owned);
-    attempts
-        .lock()
-        .expect("attempts mutex poisoned")
-        .push(attempt.clone());
-    if attempt.is_none() {
-        return HandlerOutcome::retry_after(RETRY_DELAY);
-    }
-    done.notify_one();
-    HandlerOutcome::ack()
-}
-
-/// `retry_after` on MQTT is a publish: the runtime acknowledges the original, waits, and sends a
-/// copy to the topic the subscription reported. Only a broker can say the copy travelled, and the
-/// attempt number it carries is a user property like any other header.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_deferred_retry_returns_through_the_broker_carrying_its_count() {
-    let Some(url) = test_url() else { return };
-
-    let state = Run::new();
-    let recorded = Arc::clone(&state.attempts);
-    let finished = Arc::clone(&state.done);
-    let app = RustStream::new(AppInfo::new("live-retry", "0.1.0"))
-        .on_startup(move |()| {
-            let state = state;
-            async move { Ok::<_, Infallible>(state) }
-        })
-        .with_broker(
-            MqttBroker::new(&url, format!("live-retry-{}", std::process::id())),
-            |b| {
-                b.include(defer_once);
-            },
-        );
-    let running = app.start().await.expect("the service starts");
-
-    let sender = connect(&url, "retry-sender").await;
-    sender
-        .publisher()
-        .message(&Reading {
-            device: "dev42".to_owned(),
-        })
-        .publish()
-        .await
-        .expect("publish succeeds");
-
-    tokio::time::timeout(RECV_TIMEOUT, finished.notified())
-        .await
-        .expect("the copy comes back and the handler settles it");
-    running.shutdown().await.expect("the service stops");
-    sender.shutdown().await.expect("shutdown succeeds");
-
-    assert_eq!(
-        *recorded.lock().expect("attempts mutex poisoned"),
-        vec![None, Some("1".to_owned())],
-        "the first delivery carried no count and the copy carried the runtime's"
-    );
-}
-
-#[derive(Debug, Deserialize, Serialize, Outgoing)]
-#[outgoing(name = "live/retry/capped")]
-struct Command {
-    id: u64,
-}
-
-/// Never ready, which is what a cap is for.
-#[subscriber(MqttTopic::new("live/retry/capped").qos(Qos::AtLeastOnce))]
-async fn never_settles(
-    command: &Command,
-    ctx: &mut Context,
-    State(attempts): State<Attempts>,
-) -> HandlerOutcome {
-    let _ = command.id;
-    attempts
-        .lock()
-        .expect("attempts mutex poisoned")
-        .push(ctx.headers().get_str(RETRY_COUNT_HEADER).map(str::to_owned));
-    HandlerOutcome::retry_after(RETRY_DELAY)
-}
-
-/// The end of the run: the delivery that spent its attempts lands here, on a topic no other
-/// subscription of this service reads.
-#[subscriber(MqttTopic::new("live/retry/dead").qos(Qos::AtLeastOnce))]
-async fn collect_spent(command: &Command, State(done): State<Arc<Notify>>) -> HandlerOutcome {
-    let _ = command.id;
-    done.notify_one();
-    HandlerOutcome::ack()
-}
-
-/// MQTT counts no redeliveries, so the cap is counted on the header the copies carry and the
-/// dead-letter topic is an ordinary publish. Both legs here cross a broker.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_spent_cap_sends_the_delivery_to_the_dead_letter_topic() {
-    let Some(url) = test_url() else { return };
-
-    let state = Run::new();
-    let recorded = Arc::clone(&state.attempts);
-    let finished = Arc::clone(&state.done);
-    let app = RustStream::new(AppInfo::new("live-capped", "0.1.0"))
-        .on_startup(move |()| {
-            let state = state;
-            async move { Ok::<_, Infallible>(state) }
-        })
-        .with_broker(
-            MqttBroker::new(&url, format!("live-capped-{}", std::process::id())),
-            |b| {
-                b.include(never_settles)
-                    .max_attempts(nonzero!(2u32))
-                    .dead_letter("live/retry/dead");
-                b.include(collect_spent);
-            },
-        );
-    let running = app.start().await.expect("the service starts");
-
-    let sender = connect(&url, "capped-sender").await;
-    sender
-        .publisher()
-        .message(&Command { id: 11 })
-        .publish()
-        .await
-        .expect("publish succeeds");
-
-    tokio::time::timeout(RECV_TIMEOUT, finished.notified())
-        .await
-        .expect("the spent delivery reaches the dead-letter topic");
-    running.shutdown().await.expect("the service stops");
-    sender.shutdown().await.expect("shutdown succeeds");
-
-    assert_eq!(
-        *recorded.lock().expect("attempts mutex poisoned"),
-        vec![None, Some("1".to_owned())],
-        "a cap of two deliveries is two deliveries, and the second one is the copy"
-    );
 }
 
 #[derive(Debug, Deserialize, Serialize, Outgoing)]
@@ -370,101 +184,4 @@ async fn a_reply_lands_where_it_was_declared_and_names_no_response_topic() {
 
     running.shutdown().await.expect("the service stops");
     sender.shutdown().await.expect("shutdown succeeds");
-}
-
-#[derive(Debug, Deserialize, Serialize, Outgoing)]
-#[outgoing(name = "live/fleet/42/deferred")]
-struct FleetReading {
-    device: String,
-}
-
-/// Sends every copy back to the topic its own delivery arrived on, which is the one topic of the
-/// filter's many that this message belongs to.
-struct ToDeliveryTopic;
-
-impl<Options> PublishTransform<ForReply<MqttContext>, Options> for ToDeliveryTopic {
-    type Destination = Names;
-
-    fn apply(
-        &self,
-        out: &mut Outgoing<'_>,
-        _options: &mut Option<Options>,
-        cx: &PublishContext<'_, MqttContext>,
-    ) {
-        out.set_name(cx.context(DeliveryTopic).to_owned());
-    }
-}
-
-/// Reads the topic it was delivered on, which is what the whole per-device answer hangs on: the
-/// subscription's own name is the filter, and the filter is not a topic anyone can publish to.
-#[subscriber(MqttFilter::new("live/fleet/+/deferred").qos(Qos::AtLeastOnce))]
-async fn reconcile_per_device(
-    reading: &FleetReading,
-    ctx: &mut Context<'_, MqttContext>,
-    State(topics): State<Topics>,
-    State(done): State<Arc<Notify>>,
-) -> HandlerOutcome {
-    let _ = &reading.device;
-    let attempt = ctx.headers().get_str(RETRY_COUNT_HEADER).map(str::to_owned);
-    topics
-        .lock()
-        .expect("topics mutex poisoned")
-        .push(ctx.context(DeliveryTopic).to_owned());
-    if attempt.is_none() {
-        return HandlerOutcome::retry_after(RETRY_DELAY);
-    }
-    done.notify_one();
-    HandlerOutcome::ack()
-}
-
-/// A filter subscription reads many topics and is a name nobody can publish to, so a deferred
-/// copy has to be addressed per delivery. The transform reads the delivery's own topic out of the
-/// broker's context, and the copy comes back on the device it came from - which is only a claim
-/// until a broker routes it.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_copy_returns_to_the_topic_its_delivery_arrived_on() {
-    let Some(url) = test_url() else { return };
-
-    let state = Run::new();
-    let seen = Arc::clone(&state.topics);
-    let finished = Arc::clone(&state.done);
-    let app = RustStream::new(AppInfo::new("live-fleet", "0.1.0"))
-        .on_startup(move |()| {
-            let state = state;
-            async move { Ok::<_, Infallible>(state) }
-        })
-        .with_broker(
-            MqttBroker::new(&url, format!("live-fleet-{}", std::process::id())),
-            |b| {
-                b.include(reconcile_per_device)
-                    .out_retry(Publish::default())
-                    .transform(ToDeliveryTopic);
-            },
-        );
-    let running = app.start().await.expect("the service starts");
-
-    let sender = connect(&url, "fleet-sender").await;
-    sender
-        .publisher()
-        .message(&FleetReading {
-            device: "42".to_owned(),
-        })
-        .publish()
-        .await
-        .expect("publish succeeds");
-
-    tokio::time::timeout(RECV_TIMEOUT, finished.notified())
-        .await
-        .expect("the copy comes back and the handler settles it");
-    running.shutdown().await.expect("the service stops");
-    sender.shutdown().await.expect("shutdown succeeds");
-
-    assert_eq!(
-        *seen.lock().expect("topics mutex poisoned"),
-        vec![
-            "live/fleet/42/deferred".to_owned(),
-            "live/fleet/42/deferred".to_owned()
-        ],
-        "both deliveries arrived on the device's own topic, never on the filter"
-    );
 }

@@ -44,6 +44,9 @@ pub(crate) struct Wire {
     /// sends for the filter meanwhile names none.
     unnamed_on_server: bool,
     pub(crate) members: Vec<Member>,
+    /// Which member takes this filter's next delivery, counted per filter so that what one
+    /// filter receives does not move the turn of another.
+    turn: usize,
 }
 
 /// What a connection must send the server to open one local subscription.
@@ -71,8 +74,6 @@ pub(crate) struct Joined {
 pub(crate) struct Registry {
     pub(crate) wires: Vec<Wire>,
     next_member: u64,
-    /// Rotates delivery across the members of one wire filter.
-    rotation: usize,
 }
 
 impl Registry {
@@ -140,6 +141,7 @@ impl Registry {
                     qos,
                     tx,
                 }],
+                turn: 0,
             });
             self.wires.len() - 1
         };
@@ -258,12 +260,12 @@ impl Registry {
     ///
     /// A packet naming identifiers belongs to the wire filters carrying them; one naming none
     /// belongs to the matching filters the server holds without one (including a filter whose
-    /// identifier is still on its way to the server). Each such filter receives one copy,
-    /// rotated across its members, and the first copy carries the acknowledgement. A packet the
-    /// rule leaves with no filter goes, when it names identifiers, to the matching filter whose
-    /// derived identifier it names (a filter a previous process identified that carries none
-    /// now), and is otherwise answered back to be held for the filter it names, which has not
-    /// opened yet; one naming none goes to every filter its topic matches. A packet no filter
+    /// identifier is still on its way to the server). Each such filter receives one copy, which
+    /// its members take in a turn of the filter's own, and the first copy carries the
+    /// acknowledgement. A packet the rule leaves with no filter goes, when it names identifiers,
+    /// to the matching filter whose derived identifier it names (a filter a previous process
+    /// identified that carries none now), and is otherwise answered back to be held for the
+    /// filter it names, which has not opened yet; one naming none goes to every filter its topic matches. A packet no filter
     /// matches at all is answered back, for the caller to hold.
     pub(crate) fn route(
         &mut self,
@@ -272,11 +274,10 @@ impl Registry {
         mut message: impl FnMut(bool) -> MqttMessage,
         dead: &mut Vec<u64>,
     ) -> Option<MqttMessage> {
-        let rotation = self.rotation;
-        self.rotation = self.rotation.wrapping_add(1);
         let mut acknowledges = true;
-        let mut deliver = |wire: &Wire| {
-            let member = &wire.members[rotation % wire.members.len()];
+        let mut deliver = |wire: &mut Wire| {
+            let index = wire.next_member();
+            let member = &wire.members[index];
             if member
                 .tx
                 .send(Ok(message(std::mem::take(&mut acknowledges))))
@@ -286,7 +287,7 @@ impl Registry {
             }
         };
         let mut delivered = false;
-        for wire in &self.wires {
+        for wire in &mut self.wires {
             let named = if identifiers.is_empty() {
                 wire.identifier.is_none() || wire.unnamed_on_server
             } else {
@@ -299,7 +300,7 @@ impl Registry {
             }
         }
         if !delivered {
-            for wire in &self.wires {
+            for wire in &mut self.wires {
                 let named = identifiers.is_empty()
                     || (wire.identifier.is_none()
                         && identifiers.contains(&derived_identifier(&wire.filter)));
@@ -310,6 +311,21 @@ impl Registry {
             }
         }
         (!delivered).then(|| message(true))
+    }
+}
+
+impl Wire {
+    /// The index of the member that takes this delivery, moving the turn on to the next one.
+    fn next_member(&mut self) -> usize {
+        let index = self.turn % self.members.len();
+        self.turn = self.turn.wrapping_add(1);
+        index
+    }
+
+    /// The member that takes this filter's next delivery, without moving the turn.
+    #[cfg(feature = "testing")]
+    pub(crate) fn upcoming(&self) -> u64 {
+        self.members[self.turn % self.members.len()].id
     }
 }
 

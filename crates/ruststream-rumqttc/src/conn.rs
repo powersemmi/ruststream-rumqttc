@@ -8,18 +8,21 @@
 //! deliveries), never a stalled loop.
 
 use std::collections::VecDeque;
+use std::pin::pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use rumqttc::Outgoing;
 use rumqttc::v5::mqttbytes::v5::{
     ConnAck, ConnectReturnCode, Filter, Packet, RetainForwardRule, SubscribeProperties,
     SubscribeReasonCode,
 };
 use rumqttc::v5::mqttbytes::{QoS, matches};
 use rumqttc::v5::{AsyncClient, ConnectionError, Event, EventLoop, StateError};
-use tokio::sync::oneshot;
+use tokio::sync::{Notify, oneshot};
 
+use crate::broker::Link;
 use crate::error::MqttError;
 use crate::message::MqttMessage;
 use crate::registry::{DeliverySender, Registry, SubscribeRequest};
@@ -73,6 +76,8 @@ pub(crate) struct Shared {
     pub(crate) closed: AtomicBool,
     /// The connection task has stopped, so nothing drains the client's request queue any more.
     exited: AtomicBool,
+    /// Wakes a shutdown waiting for the connection task to flush what was queued before it.
+    stopped: Notify,
     /// Whether the server's last `CONNACK` offered subscription identifiers.
     identifiers: AtomicBool,
 }
@@ -86,6 +91,7 @@ impl Shared {
             last_error: Mutex::new(None),
             closed: AtomicBool::new(false),
             exited: AtomicBool::new(false),
+            stopped: Notify::new(),
             // The protocol's default when the property is absent.
             identifiers: AtomicBool::new(true),
         }
@@ -93,6 +99,10 @@ impl Shared {
 
     /// Holds a delivery no subscription matched, evicting the oldest when the buffer is full.
     fn hold(&self, message: MqttMessage, identifiers: &[usize]) {
+        // A held delivery waits for a subscription that may never open, so the test harness stops
+        // counting it as in flight: it is not a reaction the harness can wait for.
+        #[cfg(feature = "testing")]
+        let message = message.uncounted();
         let mut held = self.held.lock().expect("mqtt held mutex poisoned");
         if held.len() >= HELD_DELIVERIES
             && let Some((dropped, _)) = held.pop_front()
@@ -131,6 +141,18 @@ impl Shared {
         Ok(())
     }
 
+    /// Resolves once the connection task has stopped.
+    pub(crate) async fn stopped(&self) {
+        let notified = self.stopped.notified();
+        let mut notified = pin!(notified);
+        // Registered before the flag is read, so a task that stops in between still wakes us.
+        notified.as_mut().enable();
+        if self.exited.load(Ordering::Acquire) {
+            return;
+        }
+        notified.await;
+    }
+
     fn gone(&self) -> bool {
         self.closed.load(Ordering::Acquire) || self.exited.load(Ordering::Acquire)
     }
@@ -143,9 +165,15 @@ impl Shared {
     /// identifier (see [`Registry::join`]).
     // The registry guard spans the join and the backlog handover on purpose (see below).
     #[allow(clippy::significant_drop_tightening)]
+    // Without the `testing` feature a link has one variant, so the match on it has a single arm;
+    // it stays so that the in-process arm has its place when the feature is on.
+    #[cfg_attr(
+        not(feature = "testing"),
+        allow(clippy::infallible_destructuring_match)
+    )]
     pub(crate) async fn open(
         &self,
-        client: &AsyncClient,
+        link: &Link,
         wire_filter: &str,
         match_filter: &str,
         qos: QoS,
@@ -169,6 +197,10 @@ impl Shared {
                 if matches(message.topic(), match_filter)
                     && registry.claims(wire_filter, &identifiers)
                 {
+                    // Counted again: the subscription's reaction to it is one the harness waits
+                    // for.
+                    #[cfg(feature = "testing")]
+                    let message = message.recounted();
                     let _ = tx.send(Ok(message));
                 } else {
                     unclaimed.push_back((message, identifiers));
@@ -176,6 +208,33 @@ impl Shared {
             }
             *held = unclaimed;
             joined
+        };
+        let client = match link {
+            Link::Wire(client) => client,
+            #[cfg(feature = "testing")]
+            Link::InProcess(bus) => {
+                // The in-process server answers a subscribe as it takes it, and always accepts.
+                for request in &joined.requests {
+                    if request.refresh {
+                        if !self
+                            .registry
+                            .lock()
+                            .expect("mqtt registry mutex poisoned")
+                            .holds(&request.filter)
+                        {
+                            continue;
+                        }
+                        bus.subscribe(self, request);
+                        self.registry
+                            .lock()
+                            .expect("mqtt registry mutex poisoned")
+                            .identified(&request.filter, true);
+                    } else {
+                        bus.subscribe(self, request);
+                    }
+                }
+                return Ok(joined.member);
+            }
         };
         let (done, wait) = oneshot::channel();
         let mut done = Some(done);
@@ -207,7 +266,7 @@ impl Shared {
                 match sent {
                     Ok(()) => break,
                     Err(_) if self.gone() => {
-                        self.release(joined.member, client);
+                        self.release(joined.member, link);
                         return Err(MqttError::Subscribe {
                             filter: match_filter.to_owned(),
                             reason: "the mqtt connection task has shut down".to_owned(),
@@ -261,15 +320,46 @@ impl Shared {
 
     /// Takes the local subscription `member` out, and unsubscribes its filter at the server when
     /// no other local subscription shares it.
-    pub(crate) fn release(&self, member: u64, client: &AsyncClient) {
+    pub(crate) fn release(&self, member: u64, link: &Link) {
+        match link {
+            Link::Wire(client) => self.release_with(member, |filter| unsubscribe(client, &filter)),
+            #[cfg(feature = "testing")]
+            Link::InProcess(bus) => bus.release(self, member),
+        }
+    }
+
+    /// Takes the local subscription `member` out, and hands its filter to `take_off` when no other
+    /// local subscription shares it.
+    pub(crate) fn release_with(&self, member: u64, take_off: impl FnOnce(String)) {
         let mut registry = self.registry.lock().expect("mqtt registry mutex poisoned");
         // Under the guard, so an open joining the same filter right now queues its subscribe
         // after this unsubscribe and the server ends up subscribed.
-        if let Some(filter) = registry.leave(member)
-            && let Err(err) = client.try_unsubscribe(filter.clone())
-        {
-            tracing::warn!(filter = %filter, error = %err, "mqtt unsubscribe failed");
+        if let Some(filter) = registry.leave(member) {
+            take_off(filter);
         }
+    }
+
+    /// Which of the local subscriptions opened on the plain filter `match_filter` receive the next
+    /// publish to a topic it matches, by their rank in the order they opened: one per wire filter
+    /// (a share group and a plain subscription on one filter are two), the member whose turn it is.
+    /// Empty when this connection holds no subscription on the filter.
+    #[cfg(feature = "testing")]
+    pub(crate) fn next_takers(&self, match_filter: &str) -> Vec<usize> {
+        let registry = self.registry.lock().expect("mqtt registry mutex poisoned");
+        let wires = || {
+            registry
+                .wires
+                .iter()
+                .filter(|wire| wire.match_filter == match_filter)
+        };
+        // Member ids grow in the order the subscriptions opened.
+        let mut opened: Vec<u64> = wires()
+            .flat_map(|wire| wire.members.iter().map(|member| member.id))
+            .collect();
+        opened.sort_unstable();
+        wires()
+            .filter_map(|wire| opened.binary_search(&wire.upcoming()).ok())
+            .collect()
     }
 
     /// Takes the local subscription `member` out after the server refused it, leaving the server
@@ -381,15 +471,12 @@ pub(crate) async fn run(mut conn: Conn) {
     // backoff is ours to own.
     let mut backoff = Duration::from_millis(100);
     loop {
-        if conn.shared.closed.load(Ordering::Acquire) {
-            break;
-        }
         match conn.eventloop.poll().await {
             Ok(Event::Incoming(packet)) => {
                 backoff = Duration::from_millis(100);
                 handle_incoming(&mut conn, packet);
             }
-            Ok(Event::Outgoing(rumqttc::Outgoing::Subscribe(pkid))) => {
+            Ok(Event::Outgoing(Outgoing::Subscribe(pkid))) => {
                 // The loop emits packet ids in issue order; hand this one to the oldest
                 // pending subscribe without one.
                 let mut pending = conn
@@ -401,6 +488,9 @@ pub(crate) async fn run(mut conn: Conn) {
                     sub.pkid = Some(pkid);
                 }
             }
+            // The requests channel is FIFO, so every acknowledgement queued before shutdown is
+            // on the wire once the DISCONNECT that shutdown queued last has been flushed.
+            Ok(Event::Outgoing(Outgoing::Disconnect)) => break,
             Ok(Event::Outgoing(_)) => {}
             Err(err) => {
                 if conn.shared.closed.load(Ordering::Acquire) {
@@ -426,6 +516,7 @@ pub(crate) async fn run(mut conn: Conn) {
         }
     }
     conn.shared.exited.store(true, Ordering::Release);
+    conn.shared.stopped.notify_waiters();
 }
 
 fn handle_incoming(conn: &mut Conn, packet: Packet) {
@@ -501,46 +592,54 @@ fn handle_incoming(conn: &mut Conn, packet: Packet) {
                 .as_ref()
                 .map_or(&[][..], |properties| &properties.subscription_identifiers);
             let client = &conn.client;
-            demultiplex(&conn.shared, client, topic, identifiers, |acknowledges| {
+            let dead = demultiplex(&conn.shared, topic, identifiers, |acknowledges| {
                 MqttMessage::new(
                     topic.to_owned(),
                     &publish,
-                    acknowledges.then(|| client.clone()),
+                    acknowledges.then(|| Link::Wire(client.clone())),
                 )
             });
+            for member in dead {
+                conn.shared
+                    .release_with(member, |filter| unsubscribe(client, &filter));
+            }
         }
         _ => {}
     }
 }
 
 /// Hands one PUBLISH packet the server sent this session to the subscriptions it belongs to (see
-/// [`Registry::route`]), holds it when none matches, and releases the subscriptions whose stream
-/// is gone.
+/// [`Registry::route`]), holds it when none matches, and answers the subscriptions whose stream
+/// is gone, for the caller to release through its transport.
 ///
 /// `identifiers` are the subscription identifiers the packet carries; `message` builds one
-/// delivery of the packet, told whether it is the one carrying the acknowledgement.
+/// delivery of the packet, told whether it is the one carrying the acknowledgement. The
+/// in-process mode hands its packets through here too, so both transports demultiplex alike.
 pub(crate) fn demultiplex(
     shared: &Shared,
-    client: &AsyncClient,
     topic: &str,
     identifiers: &[usize],
     message: impl FnMut(bool) -> MqttMessage,
-) {
+) -> Vec<u64> {
     let mut dead = Vec::new();
-    {
-        let mut registry = shared
-            .registry
-            .lock()
-            .expect("mqtt registry mutex poisoned");
-        if let Some(message) = registry.route(topic, identifiers, message, &mut dead) {
-            // Not an error: a resumed session flushes its backlog before the application has
-            // opened the subscription that owns it, so the delivery waits for that filter instead
-            // of being discarded. Held under the registry guard, so an open cannot slip in between
-            // the miss and the hold and leave the delivery waiting for a filter already there.
-            shared.hold(message, identifiers);
-        }
+    let mut registry = shared
+        .registry
+        .lock()
+        .expect("mqtt registry mutex poisoned");
+    if let Some(message) = registry.route(topic, identifiers, message, &mut dead) {
+        // Not an error: a resumed session flushes its backlog before the application has
+        // opened the subscription that owns it, so the delivery waits for that filter instead
+        // of being discarded. Held under the registry guard, so an open cannot slip in between
+        // the miss and the hold and leave the delivery waiting for a filter already there.
+        shared.hold(message, identifiers);
     }
-    for member in dead {
-        shared.release(member, client);
+    drop(registry);
+    dead
+}
+
+/// Takes the wire filter `filter` off the server, from a context that cannot wait for the answer.
+fn unsubscribe(client: &AsyncClient, filter: &str) {
+    if let Err(err) = client.try_unsubscribe(filter) {
+        tracing::warn!(filter = %filter, error = %err, "mqtt unsubscribe failed");
     }
 }

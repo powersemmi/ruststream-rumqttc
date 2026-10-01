@@ -44,7 +44,6 @@ pub use crate::{
 // trait. Add one here when a capability a body binds lands.
 
 // Deliberately absent, do not add:
-// - `testing`: feature-gated broker-author tooling, imported by the tests that use it.
 // - `MqttMessage`, `MqttSubscriber`, `MqttPublisher`, `ConnectedMqttBroker`: a service reaches
 //   these through the framework's own surfaces.
 // - `MqttError`: named where it is handled.

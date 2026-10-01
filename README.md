@@ -109,25 +109,14 @@ fn app() -> impl App {
 
 ## Test it
 
-`TestApp` runs the handlers against an in-process MQTT broker, with no server.
+`TestApp` runs the service's own app with `MqttBroker` in process, with no server.
 
 ```rust
 use ruststream::testing::TestApp;
-use ruststream_rumqttc::testing::MqttTestBroker;
 
-let app = RustStream::new(AppInfo::new("telemetry", "0.1.0")).with_broker(
-    MqttTestBroker::new(),
-    |b| {
-        b.include(handle)
-            .out(DefaultSlot, Publish::default().qos(Qos::AtLeastOnce))
-            .out_retry(Publish::default())
-            .to("devices/retry/telemetry")
-            .build();
-    },
-);
-let tb = TestApp::start(app).await?;
+let tb = TestApp::start(app()).await?;
 
-tb.broker::<MqttTestBroker>()
+tb.broker::<MqttBroker>()
     .message(&Telemetry {
         device: "dev42".to_owned(),
         temperature: 31.5,
@@ -136,7 +125,7 @@ tb.broker::<MqttTestBroker>()
     .publish()
     .await?;
 
-tb.broker::<MqttTestBroker>()
+tb.broker::<MqttBroker>()
     .published::<Alert>("alerts")
     .assert_called_once()
     .with(&Alert {

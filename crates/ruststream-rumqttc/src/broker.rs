@@ -57,6 +57,9 @@ pub(crate) enum Link {
 // The zero-cost promise of the in-process mode, held by the compiler: a build without it gives
 // the link exactly the size of the client it wraps, and every handle holding a link keeps its
 // size with it.
+/// How long shutdown waits for the connection task to write what was queued before it.
+const SHUTDOWN_FLUSH: Duration = Duration::from_secs(5);
+
 #[cfg(not(feature = "testing"))]
 const _: () = assert!(size_of::<Link>() == size_of::<AsyncClient>());
 #[cfg(not(feature = "testing"))]
@@ -88,11 +91,24 @@ impl Link {
         }
     }
 
-    /// Closes the session with a clean `DISCONNECT`.
-    async fn disconnect(&self) {
+    /// Closes the session with a clean `DISCONNECT`, and returns once the connection task has
+    /// flushed it.
+    async fn disconnect(&self, shared: &Shared) {
         match self {
             Self::Wire(client) => {
                 let _ = client.disconnect().await;
+                // An acknowledgement reports success once it is queued, so the session is closed
+                // only when the task has written the queue up to the DISCONNECT, or has lost the
+                // connection. The bound covers a broker that stops reading.
+                if tokio::time::timeout(SHUTDOWN_FLUSH, shared.stopped())
+                    .await
+                    .is_err()
+                {
+                    tracing::warn!(
+                        timeout = ?SHUTDOWN_FLUSH,
+                        "mqtt shutdown stopped waiting for the connection task to flush its queue"
+                    );
+                }
             }
             #[cfg(feature = "testing")]
             Self::InProcess(bus) => bus.close(),
@@ -366,6 +382,9 @@ impl Broker for MqttBroker {
                     }
                     Err(_) => {
                         shared.closed.store(true, Ordering::Release);
+                        // A task still dialing would otherwise connect later and run unowned;
+                        // the queued DISCONNECT is what stops a task that got through.
+                        let _ = client.try_disconnect();
                         // Everything the task retried is gone by now, so the wait is all there
                         // would be to report: a wrong port, an unreachable host and a handshake
                         // the broker refused after the fact would all read the same.
@@ -561,8 +580,9 @@ impl ConnectedBroker for ConnectedMqttBroker {
             );
         }
         // A clean DISCONNECT lets the broker publish no last will and expire the session per
-        // policy; the connection task sees the closed flag and exits.
-        self.link.disconnect().await;
+        // policy; the connection task exits once it has flushed it, after every acknowledgement
+        // queued before it.
+        self.link.disconnect(&self.shared).await;
         Ok(())
     }
 }
@@ -618,33 +638,33 @@ impl TestableBroker for ConnectedMqttBroker {
     /// Every subscription whose topic filter matches the destination, by the match the
     /// connection demultiplexes deliveries with; the subscriptions this connection opened on one
     /// wire filter (the members of one share group, or one filter subscribed twice) are one
-    /// subscription to the server and take one delivery between them.
+    /// subscription to the server and take one delivery between them in turn, so the answer names
+    /// the one whose turn it is.
     fn routes(&self, destination: &str, subscriptions: &[&str]) -> Vec<usize> {
-        let mut taken: Vec<(&str, usize)> = Vec::new();
-        subscriptions
-            .iter()
-            .enumerate()
-            .filter(|(_, filter)| matches(destination, filter))
-            .filter_map(|(position, filter)| {
+        let mut routed = Vec::new();
+        let mut answered: Vec<&str> = Vec::new();
+        for filter in subscriptions {
+            if !matches(destination, filter) || answered.contains(filter) {
+                continue;
+            }
+            answered.push(filter);
+            // The subscriptions the app opened under this name, in the order it opened them.
+            let positions = subscriptions
+                .iter()
+                .enumerate()
+                .filter(|(_, name)| *name == filter)
+                .map(|(position, _)| position);
+            let takers = self.shared.next_takers(filter);
+            if takers.is_empty() {
                 // A filter this connection has not opened answers by its name alone.
-                let copies = match self.shared.wire_filters(filter) {
-                    0 => usize::MAX,
-                    copies => copies,
-                };
-                let index = taken
-                    .iter()
-                    .position(|(name, _)| name == filter)
-                    .unwrap_or_else(|| {
-                        taken.push((filter, 0));
-                        taken.len() - 1
-                    });
-                let seen = &mut taken[index].1;
-                (*seen < copies).then(|| {
-                    *seen += 1;
-                    position
-                })
-            })
-            .collect()
+                routed.extend(positions);
+            } else {
+                let positions: Vec<usize> = positions.collect();
+                routed.extend(takers.iter().filter_map(|rank| positions.get(*rank)));
+            }
+        }
+        routed.sort_unstable();
+        routed
     }
 }
 

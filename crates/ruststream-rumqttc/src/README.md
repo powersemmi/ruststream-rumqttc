@@ -360,6 +360,11 @@ content type is textual (`application/json`, any `text/` subtype, any `+json` ve
 the payload format indicator 1 and every other one carries 0, so a peer reads a JSON body as the
 UTF-8 it is.
 
+A property is an MQTT string, and a server may close the connection on one that carries a control
+character or a Unicode non-character; Mosquitto does. So a header name or value that is not UTF-8
+or carries such a character refuses the publish with [`MqttError::Publish`], and so does a topic
+that carries one. The correlation data is binary on the wire and takes any bytes.
+
 The media type is a header like any other, and nothing writes it for you: a reply the runtime
 sends, a deferred retry copy and a plain publish all carry the headers something put on them, and
 the codec of the position is not one of those things. A service whose peers read the property sets

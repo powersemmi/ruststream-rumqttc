@@ -631,9 +631,9 @@ dependencies = [
 
 [[package]]
 name = "ruststream"
-version = "0.7.0-rc.10"
+version = "0.7.0-rc.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "29c5225d1e10cfee3d33e4aea9998f6f97829d3266a75418ac76d916ccb2c6d6"
+checksum = "868604a9138c3f9ddde617b1fc056e0f5f5925c7d7989e5f207fd96f45f17a16"
 dependencies = [
  "bytes",
  "bytes-utils",
@@ -653,9 +653,9 @@ dependencies = [
 
 [[package]]
 name = "ruststream-macros"
-version = "0.7.0-rc.10"
+version = "0.7.0-rc.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d409c9c91ab27cc9316c31c2625f0b75dedda1b1d2fbcad8713b7bd017ce163"
+checksum = "915a47a2359e57c0b7b9ca54acd9e827f4c0128071d09a18cfb0742fb8f205df"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -911,18 +911,18 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "2.0.20"
+version = "2.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ec86235f5fcc2a73650310756d2ac5b138a5780bbbdfae3eeccec992c435ba4f"
+checksum = "09e52cb86a36cede5cb101bf8908837b3e4c6e5e59fe7fd85c23fb56200d189e"
 dependencies = [
  "thiserror-impl",
 ]
 
 [[package]]
 name = "thiserror-impl"
-version = "2.0.20"
+version = "2.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc04cd3e1236dd4a98afca4569f2deb3f120e5422a4023be2cb683f8486292af"
+checksum = "fe5197923287db20a58125f0bc85c062f7f2c892de97b18c356f9efb14b28524"
 dependencies = [
  "proc-macro2",
  "quote",

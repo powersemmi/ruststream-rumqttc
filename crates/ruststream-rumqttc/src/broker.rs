@@ -638,33 +638,33 @@ impl TestableBroker for ConnectedMqttBroker {
     /// Every subscription whose topic filter matches the destination, by the match the
     /// connection demultiplexes deliveries with; the subscriptions this connection opened on one
     /// wire filter (the members of one share group, or one filter subscribed twice) are one
-    /// subscription to the server and take one delivery between them.
+    /// subscription to the server and take one delivery between them in turn, so the answer names
+    /// the one whose turn it is.
     fn routes(&self, destination: &str, subscriptions: &[&str]) -> Vec<usize> {
-        let mut taken: Vec<(&str, usize)> = Vec::new();
-        subscriptions
-            .iter()
-            .enumerate()
-            .filter(|(_, filter)| matches(destination, filter))
-            .filter_map(|(position, filter)| {
+        let mut routed = Vec::new();
+        let mut answered: Vec<&str> = Vec::new();
+        for filter in subscriptions {
+            if !matches(destination, filter) || answered.contains(filter) {
+                continue;
+            }
+            answered.push(filter);
+            // The subscriptions the app opened under this name, in the order it opened them.
+            let positions = subscriptions
+                .iter()
+                .enumerate()
+                .filter(|(_, name)| *name == filter)
+                .map(|(position, _)| position);
+            let takers = self.shared.next_takers(filter);
+            if takers.is_empty() {
                 // A filter this connection has not opened answers by its name alone.
-                let copies = match self.shared.wire_filters(filter) {
-                    0 => usize::MAX,
-                    copies => copies,
-                };
-                let index = taken
-                    .iter()
-                    .position(|(name, _)| name == filter)
-                    .unwrap_or_else(|| {
-                        taken.push((filter, 0));
-                        taken.len() - 1
-                    });
-                let seen = &mut taken[index].1;
-                (*seen < copies).then(|| {
-                    *seen += 1;
-                    position
-                })
-            })
-            .collect()
+                routed.extend(positions);
+            } else {
+                let positions: Vec<usize> = positions.collect();
+                routed.extend(takers.iter().filter_map(|rank| positions.get(*rank)));
+            }
+        }
+        routed.sort_unstable();
+        routed
     }
 }
 

@@ -4,8 +4,10 @@
 //!
 //! Running them in process is what says the in-process mode obeys the framework's own definition
 //! of a broker rather than a convenient subset of it; running them live is what says it is not
-//! lying. The suites that compare the two transports, and the one that needs several connections
-//! to reach one server, run live only.
+//! lying. The routing suite is in-process only by construction: it drives
+//! [`TestableBroker`](ruststream::testing::TestableBroker) through the in-process transport. The
+//! suites that compare the two transports, and the one that needs several connections to reach
+//! one server, run live only.
 //!
 //! Start one with `just brokers-up` (mosquitto), then:
 //! `MQTT_TEST_URL=mqtt://127.0.0.1:1883 cargo test --all-features`.
@@ -61,6 +63,11 @@ fn test_url() -> Option<String> {
             None
         }
     }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_in_process_mode_passes_conformance_suite() {
+    harness::run_suite(broker).await;
 }
 
 /// The ladder the framework defines, walked on the in-process mode a service's tests run on:

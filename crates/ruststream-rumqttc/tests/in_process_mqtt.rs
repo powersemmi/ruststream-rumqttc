@@ -459,5 +459,13 @@ async fn routes_answers_every_matching_filter_and_one_member_of_a_group() {
     assert_eq!(connected.routes("jobs", &subscriptions), [2]);
     assert!(connected.routes("elsewhere", &subscriptions).is_empty());
 
+    // The group's members take its deliveries in turn, and the answer follows the turn.
+    connected
+        .publisher()
+        .publish(OutgoingMessage::new("jobs/print", b"x".as_slice()), None)
+        .await
+        .expect("the publish is taken");
+    assert_eq!(connected.routes("jobs/print", &subscriptions), [1, 2]);
+
     connected.shutdown().await.expect("shutdown succeeds");
 }

@@ -21,26 +21,30 @@
 
 ---
 
-`ruststream-rumqttc` implements the RustStream broker contract over [`rumqttc`](https://crates.io/crates/rumqttc). Handlers, routers, codecs, and middleware come from the framework; this crate supplies the transport - and nothing broker-specific leaks back into the framework.
-
-MQTT 5 is the primary target because two things the framework relies on exist only there: user properties (headers travel natively, without a wrapper envelope) and shared subscriptions (which make competing consumers expressible).
+`ruststream-rumqttc` connects a RustStream service to an MQTT 5 broker over
+[`rumqttc`](https://crates.io/crates/rumqttc). Handlers, routing, codecs and middleware come from
+the framework; this crate is the transport.
 
 ## Features
 
-- **A crate-owned connection task.** The client exposes a single event loop that must be polled continuously; the crate drives it in a dedicated task that demultiplexes packets into independent per-subscription streams by topic-filter matching and MQTT 5 subscription identifiers, reconnects with exponential backoff (the client itself retries with zero delay, forever), and resubscribes exactly when the broker reports the session gone, without stalling keep-alive traffic. Delivery back-pressure is the protocol's receive-maximum, which bounds unacknowledged deliveries.
-- **QoS-aware acknowledgement.** QoS 1/2 acknowledge through the protocol under manual control (the client completes the QoS 2 handshake); QoS 0 has no protocol acknowledgement, so it reports `AckError::Unsupported` instead of reporting success. MQTT has no negative acknowledgement, so `nack(requeue = true)` reports `Unsupported` too - unacked messages redeliver when a persistent session resumes - and `nack(requeue = false)` acknowledges.
-- **Shared subscriptions.** `MqttTopic::new("jobs").shared("workers")` subscribes `$share/workers/jobs`; the broker splits the stream across the group, and two group members on one connection round-robin locally (they are one wire subscription).
-- **Several subscriptions on one connection, each receiving a message once.** Overlapping filters (`devices/+/telemetry` next to `devices/#`) are told apart by subscription identifiers, attached only where filters meet; a server that offers none refuses the overlap when the second filter opens. The same filter opened twice is one wire subscription, which stays until its last subscriber is dropped.
-- **Two subscription descriptors, one per thing MQTT names.** `MqttTopic` subscribes to a topic, `MqttFilter` to a topic filter with the protocol's own wildcards (`+`, `#`); either way a message reports the real topic it arrived on. The split is what a deferred retry needs: a topic is a name a publisher can use, so `MqttTopic` says where a copy reaches its subscription again, while a registration on `MqttFilter` names that topic at the mount site.
-- **A retry cap and a dead-letter topic per registration.** `b.include(handle).max_attempts(nonzero!(5)).dead_letter("dead/telemetry")` reads the same here as on every other broker. MQTT counts no redeliveries of its own, so the count travels in the framework's retry-count header on the copies the runtime publishes.
-- **Batches for `&[T]` handlers.** A PUBLISH packet carries one message, so the crate assembles batches on the client to the size the mount site named (`b.include(ingest.batch(nonzero!(64)))`), closing a partial batch 20 ms after its first delivery. Nothing at the mount site says which side of the wire filled it.
-- **Headers ride user properties**; the well-known `content-type`, `reply-to`, and `correlation-id` headers ride the matching first-class MQTT 5 properties.
-- **Payloads that are already bytes.** An MQTT payload is often a wire value the service holds already - a state string, a sensor frame, a protobuf record - rather than a model to encode. `#[derive(Serialized)]` on the way out and `#[derive(Deserialized)]` on the way in move those bytes untouched, with no codec on the path; the outgoing type still names its topic through `#[derive(Outgoing)]`, `{placeholder}` segments included.
-- **Sessions, wills, retained.** `clean_start`/`session_expiry` for persistent sessions, `last_will` on the broker, `retain` on the publish policy, TLS with client certificates (`tls_ca` + `tls_client_auth`) for managed MQTT services.
-- **Per-message QoS and retain.** The mount site's policy declares both for every publish through it, and a step on the publish changes one message: `publisher.message(&state).retain(true).publish()`. The step fills a field of `MqttPublishOptions`, which the publisher resolves over its policy and hands to the client as the protocol fields they are - nothing rides a header, and a stepped publish keeps the codec and the slot of the mount site it left through.
-- **One glob per routes file.** `ruststream_rumqttc::prelude::*` carries the framework's prelude plus this crate's surface, with `MqttPublish` aliased to `Publish`, so a mount site reads the same whichever broker it runs on. A handler body imports `ruststream::prelude::*` alone and states a capability on its injected publisher, so it names no broker type at all - unless it adjusts a per-message argument, which is the one case a body says which broker it is on, by binding `Out<impl Publisher<Options = MqttPublishOptions>, Marker>`.
-- **The `mqtt` protocol binding in the generated document** (feature `asyncapi`). The server reports the client identity, the session settings and the last will's coordinates; a subscription reports the quality of service it reads at; a publish policy reports both arguments its packets carry. Credentials and the will's payload stay out.
-- **Tests run the production app** (feature `testing`). `TestApp::start(app())` connects `MqttBroker` in process, with no server, and `TestApp::start_live(app())` runs the same test against a real broker. The in-process mode reads the broker's own settings and answers the way a server does, which the crate's own tests hold it to.
+- **A connection task the crate owns:** one event loop per broker, per-subscription streams,
+  reconnects with backoff and resubscribes when the session is gone.
+- **QoS-aware acknowledgement** for QoS 1 and 2; QoS 0 reports that it has none.
+- **Shared subscriptions** for competing consumers.
+- **Overlapping filters on one connection,** each receiving a message once (MQTT 5 subscription
+  identifiers); the same filter opened twice is one wire subscription.
+- **Topics and filters:** `MqttTopic` for a topic, `MqttFilter` for the `+` and `#` wildcards.
+- **Retry caps and dead-letter topics** declared where the handler is mounted.
+- **Batches** assembled on the client.
+- **Headers as user properties,** with `content-type`, `reply-to` and `correlation-id` as the
+  native MQTT 5 properties.
+- **Byte payloads without a codec:** `#[derive(Serialized)]` out, `#[derive(Deserialized)]` in.
+- **Sessions, wills and retained messages,** QoS and retain per message
+  (`publisher.message(&state).retain(true).publish()`), and TLS with client certificates.
+- **AsyncAPI** with the specification's `mqtt` binding, behind the `asyncapi` feature.
+- **Tests run the production app** (feature `testing`): `TestApp::start(app())` connects
+  `MqttBroker` in process, with no server; `TestApp::start_live(app())` runs the same test
+  against a real broker.
 
 ## Install
 
@@ -52,7 +56,6 @@ serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
 ruststream-rumqttc = { version = "0.7", features = ["testing"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 ```
 
 ## Write a service
@@ -107,60 +110,48 @@ fn app() -> impl App {
 }
 ```
 
-`#[ruststream::app]` generates `main`, so there is no runtime boilerplate. The mount site names a policy per publish position: `.out_reply(policy)` for what a `publish(..)` handler returns, `.out_retry(policy)` for the copy a deferred `retry_after` publishes, and `.out(marker, policy)` for a slot the body holds - `DefaultSlot` for its single unnamed `Out`, a `#[derive(OutSlot)]` marker for any further one. The policy carries the MQTT arguments, so the body states a capability (`Out<impl Publisher>`) and never a broker type - which is what lets the same handler run under the harness below.
+`#[ruststream::app]` generates `main`, so the binary understands `run` and `asyncapi gen`.
 
 ## Test it
 
-The `testing` feature gives `MqttBroker` an in-process mode. A test hands the framework's `TestApp` the app `main` runs, and addresses the broker by its production type. `#[ruststream::app]` keeps `app()` next to the `main` it generates, so a test calls the same function. `TestApp::start` connects the broker in process, with no server, and drives the production dispatch path; each publish settles the reaction before an assertion reads it. `Telemetry` and `Alert` carry both serde derives because the test injects one and reads the other back, and `Telemetry` derives `Outgoing` so the injection can name the topic the reading arrives on.
+`TestApp` runs the service's own app with `MqttBroker` in process, with no server.
+`TestApp::start_live(app())` runs the same test against a real broker.
 
 ```rust
 use ruststream::testing::TestApp;
-use ruststream_rumqttc::prelude::*;
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_hot_reading_raises_an_alert() -> Result<(), Box<dyn std::error::Error>> {
-    let tb = TestApp::start(app()).await?;
+let tb = TestApp::start(app()).await?;
 
-    tb.broker::<MqttBroker>()
-        .message(&Telemetry {
-            device: "dev42".to_owned(),
-            temperature: 31.5,
-        })
-        .to("devices/dev42/telemetry")
-        .publish()
-        .await?;
+tb.broker::<MqttBroker>()
+    .message(&Telemetry {
+        device: "dev42".to_owned(),
+        temperature: 31.5,
+    })
+    .to("devices/dev42/telemetry")
+    .publish()
+    .await?;
 
-    tb.broker::<MqttBroker>()
-        .published::<Alert>("alerts")
-        .assert_called_once()
-        .with(&Alert {
-            device: "dev42".to_owned(),
-        });
-    tb.shutdown().await?;
-    Ok(())
-}
+tb.broker::<MqttBroker>()
+    .published::<Alert>("alerts")
+    .assert_called_once()
+    .with(&Alert {
+        device: "dev42".to_owned(),
+    });
+tb.shutdown().await?;
 ```
 
-The wildcard resolves here the way it resolves on the wire, so the injection names the topic a device would publish to and the body sees it under that topic, never under the filter. `TestApp::start_live(app())` runs the same body against a running broker.
+## Documentation
 
-The compiling originals live in `crates/ruststream-rumqttc/tests/handlers_mqtt.rs`, next to the same harness reading back the per-message arguments a slot publish carried (`tb.out::<Marker>().with_options(..)`) and driving a batch handler; `tests/both_modes_mqtt.rs` runs one body in both modes.
+- This crate: <https://docs.rs/ruststream-rumqttc>
+- The framework: <https://powersemmi.github.io/ruststream/latest>
 
-A persistent session, the protocol handshakes and several connections sharing one server run only against a real broker: `just test-brokers` starts Mosquitto and runs the live suite, the live half of the dual-mode tests and the framework conformance suites against it. The conformance suites also run in process under `just test`, and the live run holds the in-process mode to the server's own answers: what it delivers, settles and refuses.
+## Minimum supported Rust version
 
-## Layout
-
-```
-ruststream-rumqttc/
-├── crates/
-│   └── ruststream-rumqttc/     the published crate
-│       ├── examples/           runnable mqtt_* examples
-│       └── tests/              handler tests, the live suite, conformance
-├── docs/                       the documentation site
-├── docker-compose.test.yml     mosquitto for the live suite
-└── Cargo.toml                  workspace
-```
+The MSRV is **1.88**, edition 2024.
 
 ## Contributing
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 ```bash
 just check          # fmt, clippy, feature checks

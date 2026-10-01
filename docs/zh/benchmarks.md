@@ -25,9 +25,9 @@ tokio 运行时和构建。这套流程属于框架本身，写在
 
 ## 数字 { #the-numbers }
 
-三个交错轮次中的最佳值，括号里是最差的一轮。越大越好。
+三个交错轮次中的最佳值，括号里是中位的一轮。越大越好。
 
-<div id="benchmark-results" data-benchmark-results="../../benchmarks/results.json" data-benchmark-labels='{"loading": "正在加载公布的结果...", "scenario": "场景", "raw": "裸客户端", "adapter": "本 crate", "framework": "RustStream 服务", "adapterOverhead": "crate 开销", "overhead": "服务开销", "indistinguishable": "无法区分", "brokerBound": "受 Broker 限制", "machine": "机器", "os": "操作系统", "broker": "Broker", "roundTrip": "往返时延", "build": "构建", "versions": "版本", "measured": "测量于", "unavailable": "读不到结果。它们公布在 {url}。", "unknownSchema": "公布的结果声明的 schema 是 {schema}，这一页不渲染它。"}'></div>
+<div id="benchmark-results" data-benchmark-results="../../benchmarks/results.json" data-benchmark-labels='{"loading": "正在加载公布的结果...", "scenario": "场景", "raw": "裸客户端", "adapter": "本 crate", "framework": "RustStream 服务", "adapterOverhead": "crate 开销", "overhead": "服务开销", "indistinguishable": "无法区分", "brokerBound": "受 Broker 限制", "machine": "机器", "os": "操作系统", "broker": "Broker", "roundTrip": "往返时延", "build": "构建", "versions": "版本", "measured": "测量于", "codeMeasured": "代码开销测量于", "instructions": "每条消息的指令数", "allocations": "每条消息的内存分配次数", "cold": "冷启动（指令 / 分配）", "unavailable": "读不到结果。它们公布在 {url}。", "unknownSchema": "公布的结果声明的 schema 是 {schema}，这一页不渲染它。"}'></div>
 
 表格由浏览器从上一次运行写下的文档读出，所以这一页上没有任何会过期的副本。
 
@@ -47,6 +47,26 @@ tokio 运行时和构建。这套流程属于框架本身，写在
 同一次运行的机器可读形式在
 [`benchmarks/results.json`](https://powersemmi.github.io/ruststream-rumqttc/latest/benchmarks/results.json)，
 框架的站点用它拼出跨 Broker 的汇总表。
+
+## crate 自身的代码 { #the-crates-own-code }
+
+<div id="benchmark-code"></div>
+
+第二张表是一条消息在服务线程上的开销，是数出来的，不是计时得来的：指令数由 callgrind 统计，内存分配
+次数由 DHAT 统计。每个场景都是用户会写的那种服务，跑在 `MqttBroker` 上，连着 compose 环境里的
+mosquitto，每次投递都用 QoS 1。本 crate 在服务运行时的一个任务里驱动 `rumqttc` 的事件循环，所以计数
+同样包括框架、本 crate 和客户端的工作：报文解码、分发、`PUBACK`，回复场景里还有发出的 PUBLISH。
+等待套接字的时间不在其中，因为 valgrind 数的是指令，不是时间。
+
+指令数和分配次数都是稳态下每条消息的值：500 次投递的运行和 1000 次投递的运行之间的斜率。每次运行
+之前由一个单独的客户端灌入消息，它的工作不计入。最后一列是启动服务一次性付出的开销：连接、订阅和
+第一次投递。这些数字是绝对值；框架自身的开销由核心库在它的
+[基准测试页面](https://powersemmi.github.io/ruststream/latest/benchmarks/)上公布。
+
+同一个二进制文件跑三次，指令数相差不到三分之一个百分点，分配次数在四千次里只差几次，取决于套接字的
+读取怎样切分。`just bench-code` 在分配次数超过场景声明的下限时失败（下限是三次运行里的最大值再加百分
+之一），加上 `--baseline=main` 时，指令数多出百分之二以上也算失败；改变开销的合并请求要附上自己的
+数字。
 
 ## 机器 { #the-machine }
 
@@ -86,3 +106,10 @@ just bench
 这个配方从 `docker-compose.test.yml` 起一套环境，跑完两个场景，再把它停掉，并用测到的结果重写
 `docs/benchmarks/results.json`。它需要独占这台机器。消息条数不是写死的：一次探测运行会把它定下
 来，使得每次被测的运行在跑它的那台机器上至少持续五秒。
+
+```bash
+just bench-code
+```
+
+这个配方启动同一套环境，在 valgrind 下统计代码表，停掉环境，并重写同一份文档里的 `code` 部分。它大约
+需要一分钟，需要 valgrind 和基准测试运行器：`cargo install --locked gungraun-runner --version =0.19.4`。

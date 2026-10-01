@@ -12,7 +12,7 @@ use std::borrow::Cow;
 use std::fmt;
 use std::future::{Future, ready};
 
-use rumqttc::v5::mqttbytes::{valid_filter, valid_topic};
+use rumqttc::v5::mqttbytes::{QoS, valid_filter, valid_topic};
 #[cfg(feature = "asyncapi")]
 use ruststream::asyncapi::Bindings;
 use ruststream::{
@@ -24,6 +24,7 @@ use ruststream::{
 use crate::asyncapi;
 use crate::broker::ConnectedMqttBroker;
 use crate::error::MqttError;
+use crate::message::is_mqtt_text;
 use crate::subscriber::MqttSubscriber;
 
 /// Delivery quality of service for a subscription or a publish policy.
@@ -40,11 +41,19 @@ pub enum Qos {
 }
 
 impl Qos {
-    pub(crate) fn to_client(self) -> rumqttc::v5::mqttbytes::QoS {
+    pub(crate) const fn from_client(qos: QoS) -> Self {
+        match qos {
+            QoS::AtMostOnce => Self::AtMostOnce,
+            QoS::AtLeastOnce => Self::AtLeastOnce,
+            QoS::ExactlyOnce => Self::ExactlyOnce,
+        }
+    }
+
+    pub(crate) fn to_client(self) -> QoS {
         match self {
-            Self::AtMostOnce => rumqttc::v5::mqttbytes::QoS::AtMostOnce,
-            Self::AtLeastOnce => rumqttc::v5::mqttbytes::QoS::AtLeastOnce,
-            Self::ExactlyOnce => rumqttc::v5::mqttbytes::QoS::ExactlyOnce,
+            Self::AtMostOnce => QoS::AtMostOnce,
+            Self::AtLeastOnce => QoS::AtLeastOnce,
+            Self::ExactlyOnce => QoS::ExactlyOnce,
         }
     }
 
@@ -137,7 +146,7 @@ impl MqttFilter {
     /// Rejects descriptors that cannot form a subscription, before any I/O. The client's own
     /// send-path error cannot say why a request failed, so validation happens here.
     pub(crate) fn validate(&self) -> Result<(), MqttError> {
-        if !valid_filter(&self.filter) {
+        if !valid_filter(&self.filter) || !is_mqtt_text(&self.filter) {
             return Err(MqttError::Invalid(format!(
                 "'{}' is not a valid MQTT topic filter",
                 self.filter
@@ -238,6 +247,13 @@ impl MqttTopic {
                 self.0.filter
             )));
         }
+        if !is_mqtt_text(&self.0.filter) {
+            return Err(MqttError::Invalid(format!(
+                "{:?} is not an MQTT topic: it carries a control character or a Unicode \
+                 non-character",
+                self.0.filter
+            )));
+        }
         validate_share_group(self.0.shared.as_ref())
     }
 
@@ -334,6 +350,16 @@ mod tests {
     fn invalid_filters_are_rejected_before_io() {
         assert!(MqttFilter::new("a/#/b").validate().is_err());
         assert!(MqttFilter::new("").validate().is_err());
+    }
+
+    /// A server may close the connection on a string with a control character in it, so neither
+    /// descriptor sends one.
+    #[test]
+    fn a_control_character_is_rejected_before_io() {
+        assert!(MqttFilter::new("devices/\n/+").validate().is_err());
+        assert!(MqttTopic::new("devices/a\tb").validate().is_err());
+        assert!(MqttTopic::new("devices/\u{fffe}").validate().is_err());
+        assert!(MqttTopic::new("devices/zürich").validate().is_ok());
     }
 
     #[test]

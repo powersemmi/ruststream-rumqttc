@@ -38,6 +38,7 @@ git clone https://github.com/powersemmi/ruststream-rumqttc.git
 | `just deny` | cargo-deny | `cargo install cargo-deny --locked` |
 | `just typo`, `just zizmor` | uv | the uv documentation |
 | `just bench` | Python 3 | the system package manager |
+| `just bench-code` | valgrind and the benchmark runner | the system package manager, then `cargo install --locked gungraun-runner --version =0.19.4` |
 | the documentation site | Python 3.12 | `pip install -r docs/requirements.txt`, then `properdocs serve` |
 
 ## Checking a change
@@ -55,7 +56,9 @@ whole suite against it with the live tests required, and stops the stand.
 
 `just bench` measures what this crate and the framework's runtime cost over the raw `rumqttc`
 client on the same stand and rewrites `docs/benchmarks/results.json`. It takes minutes and wants
-the machine to itself.
+the machine to itself. `just bench-code` counts what a message costs on the service's thread, in instructions
+and allocations under valgrind, with the service on the same stand, and rewrites the code table of
+the same document; it takes about a minute.
 
 ## Testing against a local core
 

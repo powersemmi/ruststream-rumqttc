@@ -290,7 +290,7 @@ impl Bus {
             message.name(),
             Qos::default().to_client(),
             Bytes::copy_from_slice(message.payload()),
-            to_wire_properties(message),
+            to_wire_properties(message)?,
         );
         self.receive(shared, &packet);
         Ok(())

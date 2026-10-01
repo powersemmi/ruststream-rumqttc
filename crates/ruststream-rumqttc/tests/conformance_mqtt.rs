@@ -4,8 +4,10 @@
 //!
 //! Running them in process is what says the in-process mode obeys the framework's own definition
 //! of a broker rather than a convenient subset of it; running them live is what says it is not
-//! lying. The suites that compare the two transports, and the one that needs several connections
-//! to reach one server, run live only.
+//! lying. The routing suite is in-process only by construction: it drives
+//! [`TestableBroker`](ruststream::testing::TestableBroker) through the in-process transport. The
+//! suites that compare the two transports, and the one that needs several connections to reach
+//! one server, run live only.
 //!
 //! Start one with `just brokers-up` (mosquitto), then:
 //! `MQTT_TEST_URL=mqtt://127.0.0.1:1883 cargo test --all-features`.
@@ -15,7 +17,7 @@
 use std::time::Duration;
 
 use ruststream::Name;
-use ruststream::conformance::harness::InProcessBroker;
+use ruststream::conformance::harness::{self, InProcessBroker};
 use ruststream::conformance::in_process::{self, Refusal};
 use ruststream::conformance::message_shape::{self, OptionCases};
 use ruststream::conformance::{
@@ -61,6 +63,42 @@ fn test_url() -> Option<String> {
             None
         }
     }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_in_process_mode_passes_conformance_suite() {
+    harness::run_suite(broker).await;
+}
+
+/// The ladder the framework defines, walked on the in-process mode a service's tests run on:
+/// synchronous construction, `connect`, a subscription opened through the crate's own descriptor,
+/// publishes it receives and settles from runtimes of their own, `shutdown` - and then the
+/// assertion that gives the suite its teeth here, that a publisher handed out before the shutdown
+/// reports the closed connection instead of quietly accepting messages nobody will ever read.
+#[allow(clippy::redundant_closure, clippy::redundant_closure_for_method_calls)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_in_process_broker_passes_lifecycle() {
+    harness::lifecycle(
+        in_process,
+        |name| MqttTopic::new(name),
+        |connected| connected.publisher(),
+    )
+    .await;
+}
+
+// `make_source` / `make_publisher` must stay closures: their bounds are higher-ranked
+// (`Fn(&str) -> _` / `Fn(&B) -> _`), so a bare method path - which binds one concrete lifetime -
+// would not type-check.
+#[allow(clippy::redundant_closure, clippy::redundant_closure_for_method_calls)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mqtt_broker_passes_lifecycle() {
+    let Some(url) = test_url() else { return };
+    harness::lifecycle(
+        move || live(&url, "lifecycle"),
+        |name| MqttTopic::new(name),
+        |connected| connected.publisher(),
+    )
+    .await;
 }
 
 /// An acknowledgement and a publish handed over right before `shutdown` reach the server. MQTT is

@@ -23,7 +23,7 @@ use crate::asyncapi;
 use crate::broker::{ConnectedMqttBroker, CoreCell, Link};
 use crate::error::MqttError;
 use crate::filter::Qos;
-use crate::message::to_wire_properties;
+use crate::message::{is_mqtt_text, to_wire_properties};
 
 /// Refuses a topic no server takes, before any I/O.
 ///
@@ -36,6 +36,8 @@ pub(crate) fn check_topic(topic: &str) -> Result<(), MqttError> {
         "an MQTT topic must not be empty"
     } else if !valid_topic(topic) {
         "not a valid MQTT topic (wildcards are subscribe-only)"
+    } else if !is_mqtt_text(topic) {
+        "not a valid MQTT topic (it carries a control character or a Unicode non-character)"
     } else {
         return Ok(());
     };
@@ -57,7 +59,7 @@ async fn send(
     core.shared.ensure_open()?;
     check_topic(msg.name())?;
     let topic = msg.name();
-    let (payload, properties) = into_packet(msg);
+    let (payload, properties) = into_packet(msg)?;
     let client = match &core.link {
         Link::Wire(client) => client,
         #[cfg(feature = "testing")]
@@ -86,9 +88,11 @@ async fn send(
 
 /// What a PUBLISH packet carries, taken out of the message in one move: the payload the session
 /// keeps and the MQTT 5 properties the headers map onto.
-fn into_packet(msg: OutgoingMessage<'_, BytesMut>) -> (Bytes, Option<PublishProperties>) {
-    let properties = to_wire_properties(&msg);
-    (msg.into_payload().freeze(), properties)
+fn into_packet(
+    msg: OutgoingMessage<'_, BytesMut>,
+) -> Result<(Bytes, Option<PublishProperties>), MqttError> {
+    let properties = to_wire_properties(&msg)?;
+    Ok((msg.into_payload().freeze(), properties))
 }
 
 /// Publishes messages to MQTT topics through the shared connection.
@@ -337,6 +341,14 @@ mod tests {
     use super::*;
     use crate::broker::MqttBroker;
 
+    /// A topic a server would close the connection on is refused before the packet is queued.
+    #[test]
+    fn a_topic_with_a_control_character_is_refused() {
+        assert!(check_topic("devices/a\nb").is_err());
+        assert!(check_topic("devices/\u{fdd0}").is_err());
+        assert!(check_topic("devices/zürich").is_ok());
+    }
+
     /// The packet is made of the buffer the publish wrote, not of a copy of it: the session keeps
     /// the payload, so this crate hands it over.
     #[test]
@@ -347,7 +359,8 @@ mod tests {
         headers.insert("content-type", "application/json");
 
         let (payload, properties) =
-            into_packet(OutgoingMessage::produced("orders", body).with_headers(headers));
+            into_packet(OutgoingMessage::produced("orders", body).with_headers(headers))
+                .expect("the headers are MQTT text");
 
         assert!(properties.is_some(), "the headers still map to properties");
         assert_eq!(

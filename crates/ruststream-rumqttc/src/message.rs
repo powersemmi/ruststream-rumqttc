@@ -4,12 +4,15 @@
 //! `correlation-id` headers ride the matching first-class MQTT 5 properties, so no envelope
 //! format is invented and non-Rust peers see plain MQTT messages.
 
+use std::str;
+
 use bytes::Bytes;
 use rumqttc::v5::mqttbytes::QoS;
 use rumqttc::v5::mqttbytes::v5::{Publish, PublishProperties};
 use ruststream::{AckError, HeaderMap, IncomingMessage, OutgoingMessage, Str};
 
 use crate::broker::Link;
+use crate::error::MqttError;
 use crate::filter::Qos;
 #[cfg(feature = "testing")]
 use crate::in_process::InFlight;
@@ -197,27 +200,62 @@ fn is_text_media_type(content_type: &str) -> bool {
 /// there. A message whose media type is textual is published as UTF-8 (`1`), every other one as
 /// unspecified bytes (`0`), and the same header fills the MQTT 5 content type property, so a
 /// non-Rust peer reads both from the packet. A message that names no media type declares neither.
+///
+/// Every header but `correlation-id` becomes an MQTT string, so a header whose name or value is
+/// not [MQTT text](is_mqtt_text) refuses the publish: the packet would otherwise reach the server
+/// rewritten, or not at all.
 pub(crate) fn to_wire_properties<Payload>(
     msg: &OutgoingMessage<'_, Payload>,
-) -> Option<PublishProperties> {
+) -> Result<Option<PublishProperties>, MqttError> {
     let mut properties = PublishProperties::default();
     let mut carries_properties = false;
     for (name, value) in msg.headers().iter() {
         carries_properties = true;
-        let text = String::from_utf8_lossy(value).into_owned();
+        // Binary data on the wire, the one property that takes any bytes.
+        if name == "correlation-id" {
+            properties.correlation_data = Some(Bytes::copy_from_slice(value));
+            continue;
+        }
+        let text = match str::from_utf8(value) {
+            Ok(text) if is_mqtt_text(name) && is_mqtt_text(text) => text.to_owned(),
+            _ => {
+                return Err(MqttError::Publish {
+                    topic: msg.name().to_owned(),
+                    reason: format!(
+                        "header {name:?} is not text an MQTT property carries: its name and value \
+                         must be UTF-8 with no control character and no Unicode non-character"
+                    ),
+                });
+            }
+        };
         match name {
             "content-type" => {
                 properties.payload_format_indicator = Some(u8::from(is_text_media_type(&text)));
                 properties.content_type = Some(text);
             }
             "reply-to" => properties.response_topic = Some(text),
-            "correlation-id" => {
-                properties.correlation_data = Some(Bytes::copy_from_slice(value));
-            }
             other => properties.user_properties.push((other.to_owned(), text)),
         }
     }
-    carries_properties.then_some(properties)
+    Ok(carries_properties.then_some(properties))
+}
+
+/// Whether `text` is a string an MQTT packet carries as it is.
+///
+/// MQTT 5 forbids U+0000 in a string and tells senders to keep out the other control characters
+/// and the Unicode non-characters (section 1.5.4). A receiver may close the connection on any of
+/// them, and Mosquitto does, taking every message in flight on that connection with it.
+pub(crate) fn is_mqtt_text(text: &str) -> bool {
+    // Printable ASCII, which almost every header and topic is, answers in one pass over the
+    // bytes; only text beyond it is decoded character by character.
+    text.bytes().all(|byte| matches!(byte, 0x20..=0x7e))
+        || text.chars().all(|c| !c.is_control() && !is_noncharacter(c))
+}
+
+/// The Unicode non-characters: U+FDD0 to U+FDEF, and the last two code points of every plane.
+const fn is_noncharacter(c: char) -> bool {
+    let code = c as u32;
+    (code >= 0xFDD0 && code <= 0xFDEF) || code & 0xFFFE == 0xFFFE
 }
 
 #[cfg(test)]
@@ -234,7 +272,9 @@ mod tests {
         let outgoing: OutgoingMessage<'_> =
             OutgoingMessage::new("orders", b"{}".as_slice()).with_headers(headers);
 
-        let properties = to_wire_properties(&outgoing).expect("properties built");
+        let properties = to_wire_properties(&outgoing)
+            .expect("the headers are MQTT text")
+            .expect("properties built");
         assert_eq!(properties.content_type.as_deref(), Some("application/json"));
         assert_eq!(properties.payload_format_indicator, Some(1));
         assert_eq!(properties.response_topic.as_deref(), Some("replies/1"));
@@ -251,7 +291,11 @@ mod tests {
     #[test]
     fn plain_messages_stay_property_free() {
         let outgoing: OutgoingMessage<'_> = OutgoingMessage::new("orders", b"{}".as_slice());
-        assert!(to_wire_properties(&outgoing).is_none());
+        assert!(
+            to_wire_properties(&outgoing)
+                .expect("no headers to refuse")
+                .is_none()
+        );
     }
 
     /// The indicator follows the media type, and the protocol has only two answers: UTF-8 or
@@ -272,7 +316,9 @@ mod tests {
             headers.insert("content-type", content_type);
             let outgoing: OutgoingMessage<'_> =
                 OutgoingMessage::new("orders", b"{}".as_slice()).with_headers(headers);
-            let properties = to_wire_properties(&outgoing).expect("properties built");
+            let properties = to_wire_properties(&outgoing)
+                .expect("the headers are MQTT text")
+                .expect("properties built");
             assert_eq!(
                 properties.payload_format_indicator,
                 Some(expected),
@@ -291,7 +337,9 @@ mod tests {
         let outgoing: OutgoingMessage<'_> =
             OutgoingMessage::new("orders", b"{}".as_slice()).with_headers(headers);
 
-        let properties = to_wire_properties(&outgoing).expect("properties built");
+        let properties = to_wire_properties(&outgoing)
+            .expect("the headers are MQTT text")
+            .expect("properties built");
         assert_eq!(properties.payload_format_indicator, None);
     }
 
@@ -305,10 +353,63 @@ mod tests {
         let outgoing: OutgoingMessage<'_> =
             OutgoingMessage::new("states", b"online".as_slice()).with_headers(headers);
 
-        let properties = to_wire_properties(&outgoing).expect("properties built");
+        let properties = to_wire_properties(&outgoing)
+            .expect("the headers are MQTT text")
+            .expect("properties built");
         assert_eq!(
             properties.user_properties,
             vec![("mqtt-qos".to_owned(), "2".to_owned())]
+        );
+    }
+
+    /// A header an MQTT string cannot carry refuses the publish rather than reaching the server
+    /// rewritten, or reaching it at all: a server may close the connection on such a packet.
+    #[test]
+    fn a_header_that_is_not_mqtt_text_refuses_the_publish() {
+        for (name, value) in [
+            ("x-binary", &[0x00, 0x80, 0xfe, 0xff][..]),
+            ("x-line", b"one\r\ntwo".as_slice()),
+            ("x-tab", b"a\tb".as_slice()),
+            ("x-nul", b"a\0b".as_slice()),
+            ("x-noncharacter", "a\u{fffe}b".as_bytes()),
+            ("x-noncharacter", "a\u{fdd0}b".as_bytes()),
+            ("content-type", b"text/plain\n".as_slice()),
+            ("reply-to", &[0xc3][..]),
+            ("x-name\n", b"fine".as_slice()),
+        ] {
+            let mut headers = HeaderMap::new();
+            headers.insert(name.to_owned(), Bytes::copy_from_slice(value));
+            let outgoing: OutgoingMessage<'_> =
+                OutgoingMessage::new("orders", b"{}".as_slice()).with_headers(headers);
+            let err = to_wire_properties(&outgoing)
+                .expect_err("a header MQTT cannot carry is refused, never rewritten");
+            assert!(
+                matches!(&err, MqttError::Publish { topic, .. } if topic == "orders"),
+                "{name:?}: {err}"
+            );
+        }
+    }
+
+    /// The correlation data is binary on the wire, so any bytes ride it unchanged; and text MQTT
+    /// carries, non-ASCII included, is accepted as it is.
+    #[test]
+    fn binary_correlation_data_and_unicode_text_are_carried() {
+        let mut headers = HeaderMap::new();
+        headers.insert("correlation-id", Bytes::from_static(&[0x00, 0x80, 0xff]));
+        headers.insert("x-city", "Zürich 東京");
+        let outgoing: OutgoingMessage<'_> =
+            OutgoingMessage::new("orders", b"{}".as_slice()).with_headers(headers);
+
+        let properties = to_wire_properties(&outgoing)
+            .expect("the headers are MQTT text")
+            .expect("properties built");
+        assert_eq!(
+            properties.correlation_data.as_deref(),
+            Some([0x00, 0x80, 0xff].as_slice())
+        );
+        assert_eq!(
+            properties.user_properties,
+            vec![("x-city".to_owned(), "Zürich 東京".to_owned())]
         );
     }
 }

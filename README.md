@@ -31,15 +31,20 @@ the framework; this crate is the transport.
   reconnects with backoff and resubscribes when the session is gone.
 - **QoS-aware acknowledgement** for QoS 1 and 2; QoS 0 reports that it has none.
 - **Shared subscriptions** for competing consumers.
+- **Overlapping filters on one connection,** each receiving a message once (MQTT 5 subscription
+  identifiers); the same filter opened twice is one wire subscription.
 - **Topics and filters:** `MqttTopic` for a topic, `MqttFilter` for the `+` and `#` wildcards.
 - **Retry caps and dead-letter topics** declared where the handler is mounted.
 - **Batches** assembled on the client.
 - **Headers as user properties,** with `content-type`, `reply-to` and `correlation-id` as the
   native MQTT 5 properties.
-- **Sessions, wills and retained messages,** QoS and retain per message, and TLS with client
-  certificates.
+- **Byte payloads without a codec:** `#[derive(Serialized)]` out, `#[derive(Deserialized)]` in.
+- **Sessions, wills and retained messages,** QoS and retain per message
+  (`publisher.message(&state).retain(true).publish()`), and TLS with client certificates.
 - **AsyncAPI** with the specification's `mqtt` binding, behind the `asyncapi` feature.
-- **Tests without a server:** handlers run against an in-process MQTT broker.
+- **Tests run the production app** (feature `testing`): `TestApp::start(app())` connects
+  `MqttBroker` in process, with no server; `TestApp::start_live(app())` runs the same test
+  against a real broker.
 
 ## Install
 
@@ -110,6 +115,7 @@ fn app() -> impl App {
 ## Test it
 
 `TestApp` runs the service's own app with `MqttBroker` in process, with no server.
+`TestApp::start_live(app())` runs the same test against a real broker.
 
 ```rust
 use ruststream::testing::TestApp;
@@ -131,6 +137,7 @@ tb.broker::<MqttBroker>()
     .with(&Alert {
         device: "dev42".to_owned(),
     });
+tb.shutdown().await?;
 ```
 
 ## Documentation
@@ -145,6 +152,12 @@ The MSRV is **1.88**, edition 2024.
 ## Contributing
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md).
+
+```bash
+just check          # fmt, clippy, feature checks
+just test           # in-process tests, no server
+just test-brokers   # live integration + conformance against mosquitto
+```
 
 ## License
 

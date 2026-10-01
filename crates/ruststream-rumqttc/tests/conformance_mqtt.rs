@@ -1,19 +1,48 @@
-//! Conformance: every suite this broker's capabilities justify, run twice where it can be - once
-//! against the in-process transport and once against a real server (gated behind `MQTT_TEST_URL`).
+//! Conformance: every suite this broker's capabilities justify, run twice over the same production
+//! broker - once connected in process and once against a real server (gated behind
+//! `MQTT_TEST_URL`).
 //!
-//! Running them in process is what says the stand-in obeys the framework's own definition of a
-//! broker rather than a convenient subset of it; running them live is what says the stand-in is
-//! not lying. The routing suite is in-process only by construction: it drives
-//! [`TestableBroker`](ruststream::testing::TestableBroker), which no server implements.
+//! Running them in process is what says the in-process mode obeys the framework's own definition
+//! of a broker rather than a convenient subset of it; running them live is what says it is not
+//! lying. The routing suite is in-process only by construction: it drives
+//! [`TestableBroker`](ruststream::testing::TestableBroker) through the in-process transport. The
+//! suites that compare the two transports, and the one that needs several connections to reach
+//! one server, run live only.
 //!
 //! Start one with `just brokers-up` (mosquitto), then:
 //! `MQTT_TEST_URL=mqtt://127.0.0.1:1883 cargo test --all-features`.
 
 #![cfg(feature = "testing")]
 
-use ruststream::conformance::{capabilities, harness};
-use ruststream_rumqttc::testing::MqttTestBroker;
-use ruststream_rumqttc::{MqttBroker, MqttTopic};
+use std::time::Duration;
+
+use ruststream::Name;
+use ruststream::conformance::harness::{self, InProcessBroker};
+use ruststream::conformance::in_process::{self, Refusal};
+use ruststream::conformance::message_shape::{self, OptionCases};
+use ruststream::conformance::{
+    capabilities, helpers::unique_subject, lifecycle, retry, settlement,
+};
+use ruststream::testing::Backlog;
+use ruststream_rumqttc::{
+    ConnectedMqttBroker, MqttBroker, MqttMessage, MqttPublish, MqttPublishOptions, MqttTopic, Qos,
+};
+
+/// The production broker a service builds; the in-process passes dial nothing.
+fn broker() -> MqttBroker {
+    MqttBroker::new("mqtt://localhost:1883", "conformance")
+}
+
+/// The production broker, connected in process by the suites that take any broker.
+fn in_process() -> InProcessBroker<MqttBroker> {
+    InProcessBroker::new(broker())
+}
+
+/// A broker on the stand at `url` with a client id no other connection of the run uses, so two
+/// connections a suite holds at once do not take each other's session over.
+fn live(url: &str, suite: &str) -> MqttBroker {
+    MqttBroker::new(url, unique_subject(suite))
+}
 
 /// The live broker URL, or `None` when there is no stand to run against.
 ///
@@ -37,20 +66,20 @@ fn test_url() -> Option<String> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn mqtt_test_broker_passes_conformance_suite() {
-    harness::run_suite(MqttTestBroker::new).await;
+async fn the_in_process_mode_passes_conformance_suite() {
+    harness::run_suite(broker).await;
 }
 
-/// The ladder the framework defines, walked on the transport a service's tests actually run on:
+/// The ladder the framework defines, walked on the in-process mode a service's tests run on:
 /// synchronous construction, `connect`, a subscription opened through the crate's own descriptor,
-/// a publish it receives and settles, `shutdown` - and then the assertion that gives the suite its
-/// teeth here, that a publisher handed out before the shutdown reports the closed connection
-/// instead of quietly accepting messages nobody will ever read.
+/// publishes it receives and settles from runtimes of their own, `shutdown` - and then the
+/// assertion that gives the suite its teeth here, that a publisher handed out before the shutdown
+/// reports the closed connection instead of quietly accepting messages nobody will ever read.
 #[allow(clippy::redundant_closure, clippy::redundant_closure_for_method_calls)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_in_process_broker_passes_lifecycle() {
     harness::lifecycle(
-        MqttTestBroker::new,
+        in_process,
         |name| MqttTopic::new(name),
         |connected| connected.publisher(),
     )
@@ -65,22 +94,45 @@ async fn the_in_process_broker_passes_lifecycle() {
 async fn mqtt_broker_passes_lifecycle() {
     let Some(url) = test_url() else { return };
     harness::lifecycle(
-        || MqttBroker::new(url.clone(), format!("lifecycle-{}", std::process::id())),
+        move || live(&url, "lifecycle"),
         |name| MqttTopic::new(name),
         |connected| connected.publisher(),
     )
     .await;
 }
 
+/// An acknowledgement and a publish handed over right before `shutdown` reach the server. MQTT is
+/// publish/subscribe, so the observer is a subscription open on another connection. Live only:
+/// each broker connected in process is a server of its own, and the check needs two connections
+/// to reach one.
+#[allow(clippy::redundant_closure, clippy::redundant_closure_for_method_calls)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mqtt_broker_flushes_on_shutdown() {
+    let Some(url) = test_url() else { return };
+    lifecycle::shutdown_flushes(
+        || live(&url, "flush"),
+        |name| MqttTopic::new(name),
+        |connected| connected.publisher(),
+        Backlog::Missed,
+    )
+    .await;
+}
+
 /// What a descriptor that addresses its own copies promises: a publish to the address it reports
 /// reaches the subscription that reported it. `MqttTopic` reports the topic, share group and all,
-/// and this is what holds it to that.
+/// and a bare name reports itself, so both are held to it.
 #[allow(clippy::redundant_closure, clippy::redundant_closure_for_method_calls)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_in_process_broker_passes_the_redelivery_address_suite() {
-    harness::redelivery_address(
-        MqttTestBroker::new,
+    retry::redelivery_address(
+        in_process,
         |name| MqttTopic::new(name),
+        |connected| connected.publisher(),
+    )
+    .await;
+    retry::redelivery_address(
+        in_process,
+        |name| Name::new(name.to_owned()),
         |connected| connected.publisher(),
     )
     .await;
@@ -91,10 +143,109 @@ async fn the_in_process_broker_passes_the_redelivery_address_suite() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn mqtt_broker_passes_the_redelivery_address_suite() {
     let Some(url) = test_url() else { return };
-    harness::redelivery_address(
-        || MqttBroker::new(url.clone(), format!("redelivery-{}", std::process::id())),
+    retry::redelivery_address(
+        || live(&url, "redelivery"),
         |name| MqttTopic::new(name),
         |connected| connected.publisher(),
+    )
+    .await;
+    retry::redelivery_address(
+        || live(&url, "redelivery-name"),
+        |name| Name::new(name.to_owned()),
+        |connected| connected.publisher(),
+    )
+    .await;
+}
+
+/// What each settlement answers on the server, held to its meaning there, and the same answers
+/// from the in-process transport. MQTT has no negative acknowledgement, so the requeue answers
+/// `Unsupported` on both.
+#[allow(clippy::redundant_closure, clippy::redundant_closure_for_method_calls)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mqtt_broker_settles_like_the_in_process_transport() {
+    let Some(url) = test_url() else { return };
+    settlement::matches_in_process(
+        || live(&url, "settlement"),
+        |name| MqttTopic::new(name),
+        |connected| connected.publisher(),
+        Duration::ZERO,
+    )
+    .await;
+}
+
+/// A message published before a subscription opens reaches it on neither transport, as the
+/// in-process mode declares.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mqtt_broker_keeps_the_backlog_the_in_process_transport_declares() {
+    let Some(url) = test_url() else { return };
+    in_process::backlog_matches_server(|| live(&url, "backlog"), ConnectedMqttBroker::publisher)
+        .await;
+}
+
+/// What the server refuses, the in-process transport refuses too: a publish to a wildcard, which
+/// the protocol forbids in a topic name, and a topic descriptor naming one.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mqtt_broker_refuses_what_the_in_process_transport_refuses() {
+    let Some(url) = test_url() else { return };
+    in_process::refuses_like_the_server(
+        || live(&url, "refusals"),
+        ConnectedMqttBroker::publisher,
+        [
+            Refusal::Publish {
+                name: "conformance/+/refused".to_owned(),
+            },
+            Refusal::Subscription {
+                source: MqttTopic::new("conformance/#"),
+            },
+        ],
+    )
+    .await;
+}
+
+/// What a publish may override of its policy, and what a delivery then shows. The policy sends
+/// at `ExactlyOnce`, which the client would not pick by itself, and the subscription takes every
+/// level, so the delivery's quality of service is the one the publish carried. MQTT honours every
+/// level, so nothing is refused.
+fn option_cases() -> OptionCases<MqttPublishOptions, Qos> {
+    OptionCases::new(Qos::ExactlyOnce)
+        .overrides(
+            MqttPublishOptions::default().qos(Qos::AtMostOnce),
+            Qos::AtMostOnce,
+        )
+        .overrides(
+            MqttPublishOptions::default().qos(Qos::AtLeastOnce),
+            Qos::AtLeastOnce,
+        )
+        // A retain flag left as the policy has it keeps the policy's quality of service.
+        .overrides(
+            MqttPublishOptions::default().retain(false),
+            Qos::ExactlyOnce,
+        )
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_in_process_broker_resolves_publish_options() {
+    message_shape::publish_options(
+        in_process,
+        &unique_subject("conformance.options"),
+        |name| MqttTopic::new(name).qos(Qos::ExactlyOnce),
+        MqttPublish::default().qos(Qos::ExactlyOnce),
+        option_cases(),
+        MqttMessage::qos,
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mqtt_broker_resolves_publish_options() {
+    let Some(url) = test_url() else { return };
+    message_shape::publish_options(
+        || live(&url, "options"),
+        &unique_subject("conformance.options"),
+        |name| MqttTopic::new(name).qos(Qos::ExactlyOnce),
+        MqttPublish::default().qos(Qos::ExactlyOnce),
+        option_cases(),
+        MqttMessage::qos,
     )
     .await;
 }
@@ -106,7 +257,7 @@ async fn mqtt_broker_passes_the_redelivery_address_suite() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_in_process_broker_passes_the_batch_suite() {
     capabilities::batches(
-        MqttTestBroker::new,
+        in_process,
         |name| MqttTopic::new(name),
         |connected| connected.publisher(),
     )
@@ -120,7 +271,7 @@ async fn the_in_process_broker_passes_the_batch_suite() {
 async fn mqtt_broker_passes_the_batch_suite() {
     let Some(url) = test_url() else { return };
     capabilities::batches(
-        || MqttBroker::new(url.clone(), format!("batches-{}", std::process::id())),
+        || live(&url, "batches"),
         |name| MqttTopic::new(name),
         |connected| connected.publisher(),
     )

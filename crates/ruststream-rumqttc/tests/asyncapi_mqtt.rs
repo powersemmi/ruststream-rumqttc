@@ -10,9 +10,10 @@
 use std::time::Duration;
 
 use ruststream::asyncapi::build_spec;
-use ruststream::conformance::harness;
+use ruststream::conformance::{harness, message_shape};
 use ruststream::runtime::{Names, Outgoing, PublishContext, PublishTransform};
 use ruststream_rumqttc::prelude::*;
+use ruststream_rumqttc::{ConnectedMqttBroker, MqttPublish};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -242,5 +243,26 @@ fn the_document_carries_no_credentials() {
         &broker(),
         &MqttFilter::new("devices/+/telemetry").shared("workers"),
         "hunter2",
+    );
+}
+
+/// The same scan over what a publish policy contributes: a reply or an `Out` slot bound on it is
+/// described through its bindings, and none of them may carry the password of the broker it
+/// publishes through.
+#[test]
+fn a_publish_policy_carries_no_credentials() {
+    message_shape::publishes_without_credentials::<ConnectedMqttBroker, _>(
+        &MqttPublish::default().qos(Qos::ExactlyOnce).retain(true),
+        "hunter2",
+    );
+}
+
+/// A URL with a user and a password in it describes only its host and port. The broker takes one
+/// address, so it is built from the first of the three the check offers.
+#[test]
+fn a_server_address_is_described_without_its_userinfo() {
+    message_shape::describes_addresses_without_credentials(
+        |addrs| MqttBroker::new(addrs[0], "telemetry-svc"),
+        "mqtt",
     );
 }

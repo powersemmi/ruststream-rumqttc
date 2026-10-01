@@ -574,7 +574,7 @@ async fn qos0_reports_ack_unsupported() {
 /// The two negative answers, against a server: asking for redelivery is refused because the
 /// protocol cannot express it, and declining redelivery acknowledges, dropping being the only
 /// terminal outcome MQTT offers. This is the behaviour a handler's `retry()` and `drop()` settle
-/// through, and the stand-in twin of it is in `stand_in_mqtt.rs`.
+/// through, and the in-process twin of it is in `in_process_mqtt.rs`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn nack_reports_unsupported_and_dropping_acknowledges() {
     let Some(url) = test_url() else { return };
@@ -733,7 +733,7 @@ async fn a_publish_maps_its_headers_onto_the_packets_own_properties() {
         "unspecified bytes is what the protocol says about a binary media type"
     );
     assert_eq!(properties.response_topic, None);
-    assert!(properties.user_properties.is_empty());
+    assert_eq!(properties.user_properties, Vec::new());
 
     connected
         .publisher()

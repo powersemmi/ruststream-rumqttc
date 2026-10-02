@@ -12,7 +12,7 @@ use std::borrow::Cow;
 use std::fmt;
 use std::future::{Future, ready};
 
-use rumqttc::v5::mqttbytes::{valid_filter, valid_topic};
+use rumqttc::v5::mqttbytes::{QoS, valid_filter, valid_topic};
 #[cfg(feature = "asyncapi")]
 use ruststream::asyncapi::Bindings;
 use ruststream::{
@@ -24,9 +24,8 @@ use ruststream::{
 use crate::asyncapi;
 use crate::broker::ConnectedMqttBroker;
 use crate::error::MqttError;
+use crate::message::is_mqtt_text;
 use crate::subscriber::MqttSubscriber;
-#[cfg(feature = "testing")]
-use crate::testing::{ConnectedMqttTestBroker, MqttTestSubscriber};
 
 /// Delivery quality of service for a subscription or a publish policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -42,11 +41,19 @@ pub enum Qos {
 }
 
 impl Qos {
-    pub(crate) fn to_client(self) -> rumqttc::v5::mqttbytes::QoS {
+    pub(crate) const fn from_client(qos: QoS) -> Self {
+        match qos {
+            QoS::AtMostOnce => Self::AtMostOnce,
+            QoS::AtLeastOnce => Self::AtLeastOnce,
+            QoS::ExactlyOnce => Self::ExactlyOnce,
+        }
+    }
+
+    pub(crate) fn to_client(self) -> QoS {
         match self {
-            Self::AtMostOnce => rumqttc::v5::mqttbytes::QoS::AtMostOnce,
-            Self::AtLeastOnce => rumqttc::v5::mqttbytes::QoS::AtLeastOnce,
-            Self::ExactlyOnce => rumqttc::v5::mqttbytes::QoS::ExactlyOnce,
+            Self::AtMostOnce => QoS::AtMostOnce,
+            Self::AtLeastOnce => QoS::AtLeastOnce,
+            Self::ExactlyOnce => QoS::ExactlyOnce,
         }
     }
 
@@ -128,15 +135,6 @@ impl MqttFilter {
         self.qos
     }
 
-    /// Consumes the descriptor into what a subscription registry needs of it: the filter to match
-    /// on, the wire filter that names its share group, and the quality of service its deliveries
-    /// are settled under.
-    #[cfg(feature = "testing")]
-    pub(crate) fn into_parts(self) -> (String, Option<String>, Qos) {
-        let group = self.shared.as_ref().map(|_| self.wire_filter());
-        (self.filter, group, self.qos)
-    }
-
     /// The filter as subscribed on the wire (`$share/<group>/<filter>` when shared).
     pub(crate) fn wire_filter(&self) -> String {
         self.shared.as_ref().map_or_else(
@@ -148,7 +146,7 @@ impl MqttFilter {
     /// Rejects descriptors that cannot form a subscription, before any I/O. The client's own
     /// send-path error cannot say why a request failed, so validation happens here.
     pub(crate) fn validate(&self) -> Result<(), MqttError> {
-        if !valid_filter(&self.filter) {
+        if !valid_filter(&self.filter) || !is_mqtt_text(&self.filter) {
             return Err(MqttError::Invalid(format!(
                 "'{}' is not a valid MQTT topic filter",
                 self.filter
@@ -249,6 +247,13 @@ impl MqttTopic {
                 self.0.filter
             )));
         }
+        if !is_mqtt_text(&self.0.filter) {
+            return Err(MqttError::Invalid(format!(
+                "{:?} is not an MQTT topic: it carries a control character or a Unicode \
+                 non-character",
+                self.0.filter
+            )));
+        }
         validate_share_group(self.0.shared.as_ref())
     }
 
@@ -337,89 +342,6 @@ impl SubscriptionSource<ConnectedMqttBroker> for MqttFilter {
     }
 }
 
-/// The same descriptors open the subscription on the in-process broker, so what a service
-/// declares for production is what the harness mounts: no second descriptor type, and no name
-/// rewritten at the mount site.
-///
-/// Every part of the descriptor that decides what a handler sees is honoured there: the filter
-/// selects the same topics, [`shared`](MqttFilter::shared) makes the subscription a competing
-/// consumer rather than another copy, and [`qos`](MqttFilter::qos) decides whether a delivery can
-/// be settled at all - [`Qos::AtMostOnce`] reports
-/// [`AckError::Unsupported`](ruststream::AckError::Unsupported) in process exactly as it does on
-/// the wire. What is left is the protocol itself: the handshake behind an acknowledged `QoS`, the
-/// retained message, the session that redelivers. Those need a server, and the live suite is where
-/// they are checked.
-#[cfg(feature = "testing")]
-impl SubscriptionSource<ConnectedMqttTestBroker> for MqttTopic {
-    type Subscriber = MqttTestSubscriber;
-    type Copies = AddressedCopies;
-
-    fn name(&self) -> &str {
-        self.topic()
-    }
-
-    async fn subscribe(
-        self,
-        connected: &ConnectedMqttTestBroker,
-    ) -> Result<MqttTestSubscriber, MqttError> {
-        connected.subscribe_topic(self).await
-    }
-
-    /// The quality of service this subscription receives at, which is the consumer's own setting
-    /// and belongs to the operation rather than the channel.
-    #[cfg(feature = "asyncapi")]
-    fn operation_bindings(&self) -> Bindings {
-        asyncapi::receive_operation(self.qos_value())
-    }
-
-    /// The MQTT 5 properties every delivery on this subscription is mapped through.
-    #[cfg(feature = "asyncapi")]
-    fn message_bindings(&self) -> Bindings {
-        asyncapi::message()
-    }
-}
-
-/// The same answer as against a server, so a registration starts on both brokers or on neither.
-#[cfg(feature = "testing")]
-impl RedeliveryAddressed<ConnectedMqttTestBroker> for MqttTopic {
-    fn redelivery_address(
-        &self,
-        _connected: &ConnectedMqttTestBroker,
-    ) -> impl Future<Output = Result<RedeliveryAddress, MqttError>> + Send {
-        ready(self.address())
-    }
-}
-
-#[cfg(feature = "testing")]
-impl SubscriptionSource<ConnectedMqttTestBroker> for MqttFilter {
-    type Subscriber = MqttTestSubscriber;
-    type Copies = NamedCopies;
-
-    fn name(&self) -> &str {
-        self.filter()
-    }
-
-    async fn subscribe(
-        self,
-        connected: &ConnectedMqttTestBroker,
-    ) -> Result<MqttTestSubscriber, MqttError> {
-        connected.subscribe_filter(self).await
-    }
-
-    /// The quality of service this subscription receives at, which is the consumer's own setting
-    /// and belongs to the operation rather than the channel.
-    #[cfg(feature = "asyncapi")]
-    fn operation_bindings(&self) -> Bindings {
-        asyncapi::receive_operation(self.qos_value())
-    }
-
-    /// The MQTT 5 properties every delivery on this subscription is mapped through.
-    #[cfg(feature = "asyncapi")]
-    fn message_bindings(&self) -> Bindings {
-        asyncapi::message()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -428,6 +350,16 @@ mod tests {
     fn invalid_filters_are_rejected_before_io() {
         assert!(MqttFilter::new("a/#/b").validate().is_err());
         assert!(MqttFilter::new("").validate().is_err());
+    }
+
+    /// A server may close the connection on a string with a control character in it, so neither
+    /// descriptor sends one.
+    #[test]
+    fn a_control_character_is_rejected_before_io() {
+        assert!(MqttFilter::new("devices/\n/+").validate().is_err());
+        assert!(MqttTopic::new("devices/a\tb").validate().is_err());
+        assert!(MqttTopic::new("devices/\u{fffe}").validate().is_err());
+        assert!(MqttTopic::new("devices/zürich").validate().is_ok());
     }
 
     #[test]

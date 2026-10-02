@@ -1,5 +1,12 @@
 //! [`MqttPublisher`], its [`MqttPublish`] policy, and the per-message settings.
 
+// Without the `testing` feature a link has one variant, so a `match` on it has a single arm; the
+// match stays so that the in-process arm has its place when the feature is on.
+#![cfg_attr(
+    not(feature = "testing"),
+    allow(clippy::infallible_destructuring_match)
+)]
+
 use std::fmt;
 use std::future::{Future, ready};
 
@@ -13,12 +20,32 @@ use ruststream::{BytesMut, OutgoingMessage, PairError, PublishPolicy, Publisher,
 
 #[cfg(feature = "asyncapi")]
 use crate::asyncapi;
-use crate::broker::{ConnectedMqttBroker, CoreCell};
+use crate::broker::{ConnectedMqttBroker, CoreCell, Link};
 use crate::error::MqttError;
 use crate::filter::Qos;
-use crate::message::to_wire_properties;
-#[cfg(feature = "testing")]
-use crate::testing::{ConnectedMqttTestBroker, MqttTestPublisher};
+use crate::message::{is_mqtt_text, to_wire_properties};
+
+/// Refuses a topic no server takes, before any I/O.
+///
+/// The client's send-path error cannot say why a request failed, so the topic is validated here; a
+/// remaining failure unambiguously means the connection is gone. The client passes an empty topic
+/// through, and a server answers that packet by closing the session, which would take every other
+/// message in flight with it.
+pub(crate) fn check_topic(topic: &str) -> Result<(), MqttError> {
+    let reason = if topic.is_empty() {
+        "an MQTT topic must not be empty"
+    } else if !valid_topic(topic) {
+        "not a valid MQTT topic (wildcards are subscribe-only)"
+    } else if !is_mqtt_text(topic) {
+        "not a valid MQTT topic (it carries a control character or a Unicode non-character)"
+    } else {
+        return Ok(());
+    };
+    Err(MqttError::Publish {
+        topic: topic.to_owned(),
+        reason: reason.to_owned(),
+    })
+}
 
 /// The single send path: every publishing form resolves to a `QoS` and a retain flag, and the
 /// wire work happens here once.
@@ -30,24 +57,25 @@ async fn send(
 ) -> Result<(), MqttError> {
     let core = cell.get().ok_or(MqttError::NotConnected)?;
     core.shared.ensure_open()?;
-    // The client's send-path error cannot say why a request failed, so the topic is
-    // validated here; a remaining failure unambiguously means the connection is gone.
-    if !valid_topic(msg.name()) {
-        return Err(MqttError::Publish {
-            topic: msg.name().to_owned(),
-            reason: "not a valid MQTT topic (wildcards are subscribe-only)".to_owned(),
-        });
-    }
+    check_topic(msg.name())?;
     let topic = msg.name();
-    let (payload, properties) = into_packet(msg);
+    let (payload, properties) = into_packet(msg)?;
+    let client = match &core.link {
+        Link::Wire(client) => client,
+        #[cfg(feature = "testing")]
+        Link::InProcess(bus) => {
+            bus.publish(&core.shared, topic, qos, retain, payload, properties);
+            return Ok(());
+        }
+    };
     let outcome = match properties {
         Some(properties) => {
-            core.client
+            client
                 .publish_bytes_with_properties(topic, qos.to_client(), retain, payload, properties)
                 .await
         }
         None => {
-            core.client
+            client
                 .publish_bytes(topic, qos.to_client(), retain, payload)
                 .await
         }
@@ -60,9 +88,11 @@ async fn send(
 
 /// What a PUBLISH packet carries, taken out of the message in one move: the payload the session
 /// keeps and the MQTT 5 properties the headers map onto.
-fn into_packet(msg: OutgoingMessage<'_, BytesMut>) -> (Bytes, Option<PublishProperties>) {
-    let properties = to_wire_properties(&msg);
-    (msg.into_payload().freeze(), properties)
+fn into_packet(
+    msg: OutgoingMessage<'_, BytesMut>,
+) -> Result<(Bytes, Option<PublishProperties>), MqttError> {
+    let properties = to_wire_properties(&msg)?;
+    Ok((msg.into_payload().freeze(), properties))
 }
 
 /// Publishes messages to MQTT topics through the shared connection.
@@ -265,18 +295,6 @@ impl MqttPublish {
     pub(crate) fn into_publisher(self, cell: CoreCell) -> MqttPublisher {
         MqttPublisher::new(cell, self.qos, self.retain)
     }
-
-    /// The quality of service this policy publishes at.
-    #[cfg(feature = "testing")]
-    pub(crate) const fn qos_value(self) -> Qos {
-        self.qos
-    }
-
-    /// Whether this policy publishes retained.
-    #[cfg(feature = "testing")]
-    pub(crate) const fn retain_value(self) -> bool {
-        self.retain
-    }
 }
 
 impl PublishPolicy<ConnectedMqttBroker> for MqttPublish {
@@ -315,55 +333,6 @@ impl PublishPolicy<ConnectedMqttBroker> for MqttPublish {
     }
 }
 
-/// The same policy pairs against the in-process broker, so a routes file mounts on both brokers as
-/// written - the destination, the codec and the slot it is attached to are the mount site's, and
-/// none of them changes with the transport underneath.
-///
-/// The quality of service survives the pairing, because it is what says whether a subscriber can
-/// settle the delivery at all: publish at [`Qos::AtMostOnce`] in process and the handler meets the
-/// same [`AckError::Unsupported`](ruststream::AckError::Unsupported) a server would have produced.
-/// The retain flag stops here - nothing in process keeps a last message per topic - and neither
-/// argument is recorded as a header, because on the wire the publisher consumes them, so a
-/// delivery here carries exactly what a subscriber would see. A test on this transport therefore
-/// says what was published, where, and whether it could be acknowledged; that it was retained, or
-/// that the acknowledgement completed a protocol handshake, is the live suite's to check.
-#[cfg(feature = "testing")]
-impl PublishPolicy<ConnectedMqttTestBroker> for MqttPublish {
-    type Live = MqttTestPublisher;
-
-    fn pair(
-        self,
-        connected: &ConnectedMqttTestBroker,
-    ) -> impl Future<Output = Result<Self::Live, PairError>> {
-        ready(Ok(connected.publisher_with(self)))
-    }
-
-    /// What every packet this policy sends carries: the quality of service and the retain flag,
-    /// which the `mqtt` binding puts on the operation.
-    #[cfg(feature = "asyncapi")]
-    fn operation_bindings(&self, _channel: &str) -> Bindings {
-        asyncapi::send_operation(self.qos, self.retain)
-    }
-
-    /// The MQTT 5 properties every message this policy sends is mapped through.
-    ///
-    /// The destination the mount site resolved is not read here, nor on the operation: the `mqtt`
-    /// binding has no field that names one. The Response Topic property is the requester's to
-    /// set, so a message a service sends describes none, and where a reply goes is the
-    /// operation's `reply` object.
-    #[cfg(feature = "asyncapi")]
-    fn message_bindings(&self, _channel: &str) -> Bindings {
-        asyncapi::publish_message()
-    }
-
-    /// The crate answers a request through the Response Topic property, which arrives as the
-    /// `reply-to` header, so that is where a client reads the address of its answer.
-    #[cfg(feature = "asyncapi")]
-    fn reply_address_location(&self) -> Option<&'static str> {
-        Some(asyncapi::REPLY_ADDRESS_LOCATION)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use ruststream::runtime::PublishExt;
@@ -371,6 +340,14 @@ mod tests {
 
     use super::*;
     use crate::broker::MqttBroker;
+
+    /// A topic a server would close the connection on is refused before the packet is queued.
+    #[test]
+    fn a_topic_with_a_control_character_is_refused() {
+        assert!(check_topic("devices/a\nb").is_err());
+        assert!(check_topic("devices/\u{fdd0}").is_err());
+        assert!(check_topic("devices/zürich").is_ok());
+    }
 
     /// The packet is made of the buffer the publish wrote, not of a copy of it: the session keeps
     /// the payload, so this crate hands it over.
@@ -382,7 +359,8 @@ mod tests {
         headers.insert("content-type", "application/json");
 
         let (payload, properties) =
-            into_packet(OutgoingMessage::produced("orders", body).with_headers(headers));
+            into_packet(OutgoingMessage::produced("orders", body).with_headers(headers))
+                .expect("the headers are MQTT text");
 
         assert!(properties.is_some(), "the headers still map to properties");
         assert_eq!(

@@ -28,7 +28,7 @@ struct Confirmation {
     id: u64,
 }
 
-#[subscriber(MqttTopic::new("bench/orders").qos(Qos::AtLeastOnce), publish)]
+#[subscriber(MqttTopic::new("bench/orders").qos(Qos::AtLeastOnce), reply)]
 async fn confirm(order: &Order, ctx: &mut Context<'_, (), Latch>) -> Confirmation {
     ctx.state().arrived();
     Confirmation {

@@ -163,7 +163,7 @@ pub(crate) type CoreCell = Arc<OnceCell<Core>>;
 ///             .credentials("user", "pass")
 ///             .keep_alive(Duration::from_secs(30))
 ///             .clean_start(false)
-///             .session_expiry(Duration::from_secs(3600)),
+///             .session_expiry(Duration::from_hours(1)),
 ///         |b| {
 ///             b.include(confirm);
 ///         },

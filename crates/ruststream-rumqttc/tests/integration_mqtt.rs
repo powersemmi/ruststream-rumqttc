@@ -494,7 +494,7 @@ async fn a_persistent_session_replays_what_arrived_while_the_subscriber_was_away
 
     let first = MqttBroker::new(url.clone(), client_id.clone())
         .clean_start(false)
-        .session_expiry(Duration::from_secs(300))
+        .session_expiry(Duration::from_mins(5))
         .connect()
         .await
         .expect("the first connection is accepted");
@@ -521,7 +521,7 @@ async fn a_persistent_session_replays_what_arrived_while_the_subscriber_was_away
 
     let resumed = MqttBroker::new(url.clone(), client_id)
         .clean_start(false)
-        .session_expiry(Duration::from_secs(300))
+        .session_expiry(Duration::from_mins(5))
         .connect()
         .await
         .expect("the session resumes");
@@ -769,7 +769,7 @@ async fn a_delivery_returns_on_resume_until_it_is_acknowledged() {
     let resume = async |url: String, client_id: String| {
         MqttBroker::new(url, client_id)
             .clean_start(false)
-            .session_expiry(Duration::from_secs(300))
+            .session_expiry(Duration::from_mins(5))
             .connect()
             .await
             .expect("the session resumes")

@@ -66,7 +66,7 @@ struct Pong {
     id: u64,
 }
 
-#[subscriber("live/reply/requests", publish("live/reply/answers"))]
+#[subscriber("live/reply/requests", reply("live/reply/answers"))]
 async fn answer_ping(ping: &Ping) -> Pong {
     Pong { id: ping.id }
 }

@@ -339,7 +339,7 @@ struct Pong {
 /// A responder in the shape a service writes it: the subscription is the crate's descriptor and
 /// the attribute names where the answer goes, so the body returns the reply instead of publishing
 /// it by hand.
-#[subscriber(MqttFilter::new("devices/+/ping").qos(Qos::AtLeastOnce), publish("devices/dev42/pong"))]
+#[subscriber(MqttFilter::new("devices/+/ping").qos(Qos::AtLeastOnce), reply("devices/dev42/pong"))]
 async fn answer_ping(ping: &Telemetry) -> Pong {
     Pong {
         device: ping.device.clone(),
@@ -395,7 +395,7 @@ struct Ack {
     id: u64,
 }
 
-#[subscriber("devices/dev42/commands", publish)]
+#[subscriber("devices/dev42/commands", reply)]
 async fn acknowledge(command: &Command) -> Ack {
     Ack { id: command.id }
 }
@@ -407,7 +407,7 @@ struct Receipt {
     id: u64,
 }
 
-#[subscriber("devices/dev42/audited", publish("devices/dev42/receipts"))]
+#[subscriber("devices/dev42/audited", reply("devices/dev42/receipts"))]
 async fn issue_receipt(command: &Command) -> Receipt {
     Receipt { id: command.id }
 }

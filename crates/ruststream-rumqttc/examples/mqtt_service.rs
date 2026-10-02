@@ -28,7 +28,7 @@ fn app() -> impl App {
         MqttBroker::new("mqtt://localhost:1883", "telemetry-svc")
             .keep_alive(Duration::from_secs(30))
             .clean_start(false)
-            .session_expiry(Duration::from_secs(3600)),
+            .session_expiry(Duration::from_hours(1)),
         |b| {
             // A filter matches many topics and names none of them, so the mount site says where
             // a deferred retry copy goes. This topic matches the filter, so a copy comes back to

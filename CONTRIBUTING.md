@@ -26,9 +26,9 @@ git clone https://github.com/powersemmi/ruststream-rumqttc.git
 ## Environment
 
 - **Rust** through rustup. `rust-toolchain.toml` selects stable with rustfmt and clippy. The
-  minimum supported version is 1.88, the `rust-version` in `Cargo.toml`:
-  `rustup toolchain install 1.88` builds against it with
-  `cargo +1.88 check --workspace --all-features`.
+  minimum supported version is 1.95, the `rust-version` in `Cargo.toml`:
+  `rustup toolchain install 1.95` builds against it with
+  `cargo +1.95 check --workspace --all-features`.
 - **just**, which runs every recipe below.
 - **Docker** with Compose, for the mosquitto stand the live suite and the benchmarks run against, and **openssl**, which generates the certificate chain of its TLS listener.
 - Per task:

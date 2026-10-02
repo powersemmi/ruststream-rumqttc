@@ -360,7 +360,7 @@ where
 ///     hot: bool,
 /// }
 ///
-/// #[subscriber(MqttFilter::new("devices/+/telemetry"), publish)]
+/// #[subscriber(MqttFilter::new("devices/+/telemetry"), reply)]
 /// async fn track(telemetry: &Telemetry) -> DeviceState {
 ///     DeviceState { device: telemetry.device.clone(), hot: telemetry.temperature > 30.0 }
 /// }

@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">
+    <url>
+        <loc>https://powersemmi.github.io/ruststream-rumqttc/0.7/</loc>
+        <lastmod>2026-10-02</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="en" href="https://powersemmi.github.io/ruststream-rumqttc/0.7/"/>
+        <xhtml:link rel="alternate" hreflang="ru" href="https://powersemmi.github.io/ruststream-rumqttc/0.7ru/"/>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://powersemmi.github.io/ruststream-rumqttc/0.7zh/"/>
+    </url>
+    <url>
+        <loc>https://powersemmi.github.io/ruststream-rumqttc/0.7/benchmarks/</loc>
+        <lastmod>2026-10-02</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="en" href="https://powersemmi.github.io/ruststream-rumqttc/0.7/benchmarks/"/>
+        <xhtml:link rel="alternate" hreflang="ru" href="https://powersemmi.github.io/ruststream-rumqttc/0.7ru/benchmarks/"/>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://powersemmi.github.io/ruststream-rumqttc/0.7zh/benchmarks/"/>
+    </url>
+    <url>
+        <loc>https://powersemmi.github.io/ruststream-rumqttc/0.7/ru/</loc>
+        <lastmod>2026-10-02</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="ru" href="https://powersemmi.github.io/ruststream-rumqttc/0.7/ru/"/>
+        <xhtml:link rel="alternate" hreflang="en" href="https://powersemmi.github.io/ruststream-rumqttc/0.7"/>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://powersemmi.github.io/ruststream-rumqttc/0.7zh/"/>
+    </url>
+    <url>
+        <loc>https://powersemmi.github.io/ruststream-rumqttc/0.7/ru/benchmarks/</loc>
+        <lastmod>2026-10-02</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="ru" href="https://powersemmi.github.io/ruststream-rumqttc/0.7/ru/benchmarks/"/>
+        <xhtml:link rel="alternate" hreflang="en" href="https://powersemmi.github.io/ruststream-rumqttc/0.7benchmarks/"/>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://powersemmi.github.io/ruststream-rumqttc/0.7zh/benchmarks/"/>
+    </url>
+    <url>
+        <loc>https://powersemmi.github.io/ruststream-rumqttc/0.7/zh/</loc>
+        <lastmod>2026-10-02</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://powersemmi.github.io/ruststream-rumqttc/0.7/zh/"/>
+        <xhtml:link rel="alternate" hreflang="en" href="https://powersemmi.github.io/ruststream-rumqttc/0.7"/>
+        <xhtml:link rel="alternate" hreflang="ru" href="https://powersemmi.github.io/ruststream-rumqttc/0.7ru/"/>
+    </url>
+    <url>
+        <loc>https://powersemmi.github.io/ruststream-rumqttc/0.7/zh/benchmarks/</loc>
+        <lastmod>2026-10-02</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://powersemmi.github.io/ruststream-rumqttc/0.7/zh/benchmarks/"/>
+        <xhtml:link rel="alternate" hreflang="en" href="https://powersemmi.github.io/ruststream-rumqttc/0.7benchmarks/"/>
+        <xhtml:link rel="alternate" hreflang="ru" href="https://powersemmi.github.io/ruststream-rumqttc/0.7ru/benchmarks/"/>
+    </url>
+</urlset>

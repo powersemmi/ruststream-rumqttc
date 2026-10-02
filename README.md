@@ -98,7 +98,7 @@ fn app() -> impl App {
         MqttBroker::new("mqtt://localhost:1883", "telemetry-svc")
             .keep_alive(Duration::from_secs(30))
             .clean_start(false)
-            .session_expiry(Duration::from_secs(3600)),
+            .session_expiry(Duration::from_hours(1)),
         |b| {
             b.include(handle)
                 .out(DefaultSlot, Publish::default().qos(Qos::AtLeastOnce))

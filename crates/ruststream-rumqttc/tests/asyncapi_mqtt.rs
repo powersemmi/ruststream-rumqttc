@@ -127,7 +127,7 @@ fn broker() -> MqttBroker {
         .credentials("alice", "hunter2")
         .keep_alive(Duration::from_secs(30))
         .clean_start(false)
-        .session_expiry(Duration::from_secs(3600))
+        .session_expiry(Duration::from_hours(1))
         .last_will(
             "devices/svc/status",
             b"offline".to_vec(),

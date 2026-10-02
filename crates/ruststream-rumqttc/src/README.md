@@ -55,7 +55,7 @@ fn app() -> impl App {
         MqttBroker::new("mqtt://localhost:1883", "telemetry-svc")
             .keep_alive(Duration::from_secs(30))
             .clean_start(false)
-            .session_expiry(Duration::from_secs(3600)),
+            .session_expiry(Duration::from_hours(1)),
         |b| {
             // A filter names no topic a publisher can use, so the mount site says where a
             // deferred retry copy goes.

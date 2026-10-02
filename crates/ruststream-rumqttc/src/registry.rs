@@ -428,7 +428,7 @@ mod tests {
             |_| MqttMessage::new(topic.to_owned(), publish, None),
             &mut dead,
         );
-        assert!(dead.is_empty(), "every member is alive");
+        assert_eq!(dead, Vec::<u64>::new(), "every member is alive");
         unmatched
     }
 
@@ -649,7 +649,12 @@ mod tests {
 
         assert_eq!(registry.leave(first.member), None, "a member remains");
         assert_eq!(registry.leave(second.member), Some("a/b".to_owned()));
-        assert!(registry.wires.is_empty());
+        let filters: Vec<&str> = registry
+            .wires
+            .iter()
+            .map(|wire| wire.filter.as_str())
+            .collect();
+        assert_eq!(filters, Vec::<&str>::new());
     }
 
     #[test]

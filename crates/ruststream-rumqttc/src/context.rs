@@ -17,11 +17,35 @@ use crate::message::MqttMessage;
 /// # Examples
 ///
 /// ```
-/// use ruststream_rumqttc::{DeliveryTopic, MqttContext};
-/// use ruststream::Field;
+/// # mod demo {
+/// use ruststream_rumqttc::prelude::*;
+/// use serde::Deserialize;
 ///
-/// let cx = MqttContext::new("devices/dev42/telemetry");
-/// assert_eq!(DeliveryTopic.get(&cx), "devices/dev42/telemetry");
+/// #[derive(Deserialize)]
+/// struct Telemetry {
+///     temperature: f64,
+/// }
+///
+/// #[subscriber(MqttFilter::new("devices/+/telemetry"))]
+/// async fn record(telemetry: &Telemetry, ctx: &mut Context<'_, MqttContext>) -> HandlerOutcome {
+///     let device = ctx.context(DeliveryTopic).split('/').nth(1).unwrap_or_default();
+///     println!("{device}: {}", telemetry.temperature);
+///     HandlerOutcome::ack()
+/// }
+///
+/// #[ruststream::app]
+/// fn app() -> impl App {
+///     RustStream::new(AppInfo::new("telemetry", "0.1.0")).with_broker(
+///         MqttBroker::new("mqtt://localhost:1883", "telemetry-svc"),
+///         |b| {
+///             b.include(record)
+///                 .out_retry(Publish::default())
+///                 .to("devices/retry/telemetry");
+///         },
+///     )
+/// }
+/// # }
+/// # fn main() {}
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -54,11 +78,79 @@ impl MqttContext {
 /// # Examples
 ///
 /// ```
-/// use ruststream::ContextField;
-/// use ruststream_rumqttc::{DeliveryTopic, MqttContext};
+/// # #[cfg(feature = "testing")]
+/// # mod demo {
+/// use std::error::Error;
 ///
-/// let cx = MqttContext::new("devices/dev42/telemetry");
-/// assert_eq!(DeliveryTopic.read(&cx), "devices/dev42/telemetry");
+/// use ruststream::testing::TestApp;
+/// use ruststream_rumqttc::prelude::*;
+/// use serde::{Deserialize, Serialize};
+///
+/// #[derive(Deserialize, Serialize, Outgoing)]
+/// struct Telemetry {
+///     temperature: f64,
+/// }
+///
+/// #[derive(Debug, PartialEq, Deserialize, Serialize, Outgoing)]
+/// #[outgoing(name = "alerts")]
+/// struct Alert {
+///     topic: String,
+/// }
+///
+/// #[subscriber(MqttFilter::new("devices/+/telemetry"))]
+/// async fn watch(
+///     telemetry: &Telemetry,
+///     Ctx(topic): Ctx<DeliveryTopic>,
+///     Out(alerts): Out<impl Publisher>,
+/// ) -> HandlerOutcome {
+///     if telemetry.temperature <= 30.0 {
+///         return HandlerOutcome::ack();
+///     }
+///     if alerts.message(&Alert { topic }).publish().await.is_err() {
+///         return HandlerOutcome::retry();
+///     }
+///     HandlerOutcome::ack()
+/// }
+///
+/// pub fn app() -> impl App {
+///     RustStream::new(AppInfo::new("telemetry", "0.1.0")).with_broker(
+///         MqttBroker::new("mqtt://localhost:1883", "telemetry-svc"),
+///         |b| {
+///             b.include(watch)
+///                 .out(DefaultSlot, Publish::default())
+///                 .out_retry(Publish::default())
+///                 .to("devices/retry/telemetry")
+///                 .build();
+///         },
+///     )
+/// }
+///
+/// pub async fn an_alert_names_the_topic_not_the_filter() -> Result<(), Box<dyn Error>> {
+///     let tb = TestApp::start(app()).await?;
+///
+///     tb.broker::<MqttBroker>()
+///         .message(&Telemetry { temperature: 31.5 })
+///         .to("devices/dev42/telemetry")
+///         .publish()
+///         .await?;
+///
+///     tb.broker::<MqttBroker>()
+///         .published::<Alert>("alerts")
+///         .assert_called_once()
+///         .with(&Alert { topic: "devices/dev42/telemetry".to_owned() });
+///     tb.shutdown().await?;
+///     Ok(())
+/// }
+/// # }
+/// # #[cfg(feature = "testing")]
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// #     tokio::runtime::Builder::new_multi_thread()
+/// #         .enable_all()
+/// #         .build()?
+/// #         .block_on(demo::an_alert_names_the_topic_not_the_filter())
+/// # }
+/// # #[cfg(not(feature = "testing"))]
+/// # fn main() {}
 /// ```
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct DeliveryTopic;

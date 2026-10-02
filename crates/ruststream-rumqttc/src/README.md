@@ -256,7 +256,7 @@ as one.
 
 [`MqttPublish`], re-exported by the prelude as `Publish`, is the policy that constructs the
 publisher, and it declares the two arguments a PUBLISH packet carries: a quality of service and
-the retain flag. It is also this broker's default policy, so a `#[subscriber(.., publish)]`
+the retain flag. It is also this broker's default policy, so a `#[subscriber(.., reply)]`
 handler mounted without a policy of its own sends through it, and a reply goes to the topic its own
 type declares. A mount site that does name a policy names one per position: `.out_reply(policy)`
 for what the handler returns, `.out(marker, policy)` for a slot the body holds, `.out_retry(policy)`
@@ -409,7 +409,7 @@ struct DeviceState {
     hot: bool,
 }
 
-#[subscriber(MqttFilter::new("devices/+/telemetry"), publish)]
+#[subscriber(MqttFilter::new("devices/+/telemetry"), reply)]
 async fn track(telemetry: &Telemetry) -> DeviceState {
     DeviceState { device: telemetry.device.clone(), hot: telemetry.temperature > 30.0 }
 }

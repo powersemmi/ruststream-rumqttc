@@ -65,7 +65,7 @@ async fn collect(
 
 /// A responder whose answer goes to the topic the request named, which is the pattern the reply
 /// address expression describes.
-#[subscriber(MqttTopic::new("devices/dev42/ping"), publish("devices/dev42/pong"))]
+#[subscriber(MqttTopic::new("devices/dev42/ping"), reply("devices/dev42/pong"))]
 async fn answer(telemetry: &Telemetry) -> Pong {
     Pong {
         device: telemetry.device.clone(),
@@ -74,7 +74,7 @@ async fn answer(telemetry: &Telemetry) -> Pong {
 
 /// A responder whose answer goes where the mount site names, which is the reply channel the
 /// document reports an address for.
-#[subscriber(MqttTopic::new("devices/dev42/config"), publish("devices/dev42/ack"))]
+#[subscriber(MqttTopic::new("devices/dev42/config"), reply("devices/dev42/ack"))]
 async fn confirm(telemetry: &Telemetry) -> Ack {
     Ack {
         device: telemetry.device.clone(),

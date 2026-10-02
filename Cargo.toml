@@ -5,8 +5,8 @@ members = ["crates/ruststream-rumqttc", "crates/ruststream-rumqttc-bench"]
 [workspace.package]
 version = "0.7.0"
 edition = "2024"
-# The floor tracks the core line: ruststream 0.7 requires 1.88, so a lower one cannot resolve it.
-rust-version = "1.88"
+# The floor tracks the core line: ruststream 0.7 requires 1.95, so a lower one cannot resolve it.
+rust-version = "1.95"
 license = "Apache-2.0"
 repository = "https://github.com/powersemmi/ruststream-rumqttc"
 authors = ["RustStream contributors"]

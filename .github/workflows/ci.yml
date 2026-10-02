@@ -110,7 +110,7 @@ jobs:
       # build job; keep it in step with `rust-version` in the workspace manifest.
       - name: Install the extra toolchains
         if: "!cancelled() && env.RUST_CHANGED == 'true'"
-        run: rustup toolchain install --profile minimal 1.88 nightly
+        run: rustup toolchain install --profile minimal 1.95 nightly
 
       - name: Cache cargo
         if: "!cancelled() && env.RUST_CHANGED == 'true'"
@@ -168,7 +168,7 @@ jobs:
         id: minimal-test
         if: "!cancelled() && steps.minimal-pin.outcome == 'success'"
         env:
-          RUSTUP_TOOLCHAIN: "1.88"
+          RUSTUP_TOOLCHAIN: "1.95"
         run: |
           cargo check --locked --workspace --exclude ruststream-rumqttc-bench --all-targets \
             --all-features
@@ -196,7 +196,7 @@ jobs:
       - name: Install beta and the floor
         run: |
           rustup toolchain install --profile minimal --component clippy beta
-          rustup toolchain install --profile minimal 1.88
+          rustup toolchain install --profile minimal 1.95
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
@@ -265,25 +265,25 @@ jobs:
           RUSTUP_TOOLCHAIN: beta
         run: cargo test --locked --workspace --all-features --no-fail-fast
 
-      - name: cargo check (no default features, 1.88)
+      - name: cargo check (no default features, 1.95)
         if: "!cancelled() && steps.stable.outcome == 'success'"
         env:
-          RUSTUP_TOOLCHAIN: "1.88"
+          RUSTUP_TOOLCHAIN: "1.95"
         run: cargo check --locked --workspace --no-default-features
 
-      - name: cargo check (all features, 1.88)
+      - name: cargo check (all features, 1.95)
         if: "!cancelled() && steps.stable.outcome == 'success'"
         env:
-          RUSTUP_TOOLCHAIN: "1.88"
+          RUSTUP_TOOLCHAIN: "1.95"
         run: |
           cargo check --locked --workspace --exclude ruststream-rumqttc-bench --all-targets \
             --all-features
           cargo check --locked -p ruststream-rumqttc-bench --all-targets
 
-      - name: cargo test (1.88)
+      - name: cargo test (1.95)
         if: "!cancelled() && steps.stable.outcome == 'success'"
         env:
-          RUSTUP_TOOLCHAIN: "1.88"
+          RUSTUP_TOOLCHAIN: "1.95"
         run: cargo test --locked --workspace --all-features --no-fail-fast
 
   broker-integration:

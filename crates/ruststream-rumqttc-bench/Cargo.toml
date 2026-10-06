@@ -25,8 +25,9 @@ testing = ["ruststream-rumqttc/testing"]
 # enables `ruststream/testing`, and a benchmark inside that package would be built against it.
 [dev-dependencies]
 ruststream-rumqttc.workspace = true
-# The code-cost benchmarks: callgrind and DHAT through the runner the core pins.
-gungraun = "=0.19.4"
+# The code-cost benchmarks: callgrind and DHAT through gungraun, at the release the core pins.
+# `just bench-code` installs the runner of the same release.
+gungraun = "=0.20.0"
 # What a service needs of the core, and nothing else: the handler macro and the codec the runtime
 # decodes with. The two hand-written loops call the traits, which are ungated.
 ruststream = { workspace = true, features = ["macros", "json"] }

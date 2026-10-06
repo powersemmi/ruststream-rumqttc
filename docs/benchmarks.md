@@ -131,5 +131,7 @@ just bench-code
 ```
 
 The recipe starts the same stand, counts the code table under valgrind, stops the stand and rewrites
-the `code` section of the same document. It takes about a minute and needs valgrind and the
-benchmark runner: `cargo install --locked gungraun-runner --version =0.19.4`.
+the `code` section of the same document. It takes about a minute and needs valgrind; the recipe
+installs the benchmark runner itself, at the release `Cargo.lock` pins. A run that breaches a limit
+still goes to the end: it prints the table, then each breach with the old value next to the new one,
+and fails.

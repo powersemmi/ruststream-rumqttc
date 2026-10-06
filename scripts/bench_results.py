@@ -12,12 +12,19 @@ loop of the comparison as its best, median and worst round, and the `code` secti
 
 `--code` reads the other run instead: the summary `cargo bench -- --output-format=json` writes for
 the code-cost benches under `crates/ruststream-rumqttc-bench/benches`, one JSON object per
-benchmark, each a service on the broker of the compose stand.
+benchmark, each a service on the broker of the compose stand, in the summary layout gungraun 0.20
+writes (its version 7).
 It writes the `code` section, one entry per scenario with instructions and allocations per
 message plus what starting the service cost once, by the core's method: every scenario is
 measured over one delivery, over MESSAGES and over twice MESSAGES, the slope between the last two
-is the steady state, and the one-delivery run is the cold start. Either run keeps the section the
-other one wrote.
+is the steady state, and the one-delivery run is the cold start. `--messages` names the count the
+benches were built with, 500 when it is left out. Either run keeps the section the other one
+wrote.
+
+A benchmark that breaches one of its limits fails the run, and in this output format the runner
+says nothing more about it: what went over is recorded in the summary alone. So every breach is
+printed under the table, the value the run was compared against next to the new one, and a
+summary that cannot be converted still prints its breaches before it stops.
 
 A field the machine does not publish is written as `unknown` rather than guessed: memory speed
 comes from the DMI tables, which most systems only let root read.
@@ -26,6 +33,7 @@ comes from the DMI tables, which most systems only let root read.
     python3 scripts/bench_results.py --code target/bench-code.json docs/benchmarks/results.json
 """
 
+import argparse
 import json
 import re
 import subprocess
@@ -138,8 +146,15 @@ def environment(summary: dict) -> dict[str, str]:
     }
 
 
-# Deliveries per measured run of the code-cost benches, their `MESSAGES`.
+# Deliveries per measured run of the code-cost benches, the default of their `MESSAGES`. Every
+# published number is per message, so the totals are divided by it. `just bench-code N` builds the
+# benches with another count and passes the same one here through `--messages`.
 CODE_MESSAGES = 500
+
+# The summary layout the code run is read in. Every summary states its layout in `version`, and a
+# gungraun release that changes the layout changes the number, so a summary of another version stops
+# the conversion with a message naming both rather than with a missing field.
+SUMMARY_VERSION = "7"
 
 # An instruction count below this on a code run means the measured region stopped matching its
 # frame and the run reported the process exit, not that the code got faster. The cold run handles
@@ -157,36 +172,119 @@ CODE_SCENARIOS = [
 
 
 def code_metric(summary: dict, tool: str, name: str) -> int | None:
-    """The new value of one metric, out of the nested summary the runner emits."""
+    """The new value of one metric: the total of one tool's run, as the runner reports it."""
     for profile in summary["profiles"]:
-        metrics = profile["summaries"]["parts"][0]["metrics_summary"].get(tool)
-        if not metrics or name not in metrics:
+        if profile["tool"] != tool:
             continue
-        values = metrics[name]["metrics"]
-        entry = values["Both"][0] if "Both" in values else next(iter(values.values()))
-        return int(entry["Int"])
+        values = profile["data"]["total"]["metrics"].get(name, {}).get("values", {})
+        # A run compared against a baseline carries the old value next to the new one.
+        new = values.get("new")
+        return None if new is None else int(new)
     return None
 
 
-def code_runs(path: Path) -> dict[str, dict]:
-    """Every benchmark in the run, keyed by `file/function/id`."""
-    found = {}
+def code_summaries(path: Path) -> list[dict]:
+    """Every benchmark summary the code run wrote, one per line, in the layout this script reads."""
+    found = []
     for line in path.read_text(encoding="utf-8").splitlines():
         if not line.strip():
             continue
         summary = json.loads(line)
-        key = f"{Path(summary['benchmark_file']).stem}/{summary['function_name']}/{summary['id']}"
-        found[key] = {
-            "instructions": code_metric(summary, "Callgrind", "Ir"),
-            "allocations": code_metric(summary, "Dhat", "TotalBlocks"),
-        }
+        version = summary.get("version")
+        if version != SUMMARY_VERSION:
+            sys.exit(
+                f"the benchmark summary has layout version {version}, and this script reads "
+                f"version {SUMMARY_VERSION}: read the new layout in `code_metric` and `breaches` "
+                "and raise SUMMARY_VERSION"
+            )
+        found.append(summary)
     return found
+
+
+def benchmark(summary: dict) -> str:
+    """The `file/function` a summary belongs to, which is how a scenario names its benchmark."""
+    return f"{Path(summary['benchmark_file']).stem}/{summary['function_name']}"
+
+
+def code_runs(summaries: list[dict]) -> dict[str, dict]:
+    """Every benchmark in the run, keyed by `file/function/id`."""
+    return {
+        f"{benchmark(summary)}/{summary['id']}": {
+            "instructions": code_metric(summary, "Callgrind", "Ir"),
+            "allocations": code_metric(summary, "DHAT", "TotalBlocks"),
+        }
+        for summary in summaries
+    }
+
+
+# The two metrics the table reads, by the names it gives them. A limit on any other metric is
+# reported under the runner's own name for it.
+METRIC_NAMES = {("Callgrind", "Ir"): "instructions", ("Dhat", "TotalBlocks"): "allocations"}
+
+
+def run_name(run: str) -> str:
+    """A benchmark id as the number of deliveries its run handled."""
+    counts = {"first": 1, "base": CODE_MESSAGES, "twice": 2 * CODE_MESSAGES}
+    if run not in counts:
+        return run
+    return "one delivery" if counts[run] == 1 else f"{counts[run]} deliveries"
+
+
+def as_text(value: int | float) -> str:
+    """A metric value as a breach line writes it: a count as it is, a fraction in short form."""
+    return str(value) if isinstance(value, int) else f"{value:g}"
+
+
+def breach(regression: dict, metrics: dict) -> str:
+    """One limit a run went over: the metric, the value it was compared against, the new one.
+
+    A limit in percent holds the run to the one it is compared against, and the regression
+    carries both values. A plain number is a ceiling the run is held to on its own, and the value
+    it was compared against is the one the metric records next to the new one, where there is one.
+    """
+    [(kind, detail)] = regression.items()
+    [(tool, name)] = detail["metric"].items()
+    label = METRIC_NAMES.get((tool, name), f"{tool} {name}")
+    if kind == "Soft":
+        return (
+            f"{label} {as_text(detail['old'])} -> {as_text(detail['new'])}, "
+            f"{float(detail['diff_pct']):+.2f}% against a limit of +{float(detail['limit']):g}%"
+        )
+    old = metrics.get(name, {}).get("values", {}).get("old")
+    change = "" if old is None else f"{as_text(old)} -> "
+    return f"{label} {change}{as_text(detail['new'])} against a limit of {as_text(detail['limit'])}"
+
+
+def breaches(summaries: list[dict]) -> list[str]:
+    """Every limit the run breached, one line each, named by its scenario and its run."""
+    names = {key: name for name, key, _ in CODE_SCENARIOS}
+    found = []
+    for summary in summaries:
+        where = f"{names.get(benchmark(summary), benchmark(summary))}, {run_name(summary['id'])}"
+        for profile in summary["profiles"]:
+            total = profile["data"]["total"]
+            for regression in total["regressions"]:
+                found.append(f"{where}: {breach(regression, total['metrics'])}")
+    return found
+
+
+def report_breaches(lines: list[str]) -> None:
+    """The limits the run breached, which is why it fails, each with both values it compared."""
+    if not lines:
+        return
+    print()
+    print("limits breached (totals of one run, old -> new):")
+    for line in lines:
+        print(f"  {line}")
 
 
 def code_total(found: dict, key: str, floor: int) -> dict:
     """One run's totals, checked for the two ways this measurement fails silently."""
     if key not in found:
-        sys.exit(f"benchmark {key} is not in the run: rename it here or in benches/")
+        sys.exit(
+            f"benchmark {key} is not in the run: it failed before it wrote a summary, or it was "
+            "renamed (then rename it here or in benches/)"
+        )
     measured = found[key]
     if measured["instructions"] is None or measured["instructions"] < floor:
         sys.exit(
@@ -201,8 +299,8 @@ def per_message(figure: float) -> float:
     return round(figure, 3) if abs(figure) < 1 else round(figure, 1)
 
 
-def code_section(path: Path) -> list[dict]:
-    found = code_runs(path)
+def code_section(summaries: list[dict]) -> list[dict]:
+    found = code_runs(summaries)
     rows = []
     for name, key, gated in CODE_SCENARIOS:
         base = code_total(found, f"{key}/base", CODE_FLOOR)
@@ -229,20 +327,49 @@ def valgrind() -> str:
     return run("valgrind", "--version").strip().removeprefix("valgrind-") or "unknown"
 
 
+def arguments() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "--code", action="store_true", help="read the code-cost run rather than the paired one"
+    )
+    parser.add_argument(
+        "--messages",
+        type=int,
+        help=f"deliveries per measured run of the code-cost benches (default {CODE_MESSAGES})",
+    )
+    parser.add_argument("source", type=Path, help="the JSON the benchmark run wrote")
+    parser.add_argument("out", type=Path, help="the results document to write")
+    args = parser.parse_args()
+    if args.messages is not None and not args.code:
+        parser.error("--messages names the count of the code-cost run, so it goes with --code")
+    if args.messages is not None and args.messages <= 0:
+        parser.error("--messages must be a positive number of deliveries")
+    return args
+
+
 def main() -> int:
-    args = sys.argv[1:]
-    code = bool(args) and args[0] == "--code"
-    if code:
-        args = args[1:]
-    if len(args) != 2:
-        print(__doc__, file=sys.stderr)
-        return 2
-    source, out = Path(args[0]), Path(args[1])
+    global CODE_MESSAGES
+    args = arguments()
+    code, source, out = args.code, args.source, args.out
+    if args.messages is not None:
+        CODE_MESSAGES = args.messages
     previous = json.loads(out.read_text(encoding="utf-8")) if out.exists() else {}
     if code:
+        summaries = code_summaries(source)
+        breached = breaches(summaries)
+        try:
+            section = code_section(summaries)
+        except SystemExit:
+            # One failure does not hide another: a summary that cannot be converted still shows
+            # what the run breached.
+            report_breaches(breached)
+            sys.stdout.flush()
+            raise
         document = previous
         document["schema"] = 3
-        document["code"] = code_section(source)
+        document["code"] = section
         # The code costs carry their own provenance: the paired numbers beside them may come
         # from another run, on another version, on another day.
         document["code_measured"] = {
@@ -279,6 +406,7 @@ def main() -> int:
                 f"{row['cold']['instructions']} instructions, {row['cold']['allocations']} "
                 "allocations"
             )
+        report_breaches(breached)
     return 0
 
 

@@ -50,7 +50,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 
-use gungraun::{Callgrind, Dhat, DhatMetric, EntryPoint, EventKind, LibraryBenchmarkConfig};
+use gungraun::{Callgrind, Dhat, DhatMetric, EntryPoint, LibraryBenchmarkConfig};
 use rumqttc::v5::mqttbytes::QoS;
 use rumqttc::v5::mqttbytes::v5::Packet;
 use rumqttc::v5::{AsyncClient, Event, MqttOptions};
@@ -79,9 +79,47 @@ pub struct Order {
 /// Deliveries per measured run.
 ///
 /// The longest run, twice this, fits the client's receive maximum of 1000 in-flight messages, so
-/// the broker holds the whole fill for the session without queueing past its own limit.
+/// the broker holds the whole fill for the session without queueing past its own limit. The
+/// default is therefore also the largest count a run takes. `RUSTSTREAM_BENCH_MESSAGES` at build
+/// time sets a smaller one (`just bench-code 250`) for a shorter run. The published document is
+/// measured at the default, the allocation limits follow the count, and
 /// `scripts/bench_results.py` divides by the same count.
-pub const MESSAGES: usize = 500;
+pub const MESSAGES: usize = messages(option_env!("RUSTSTREAM_BENCH_MESSAGES"));
+
+/// The count a run measures when nothing names one, and the most the receive maximum holds.
+const DEFAULT_MESSAGES: usize = 500;
+
+/// The configured count, or the default. A value that is not a number from 1 to the default is a
+/// build error naming the variable: a typo cannot silently measure the default, and a run that
+/// outgrows the receive maximum is refused before it reaches the broker's queue, where a dropped
+/// message would leave the drain waiting for good.
+const fn messages(configured: Option<&str>) -> usize {
+    let Some(text) = configured else {
+        return DEFAULT_MESSAGES;
+    };
+    let bytes = text.as_bytes();
+    let mut count = 0usize;
+    let mut index = 0;
+    while index < bytes.len() {
+        let digit = bytes[index];
+        assert!(
+            digit.is_ascii_digit(),
+            "RUSTSTREAM_BENCH_MESSAGES must be a number of deliveries"
+        );
+        count = count * 10 + (digit - b'0') as usize;
+        assert!(
+            count <= DEFAULT_MESSAGES,
+            "RUSTSTREAM_BENCH_MESSAGES must be at most 500: the longest run, twice the count, has \
+             to fit the client's receive maximum of 1000"
+        );
+        index += 1;
+    }
+    assert!(
+        count > 0,
+        "RUSTSTREAM_BENCH_MESSAGES must be a positive number of deliveries"
+    );
+    count
+}
 
 /// The measurement configuration every scenario shares.
 ///
@@ -89,9 +127,10 @@ pub const MESSAGES: usize = 500;
 /// service and taking the first delivery allocate once; together they are the hard limit a run of
 /// `messages` deliveries is held to, each run its own, so a run fails when the path allocates more
 /// than it does today. Both are floors the code is held to, so a number
-/// that goes down is lowered here in the same change. The instruction limit is relative:
-/// `just bench-code --save-baseline=main` records a baseline and `just bench-code
-/// --baseline=main` compares against it.
+/// that goes down is lowered here in the same change. The instruction limit is relative, and
+/// `just bench-code` sets it only for a run against a named baseline:
+/// `just bench-code --save-baseline=main` records one, and `just bench-code --baseline=main`
+/// fails on two percent more instructions than it.
 pub fn config(steady: u64, cold: u64, messages: usize) -> LibraryBenchmarkConfig {
     config_every(steady, 1, cold, messages)
 }
@@ -101,7 +140,7 @@ pub fn config(steady: u64, cold: u64, messages: usize) -> LibraryBenchmarkConfig
 pub fn config_every(steady: u64, per: u64, cold: u64, messages: usize) -> LibraryBenchmarkConfig {
     let mut config = LibraryBenchmarkConfig::default();
     config
-        .tool(callgrind().soft_limits([(EventKind::Ir, 2f64)]))
+        .tool(callgrind())
         .tool(dhat().hard_limits([(DhatMetric::TotalBlocks, blocks(steady, per, cold, messages))]));
     config
 }

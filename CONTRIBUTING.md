@@ -38,7 +38,7 @@ git clone https://github.com/powersemmi/ruststream-rumqttc.git
 | `just deny` | cargo-deny | `cargo install cargo-deny --locked` |
 | `just typo`, `just zizmor` | uv | the uv documentation |
 | `just bench` | Python 3 | the system package manager |
-| `just bench-code` | valgrind and the benchmark runner | the system package manager, then `cargo install --locked gungraun-runner --version =0.19.4` |
+| `just bench-code` | valgrind | the system package manager; the recipe installs the benchmark runner itself, at the release `Cargo.lock` pins |
 | the documentation site | Python 3.12 | `pip install -r docs/requirements.txt`, then `properdocs serve` |
 
 ## Checking a change
@@ -58,7 +58,10 @@ whole suite against it with the live tests required, and stops the stand.
 client on the same stand and rewrites `docs/benchmarks/results.json`. It takes minutes and wants
 the machine to itself. `just bench-code` counts what a message costs on the service's thread, in instructions
 and allocations under valgrind, with the service on the same stand, and rewrites the code table of
-the same document; it takes about a minute.
+the same document; it takes about a minute. `just bench-code --save-baseline=main` on `main`
+records a baseline, and `just bench-code --baseline=main` on a branch fails on two percent more
+instructions than it. Every run fails on an allocation above a scenario's floor, and a failing run
+prints each breach under the table.
 
 ## Testing against a local core
 

@@ -638,9 +638,9 @@ dependencies = [
 
 [[package]]
 name = "ruststream"
-version = "0.7.0"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e305cbca42b78b29597864f3bdb6732a136035f3792a75b099cea388e5b82e4d"
+checksum = "f0d8fb3aa559104a40a160ea43291047bc19c65451361fd1042e90e3e34c03ed"
 dependencies = [
  "bytes",
  "bytes-utils",
@@ -660,9 +660,9 @@ dependencies = [
 
 [[package]]
 name = "ruststream-macros"
-version = "0.7.0"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "41108b8dfe9660e288827bdd18234ededebb8faa5f554349ff8887151309a90d"
+checksum = "877999d127f0c83b180377ec0b7c214636cb58541c872ca118f9708003edabfc"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -938,9 +938,9 @@ dependencies = [
 
 [[package]]
 name = "tokio"
-version = "1.53.1"
+version = "1.53.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "202caea871b69668250d242070849eb495be178ed697a3e98aebce5bc81a0bed"
+checksum = "e95f91fcc7a621e8b030f6aa23c71fe9838ae2fb4d8118b75602a328f5144044"
 dependencies = [
  "bytes",
  "libc",

@@ -1,0 +1,14 @@
+{
+  "sidebar.components.doc.Overview": {
+    "message": "概览",
+    "description": "The label for the doc item 'Overview' in sidebar 'components', linking to the doc components/index"
+  },
+  "sidebar.architecture.category.Benchmarks": {
+    "message": "基准测试",
+    "description": "The label for category 'Benchmarks' in sidebar 'architecture'"
+  },
+  "sidebar.architecture.doc.Benchmarks": {
+    "message": "基准测试",
+    "description": "The label for the doc item 'Benchmarks' in sidebar 'architecture', linking to the doc architecture/benchmarks/index"
+  }
+}

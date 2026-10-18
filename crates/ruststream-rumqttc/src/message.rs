@@ -9,7 +9,7 @@ use std::str;
 use bytes::Bytes;
 use rumqttc::v5::mqttbytes::QoS;
 use rumqttc::v5::mqttbytes::v5::{Publish, PublishProperties};
-use ruststream::{AckError, HeaderMap, IncomingMessage, OutgoingMessage, Str};
+use ruststream::{AckError, HeaderMap, IncomingMessage, OutgoingMessage, Partitioned, Str};
 
 use crate::broker::Link;
 use crate::error::MqttError;
@@ -22,6 +22,62 @@ use crate::in_process::InFlight;
 const CONTENT_TYPE: Str = Str::from_static("content-type");
 const REPLY_TO: Str = Str::from_static("reply-to");
 const CORRELATION_ID: Str = Str::from_static("correlation-id");
+
+/// The header that carries a message's partition key, which keyed worker lanes
+/// (`workers(n, by_key)`) order by.
+///
+/// MQTT has no partitions, so the key travels as this header, a user property on the wire, and
+/// the publisher sets it. The runtime hashes the value to pick a lane: the messages of one key run
+/// one after another in the order they arrived, and different keys run side by side. A message
+/// without the header takes the next lane in turn and keeps no order with any other.
+///
+/// # Examples
+///
+/// ```
+/// # mod demo {
+/// use ruststream_rumqttc::PARTITION_KEY_HEADER;
+/// use ruststream_rumqttc::prelude::*;
+/// use serde::{Deserialize, Serialize};
+///
+/// #[derive(Deserialize, Serialize, Outgoing)]
+/// #[outgoing(name = "orders/placed")]
+/// struct Order {
+///     id: u64,
+///     tenant: String,
+/// }
+///
+/// /// Eight lanes keyed by tenant: one tenant's orders run in order, different tenants at once.
+/// #[subscriber("orders/placed", workers(8, by_key))]
+/// async fn place(order: &Order) -> HandlerOutcome {
+///     tracing::info!(order.id, tenant = %order.tenant, "order placed");
+///     HandlerOutcome::ack()
+/// }
+///
+/// /// The checkout keys every order it places by its tenant.
+/// #[subscriber("checkout/completed")]
+/// async fn checkout(order: &Order, Out(orders): Out<impl Publisher>) -> HandlerOutcome {
+///     let mut headers = HeaderMap::new();
+///     headers.insert(PARTITION_KEY_HEADER, order.tenant.clone());
+///     if orders.message(order).with_headers(headers).publish().await.is_err() {
+///         return HandlerOutcome::retry();
+///     }
+///     HandlerOutcome::ack()
+/// }
+///
+/// #[ruststream::app]
+/// fn app() -> impl App {
+///     RustStream::new(AppInfo::new("orders", "0.1.0")).with_broker(
+///         MqttBroker::new("mqtt://localhost:1883", "orders-svc"),
+///         |b| {
+///             b.include(place);
+///             b.include(checkout).out(DefaultSlot, Publish::default()).build();
+///         },
+///     )
+/// }
+/// # }
+/// # fn main() {}
+/// ```
+pub const PARTITION_KEY_HEADER: &str = "partition-key";
 
 /// A message delivered by an [`MqttSubscriber`](crate::MqttSubscriber).
 ///
@@ -135,6 +191,12 @@ impl IncomingMessage for MqttMessage {
         &self.headers
     }
 
+    /// The [`PARTITION_KEY_HEADER`] value the publisher set, which keyed worker lanes
+    /// (`workers(n, by_key)`) order by.
+    fn partition_key(&self) -> Option<&[u8]> {
+        self.headers.get(PARTITION_KEY_HEADER)
+    }
+
     async fn ack(self) -> Result<(), AckError> {
         let Some((link, publish)) = self.acker else {
             return Err(AckError::Unsupported);
@@ -150,6 +212,14 @@ impl IncomingMessage for MqttMessage {
         } else {
             self.ack().await
         }
+    }
+}
+
+/// The key a delivery is ordered by. MQTT has no partitions, so the key is the
+/// [`PARTITION_KEY_HEADER`] the publisher set.
+impl Partitioned for MqttMessage {
+    fn partition_key(&self) -> Option<&[u8]> {
+        IncomingMessage::partition_key(self)
     }
 }
 

@@ -109,9 +109,17 @@ The client id is the session's name, so each process of the service needs its ow
 Mosquitto does not queue `QoS` 0 messages for an absent session by default.
 The samples published while the service is down are gone, which is what a live chart wants.
 
+## Order per meter
+
+One subscription hands its deliveries to the handler one at a time, in the order they arrived.
+`workers(n)` runs `n` handlers at once and gives that order up.
+[`workers(n, by_key)`](../components/subscriptions/lanes.md) keeps it per key: the deliveries of one key run one after another, and different keys run side by side.
+The key is the `partition-key` header, [`PARTITION_KEY_HEADER`](api:ruststream_rumqttc::PARTITION_KEY_HEADER), which the meter sets on each report, such as its own id.
+A report without the header takes the next lane in turn.
+
 ## Flow control
 
-[`receive_maximum(100)`](../components/broker/limits.md) tells the server how many `QoS` 1 and 2 deliveries the service takes before it acknowledges one.
+[`receive_maximum(IN_FLIGHT)`](../components/broker/limits.md) tells the server how many `QoS` 1 and 2 deliveries the service takes before it acknowledges one.
 At the limit the server stops sending until a handler settles a delivery.
 The default is 1000.
 An unacknowledged delivery holds its place in that window until the connection ends, so every `retry` without a declared cap takes one place away until the next session.

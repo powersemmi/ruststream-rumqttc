@@ -28,6 +28,7 @@
     "Keep a session across restarts with `MqttBroker::clean_start(false)` and a `session_expiry`, so the server queues what arrives while the service is away (Session page).",
     "Answer a request on its response topic with a reply transform that reads `reply-to` and copies `correlation-id`, declaring `Destination = Names` (Responders page).",
     "Test a service by handing the app `main` runs to `TestApp::start` with the `testing` feature and addressing the broker as `tb.broker::<MqttBroker>()` (Testing page).",
-    "Run the same test body against a running MQTT server with `TestApp::start_live` for a persistent session, the last will and the receive window (Live page)."
+    "Run the same test body against a running MQTT server with `TestApp::start_live` for a persistent session, the last will and the receive window (Live page).",
+    "Keep one key's messages in order with `workers(n, by_key)`; the publisher sets `PARTITION_KEY_HEADER` (`partition-key`) on each message, as a user property (Lanes page)."
   ]
 }

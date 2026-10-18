@@ -114,6 +114,17 @@ required-features = ["testing"]
 test = true
 
 [[example]]
+name = "mqtt_subscriptions_lanes"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "manual_mqtt_subscriptions_lanes"
+path = "examples/manual/mqtt_subscriptions_lanes.rs"
+required-features = ["testing"]
+test = true
+
+[[example]]
 name = "mqtt_subscriptions_overlaps"
 required-features = ["testing"]
 test = true

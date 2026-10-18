@@ -23,7 +23,7 @@ This site holds the guides, one page per component and the architecture of the c
 
 - [Components](https://powersemmi.github.io/ruststream-rumqttc/latest/components/): the parts of the crate an MQTT service uses, one page each
 - [MqttBroker](https://powersemmi.github.io/ruststream-rumqttc/latest/components/broker/): the broker type, its URL and client id, and its lazy connection
-- [Security](https://powersemmi.github.io/ruststream-rumqttc/latest/components/broker/security/): `credentials`, `tls_ca` and `tls_client_auth`
+- [Security](https://powersemmi.github.io/ruststream-rumqttc/latest/components/broker/security/): the login in the URL or `credentials`, `tls_ca` and `tls_client_auth`
 - [Session](https://powersemmi.github.io/ruststream-rumqttc/latest/components/broker/session/): `clean_start(false)` and `session_expiry`, a session the server keeps between connections
 - [last_will](https://powersemmi.github.io/ruststream-rumqttc/latest/components/broker/last-will/): the message the server publishes when the connection ends without a clean disconnect
 - [Limits](https://powersemmi.github.io/ruststream-rumqttc/latest/components/broker/limits/): `max_packet_size` and `receive_maximum`, the packet size cap and the flow-control window
@@ -39,6 +39,7 @@ This site holds the guides, one page per component and the architecture of the c
 - [shared](https://powersemmi.github.io/ruststream-rumqttc/latest/components/subscriptions/shared/): a share group, where the server hands each message to one member
 - [Overlaps](https://powersemmi.github.io/ruststream-rumqttc/latest/components/subscriptions/overlaps/): overlapping filters on one connection, told apart by subscription identifiers
 - [Batches](https://powersemmi.github.io/ruststream-rumqttc/latest/components/subscriptions/batches/): slice handlers over batches the crate assembles on the client
+- [Lanes](https://powersemmi.github.io/ruststream-rumqttc/latest/components/subscriptions/lanes/): `workers(n, by_key)`, keyed by the `partition-key` header the publisher sets, in order per key
 - [Acknowledgement](https://powersemmi.github.io/ruststream-rumqttc/latest/components/settlement/): what an `ack` and a `drop` send at each quality of service
 - [retry](https://powersemmi.github.io/ruststream-rumqttc/latest/components/settlement/retry/): a delivery left unacknowledged until a persistent session resumes
 - [retry_after](https://powersemmi.github.io/ruststream-rumqttc/latest/components/settlement/retry-after/): a copy the runtime publishes after a delay, within the session

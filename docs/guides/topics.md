@@ -46,6 +46,13 @@ A subscription outside the group, or in another group, still gets its own copy.
 The handler never sees the `$share/..` prefix, and it never sees the filter either.
 [`Ctx<DeliveryTopic>`](../components/context/index.md) is the topic this reading arrived on, such as `devices/dev42/telemetry`, so the device's id is in reach.
 
+## Order per device
+
+The server hands each reading of a share group to any member, so the readings of one device may land on different replicas.
+Order by device holds inside one subscription: [`workers(n, by_key)`](../components/subscriptions/lanes.md) runs the readings that share a key one after another, and different keys side by side.
+The key is the `partition-key` header, [`PARTITION_KEY_HEADER`](api:ruststream_rumqttc::PARTITION_KEY_HEADER), which the device sets on each reading, such as its id.
+A subscription whose readings must stay in order per device reads outside a share group.
+
 ## A multi-level wildcard
 
 `trace` logs every message of one device, whatever its kind.

@@ -47,6 +47,13 @@ import TabItem from '@theme/TabItem';
 处理器看不到 `$share/..` 前缀，也看不到过滤器。
 [`Ctx<DeliveryTopic>`](../components/context/index.md) 是这条读数到达时所在的主题，例如 `devices/dev42/telemetry`，所以设备的 id 唾手可得。
 
+## 按设备保持顺序 {/* #order-per-device */}
+
+服务器把共享组的每条读数交给任意一个成员，因此同一设备的读数可能落到不同的副本上。
+按设备的顺序只在一个订阅内部成立：[`workers(n, by_key)`](../components/subscriptions/lanes.md) 让键相同的读数依次执行，不同的键并行执行。
+键是 `partition-key` 头，即 [`PARTITION_KEY_HEADER`](api:ruststream_rumqttc::PARTITION_KEY_HEADER)，设备在每条读数上设置它，例如自己的 id。
+需要按设备保持读数顺序的订阅，应在共享组之外读取。
+
 ## 多层通配符 {/* #a-multi-level-wildcard */}
 
 `trace` 把某一台设备的每条消息记入日志，无论消息属于哪一类。

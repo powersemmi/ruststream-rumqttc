@@ -94,6 +94,7 @@ item's own documentation keeps the detail.
   group takes each message.
 - [Overlaps][c-overlaps]: overlapping filters on one connection, each receiving a message once.
 - [Batches][c-batches]: a slice handler over [`MqttSubscriber`] batches assembled on the client.
+- [Lanes][c-lanes]: `workers(n, by_key)`, one lane per [`PARTITION_KEY_HEADER`] value, in order.
 
 ## Settlement
 
@@ -165,6 +166,7 @@ document. The codecs, the macros and the harness itself are features of the core
 [c-shared]: https://powersemmi.github.io/ruststream-rumqttc/latest/components/subscriptions/shared/
 [c-overlaps]: https://powersemmi.github.io/ruststream-rumqttc/latest/components/subscriptions/overlaps/
 [c-batches]: https://powersemmi.github.io/ruststream-rumqttc/latest/components/subscriptions/batches/
+[c-lanes]: https://powersemmi.github.io/ruststream-rumqttc/latest/components/subscriptions/lanes/
 [c-settlement]: https://powersemmi.github.io/ruststream-rumqttc/latest/components/settlement/
 [c-retry]: https://powersemmi.github.io/ruststream-rumqttc/latest/components/settlement/retry/
 [c-retry-after]: https://powersemmi.github.io/ruststream-rumqttc/latest/components/settlement/retry-after/

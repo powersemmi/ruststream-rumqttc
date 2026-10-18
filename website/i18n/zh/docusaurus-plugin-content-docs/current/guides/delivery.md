@@ -110,9 +110,17 @@ Broker 一直暂存它们，直到它们所属的订阅打开，所以启动时�
 默认情况下，Mosquitto 不会为不在线的会话排队保存 `QoS` 0 消息。
 服务停机期间发布的采样就此消失，这正是实时图表需要的。
 
+## 按电表保持顺序 {/* #order-per-meter */}
+
+一个订阅按到达顺序把投递逐个交给处理器。
+`workers(n)` 同时运行 `n` 个处理器，这个顺序也就不再保证。
+[`workers(n, by_key)`](../components/subscriptions/lanes.md) 按键保持顺序：同一个键的投递依次执行，不同的键并行执行。
+键是 `partition-key` 头，即 [`PARTITION_KEY_HEADER`](api:ruststream_rumqttc::PARTITION_KEY_HEADER)，电表在每份报告上设置它，例如自己的 id。
+没有这个头的报告轮流进入下一个工作分区。
+
 ## 流量控制 {/* #flow-control */}
 
-[`receive_maximum(100)`](../components/broker/limits.md) 告诉服务器，服务在确认一条投递之前最多接收多少个 `QoS` 1 和 2 投递。
+[`receive_maximum(IN_FLIGHT)`](../components/broker/limits.md) 告诉服务器，服务在确认一条投递之前最多接收多少个 `QoS` 1 和 2 投递。
 达到上限后，服务器停止发送，直到某个处理器结算了一条投递。
 默认值是 1000。
 未确认的投递在连接结束之前一直占着窗口中的位置，所以每个没有声明上限的 `retry` 都会占掉一个位置，直到下一个会话。

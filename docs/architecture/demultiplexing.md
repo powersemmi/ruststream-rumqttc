@@ -26,7 +26,7 @@ export const lanes = {
   "pool": ["workers(2)", "the lanes take the deliveries in turn"],
   "lane0": ["Lane 1", "runs its deliveries in order"],
   "lane1": ["Lane 2", "runs its deliveries in order"],
-  "noKey": ["An MQTT delivery carries no key:", "under by_key too, the deliveries rotate over the lanes"],
+  "noKey": ["by_key: one partition-key value, one lane;", "without the header, the next lane in turn"],
   "scale": ["Across processes: a share group", "hands each message to one member"],
   "delivered": "delivered",
   "oneAtATime": "one at a time"
@@ -74,9 +74,10 @@ dropped with a warning past that.
 Without `workers`, one loop runs the handler for each delivery of a subscription in turn. The order
 in which the server sent them is kept, and nothing runs side by side.
 
-`workers(n)` runs `n` lanes, and a lane runs its deliveries in order. An MQTT delivery carries no
-partition key, so the lanes take the deliveries in turn, under `workers(n, by_key)` as well.
-Deliveries of one topic then run side by side on different lanes.
+`workers(n)` runs `n` lanes, and a lane runs its deliveries in order. The lanes take the
+deliveries in turn, so deliveries of one topic run side by side on different lanes. Under
+`workers(n, by_key)` the [`partition-key` header](../components/subscriptions/lanes.md) the publisher set picks the lane: the
+deliveries of one key run in order, and a delivery without the header takes the next lane in turn.
 
 Across processes, a [share group](../components/subscriptions/shared.md) divides the messages: the
 server hands each one to one member. The [Receive Maximum](mqtt/qos.md) bounds how many QoS 1 and

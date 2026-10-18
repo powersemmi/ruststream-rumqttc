@@ -26,7 +26,7 @@ export const lanes = {
   "pool": ["workers(2)", "工作分区轮流接收投递"],
   "lane0": ["工作分区 1", "按顺序运行它的投递"],
   "lane1": ["工作分区 2", "按顺序运行它的投递"],
-  "noKey": ["MQTT 投递不带键：", "即使在 by_key 下，投递也轮流分配到各个工作分区"],
+  "noKey": ["by_key：同一个 partition-key 值走同一个工作分区；", "没有该头的投递轮流进入下一个"],
   "scale": ["跨进程：共享组", "把每条消息交给一个成员"],
   "delivered": "投递",
   "oneAtATime": "一次一个"
@@ -54,7 +54,7 @@ export const lanes = {
 
 不用 `workers` 时，一个循环依次为订阅的每个投递运行处理器。服务器发送它们的顺序得以保持，也没有任何东西并行运行。
 
-`workers(n)` 运行 `n` 个工作分区，每个工作分区按顺序运行自己的投递。MQTT 投递不带分区键，所以即使在 `workers(n, by_key)` 下，工作分区也轮流接收投递。同一主题的投递于是在不同的工作分区上并行运行。
+`workers(n)` 运行 `n` 个工作分区，每个工作分区按顺序运行自己的投递。工作分区轮流接收投递，所以同一主题的投递在不同的工作分区上并行运行。在 `workers(n, by_key)` 下，由发布者设置的 [`partition-key` 头](../components/subscriptions/lanes.md) 选择工作分区：同一个键的投递按顺序运行，没有该头的投递轮流进入下一个工作分区。
 
 跨进程时，由[共享组](../components/subscriptions/shared.md)划分消息：服务器把每条消息交给一个成员。[Receive Maximum](mqtt/qos.md) 限制一个连接在其所有订阅中同时持有的未确认 QoS 1 和 QoS 2 投递数。
 

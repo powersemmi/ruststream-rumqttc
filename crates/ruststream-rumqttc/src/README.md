@@ -600,7 +600,9 @@ Eclipse Mosquitto covers them; `just test-brokers` starts the stand and runs it.
   against that certificate authority and no other store, so a `mqtts://` URL without `tls_ca` is
   refused when the broker connects instead of failing every handshake behind a retry.
 * The session is `clean_start(false)` plus `session_expiry(duration)`; resuming a persistent
-  session is what redelivers unacknowledged messages. `last_will(topic, payload, qos, retain)`
+  session is what redelivers unacknowledged messages. The app's subscriptions stay in the session
+  when the service stops, so the broker queues what is published while the service is away and
+  hands it over on the next start. `last_will(topic, payload, qos, retain)`
   names the message the broker publishes if that session dies unexpectedly. `keep_alive(duration)`
   has a protocol floor of 5 seconds.
 * `max_packet_size(bytes)` defaults to 1 MiB, well above the client's own 10 KiB cap, which kills

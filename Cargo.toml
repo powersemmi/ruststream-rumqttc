@@ -21,7 +21,8 @@ futures = "0.3"
 percent-encoding = "2"
 thiserror = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
-tracing = "0.1"
+# The examples log `String` fields, which the oldest releases do not record; 0.1.36 does.
+tracing = "0.1.36"
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

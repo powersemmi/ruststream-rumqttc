@@ -158,21 +158,11 @@ jobs:
         if: "!cancelled() && env.RUST_CHANGED == 'true'"
         run: cargo +nightly update -Z minimal-versions
 
-      # A too-loose bound in a third-party manifest reached through this crate's own
-      # dependencies; drop it when the crate that declares it moves its floor.
-      #
-      # tracing-attributes 0.1.13 (reached through `tracing`) declares `syn = "1.0"` but calls
-      # `LitInt::base10_parse`, added in 1.0.4.
-      - name: Pin dependencies whose declared bounds are too loose
-        id: minimal-pin
-        if: "!cancelled() && steps.minimal-resolve.outcome == 'success'"
-        run: cargo update -p syn@1.0.0 --precise 1.0.4
-
       # Minimum dependencies on the minimum compiler: the worst case a user can assemble.
       # Resolution above needs nightly, so only this step drops to the floor.
       - name: Build and test against minimal versions
         id: minimal-test
-        if: "!cancelled() && steps.minimal-pin.outcome == 'success'"
+        if: "!cancelled() && steps.minimal-resolve.outcome == 'success'"
         env:
           RUSTUP_TOOLCHAIN: "1.95"
         run: |

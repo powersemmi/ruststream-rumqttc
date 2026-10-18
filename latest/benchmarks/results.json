@@ -1,0 +1,124 @@
+{
+  "schema": 3,
+  "crate": "ruststream-rumqttc",
+  "crate_version": "0.7.0",
+  "core_version": "0.7.0",
+  "measured_at": "2026-10-18",
+  "environment": {
+    "cpu": "AMD Ryzen 9 7900X 12-Core Processor",
+    "architecture": "x86_64",
+    "cpu_frequency": "427-5912 MHz",
+    "cores": "12 physical, 24 logical",
+    "memory": "62.4 GiB",
+    "memory_speed": "unknown",
+    "os": "Linux 7.2.11-x64v3-xanmod1-1",
+    "broker": "eclipse-mosquitto:2 in Docker on localhost",
+    "round_trip": "41.8 microseconds, measured as a QoS 1 publish whose PUBACK the client waits for, averaged over 20,000 exchanges on a connection of its own",
+    "rustc": "1.99.0",
+    "profile": "bench, inheriting release (opt-level = 3, lto = fat, codegen-units = 16, debug = line-tables-only)",
+    "features": "ruststream-rumqttc default (none), ruststream macros,json",
+    "rustflags": "none (the recipe clears RUSTFLAGS, so the numbers are not tied to this CPU)",
+    "load": "9.15 / 10.95 / 9.58 over 1, 5 and 15 minutes when the run ended",
+    "valgrind": "3.25.1"
+  },
+  "scenarios": [
+    {
+      "name": "QoS 0 topic, 512 B JSON",
+      "unit": "msg/s",
+      "messages": 776573,
+      "pairs": 3,
+      "raw": {
+        "best": 154259,
+        "median": 151130,
+        "worst": 122368
+      },
+      "adapter": {
+        "best": 152504,
+        "median": 137593,
+        "worst": 121724
+      },
+      "framework": {
+        "best": 153188,
+        "median": 151410,
+        "worst": 143361
+      },
+      "adapter_overhead_percent": 1.1,
+      "adapter_verdict": "indistinguishable",
+      "overhead_percent": 0.7,
+      "verdict": "indistinguishable",
+      "broker_bound": false
+    },
+    {
+      "name": "QoS 1 topic, 512 B JSON, ack each",
+      "unit": "msg/s",
+      "messages": 727483,
+      "pairs": 3,
+      "raw": {
+        "best": 118899,
+        "median": 118745,
+        "worst": 118024
+      },
+      "adapter": {
+        "best": 117722,
+        "median": 116990,
+        "worst": 113524
+      },
+      "framework": {
+        "best": 118792,
+        "median": 116403,
+        "worst": 89809
+      },
+      "adapter_overhead_percent": 1.0,
+      "adapter_verdict": "indistinguishable",
+      "overhead_percent": 0.1,
+      "verdict": "indistinguishable",
+      "broker_bound": true
+    }
+  ],
+  "code": [
+    {
+      "name": "QoS 1 topic, JSON decode into a small struct, ack each",
+      "messages": 500,
+      "framework": {
+        "instructions": 8769.5,
+        "allocations": 1.2
+      },
+      "cold": {
+        "instructions": 3820572,
+        "allocations": 67
+      },
+      "gated": true
+    },
+    {
+      "name": "QoS 1 topic, reply published through this crate's publisher",
+      "messages": 500,
+      "framework": {
+        "instructions": 17331.2,
+        "allocations": 7.2
+      },
+      "cold": {
+        "instructions": 3828301,
+        "allocations": 74
+      },
+      "gated": true
+    },
+    {
+      "name": "QoS 1 topic, batches of 64 assembled on the client",
+      "messages": 500,
+      "framework": {
+        "instructions": 9087.7,
+        "allocations": 1.2
+      },
+      "cold": {
+        "instructions": 3827348,
+        "allocations": 71
+      },
+      "gated": true
+    }
+  ],
+  "code_measured": {
+    "crate_version": "0.7.0",
+    "core_version": "0.7.0",
+    "measured_at": "2026-10-18"
+  }
+}

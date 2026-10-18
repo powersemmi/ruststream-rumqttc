@@ -15,8 +15,8 @@ The server keeps the last retained message of each topic.
 A subscription that opens later receives it at once, so a dashboard that starts after a device announced its state still reads that state.
 A publisher retains every message with [`Publish::default().retain(true)`](api:ruststream_rumqttc::MqttPublish::retain), and one message with the [`retain` step](./mqtt-publish-steps.md).
 Publishing an empty payload retained removes the message the server kept for that topic.
-A shared subscription receives no retained messages.
-A scope's `after_startup` hook runs once the broker is connected, which is where a service announces its own status.
+A [shared subscription](../subscriptions/shared.md) receives no retained messages.
+A scope's `after_startup` hook runs once the broker is [connected](../broker/startup.md), which is where a service announces its own status.
 A state is bytes on the wire rather than an encoded model, so its type carries its own bytes with `#[derive(Serialized)]`, and no codec runs on them.
 
 ## Example

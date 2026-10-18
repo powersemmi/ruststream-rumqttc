@@ -20,9 +20,9 @@ Then the broker sends a `DISCONNECT` behind everything already queued.
 It waits up to 5 seconds for the connection task to write the queue out, and logs a warning when they run out.
 The server discards the [last will](./last-will.md) of a connection that ends this way.
 
-A publisher taken before the shutdown keeps pointing at the closed connection.
+A [publisher](../publishing/index.md) taken before the shutdown keeps pointing at the closed connection.
 A publish through it returns `MqttError::NotConnected` and never succeeds against the dead connection.
-An acknowledgement after the shutdown is refused too.
+An [acknowledgement](../settlement/index.md) after the shutdown is refused too.
 
 ## Example
 

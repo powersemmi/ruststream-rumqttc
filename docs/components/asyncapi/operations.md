@@ -15,7 +15,7 @@ The operation binding carries `qos`, the level as a number: 0, 1 or 2.
 A receive operation takes it from the descriptor's [`qos`](../subscriptions/qos.md).
 A share group is part of the subscribed filter and adds nothing to the binding.
 
-A send operation comes from an `Out` slot or a [dead-letter topic](../settlement/dead-letters.md).
+A send operation comes from an `Out` [slot](../publishing/index.md) or a [dead-letter topic](../settlement/dead-letters.md).
 It reports both arguments of the PUBLISH packet its [publish policy](../publishing/index.md) declares: `qos` and `retain`.
 A reply has no send operation of its own, so a reply policy adds nothing to the document's operations.
 

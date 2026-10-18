@@ -14,7 +14,7 @@ import TabItem from '@theme/TabItem';
 MQTT holds no message back and counts no deliveries, so the runtime does both.
 It acknowledges the original, waits out the delay and publishes the payload and the headers as they arrived.
 The copy carries [`RETRY_COUNT_HEADER`](api:ruststream::runtime::RETRY_COUNT_HEADER), raised by one on every copy, and the handler reads it like any other header.
-An [`MqttTopic`](api:ruststream_rumqttc::MqttTopic) subscription receives its copies on its own topic; an [`MqttFilter`](api:ruststream_rumqttc::MqttFilter) names where they go with [`out_retry`](./out-retry.md).
+An [`MqttTopic`](../subscriptions/mqtt-topic.md) subscription receives its copies on its own topic; an [`MqttFilter`](../subscriptions/mqtt-filter.md) names where they go with [`out_retry`](./out-retry.md).
 The copy waits in the service's memory, so a process that exits before the delay is over loses it.
 A QoS 0 delivery has no acknowledgement, and its copy is published all the same.
 A copy is an ordinary publish, so every subscription whose filter matches its topic receives it, in this service and in any other.

@@ -345,3 +345,25 @@ name = "manual_mqtt_broker_errors"
 path = "examples/manual/mqtt_broker_errors.rs"
 required-features = ["testing"]
 test = true
+
+[[example]]
+name = "mqtt_testing"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "manual_mqtt_testing"
+path = "examples/manual/mqtt_testing.rs"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "mqtt_testing_live"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "manual_mqtt_testing_live"
+path = "examples/manual/mqtt_testing_live.rs"
+required-features = ["testing"]
+test = true

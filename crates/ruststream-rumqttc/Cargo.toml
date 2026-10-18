@@ -417,3 +417,15 @@ name = "manual_guide_device_state"
 path = "examples/manual/guide/device_state.rs"
 required-features = ["testing"]
 test = true
+
+[[example]]
+name = "guide_publishing"
+path = "examples/guide/publishing.rs"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "manual_guide_publishing"
+path = "examples/manual/guide/publishing.rs"
+required-features = ["testing"]
+test = true

@@ -49,7 +49,7 @@ const CORRELATION_ID: Str = Str::from_static("correlation-id");
 /// /// Eight lanes keyed by tenant: one tenant's orders run in order, different tenants at once.
 /// #[subscriber("orders/placed", workers(8, by_key))]
 /// async fn place(order: &Order) -> HandlerOutcome {
-///     tracing::info!(order.id, order.tenant, "order placed");
+///     tracing::info!(order.id, tenant = %order.tenant, "order placed");
 ///     HandlerOutcome::ack()
 /// }
 ///

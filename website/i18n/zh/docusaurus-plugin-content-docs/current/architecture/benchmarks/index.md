@@ -1,121 +1,39 @@
 ---
 title: 基准测试
-description: "ruststream-rumqttc 在每条消息上的开销：与裸 rumqttc 客户端对比的吞吐量，以及其代码的指令数和内存分配次数。"
+description: "ruststream-rumqttc 在每条消息上的开销：与裸 rumqttc 客户端对照的吞吐量，以及它自身代码的指令数和内存分配次数。"
 ---
 
-# 基准测试 {/* #benchmarks */}
+import {Environment, MovedSections, Results} from '@site/src/components/Benchmarks';
+import {mqtt} from '@site/src/components/Benchmarks/mqtt';
 
-在 `rumqttc` 客户端和你的代码之间，本 crate 在每条消息上都要做事：它打开的订阅、它给出的流、它交
-过来的消息、它送出的确认、它发布的报文。这一页说明这些花了多少，参照物是同样的活在客户端上手写
-一遍。
+export const labels = {"loading": "正在读取结果...", "scenario": "场景", "raw": "裸客户端", "adapter": "Broker crate", "framework": "RustStream", "overhead": "额外开销", "against": "（比客户端 {percent}）", "indistinguishable": "无法区分", "brokerBound": "受 Broker 限制", "measured": "测量于", "details": "这些数字是怎样测得的", "pending": "尚未公布结果：{brokers}。", "instructions": "指令数", "allocations": "内存分配", "cold": "冷启动", "table": "以表格显示数字", "axis": "各循环比裸客户端最佳一轮低多少", "rounds": "各轮，从最佳到最慢", "best": "最佳一轮", "median": "中位一轮", "noise": "轮次的波动范围", "comparison": "与裸客户端对照", "code": "代码的开销", "broker": "Broker", "plugin": "{plugin} 插件", "pluginRaw": "不用插件", "pluginAdapter": "手写的插件", "pluginFramework": "crate 自带的插件", "pluginAxis": "各循环比不用插件的应用最佳一轮低多少", "pluginAgainst": "（比不用插件 {percent}）", "pluginOverhead": "比手写插件", "pluginOverHand": "（比手写插件 {percent}）"};
 
-同一个进程用三个循环跑同一个场景，每个只差一件事：由什么来承载消息。**裸客户端**直接驱动
-`rumqttc`。**本 crate** 是写在基准测试里的循环，驱动 crate 自己的 Broker、订阅、消息和发布者，上
-面没有处理器，也没有运行时。**RustStream 服务**是用户真正会写的那一整套：挂在应用上的
-`#[subscriber]` 处理器，由运行时启动。
+export const machine = {"cpu": "处理器", "architecture": "架构", "cpu_frequency": "频率", "cores": "核心数", "memory": "内存", "memory_speed": "内存速度", "os": "操作系统", "broker": "Broker", "rustc": "编译器", "profile": "构建配置", "features": "特性", "rustflags": "RUSTFLAGS", "round_trip": "往返时间", "valgrind": "Valgrind"};
 
-两个差值回答两个问题。「crate 开销」是它自己的消费者和发布者在所包装的客户端之上的代价，这是本仓
-库要负责的数字。「服务开销」是整套服务对同一个裸客户端的差距，所以两者之间的距离就是运行时压在这
-个 Broker 之上的代价。后者值得按 Broker 分别看：如果各家适配器都很薄，而运行时那一份仍然不一样，
-差别就藏在两者相接的地方。
+# 基准测试
 
-其余一切都保持相同：连接选项、订阅和发布两端的服务质量、确认的位置、解码成同一个类型、载荷字节、
-tokio 运行时和构建。这套流程属于框架本身，写在
-[RustStream 基准测试页](https://powersemmi.github.io/ruststream/latest/zh/benchmarks/#methodology)
-上；这一页公布它在这台机器上得出的结果。
+`ruststream-rumqttc` 在每条消息上的开销：与裸 `rumqttc` 客户端对照的吞吐量，以及它自身代码的指令数和内存分配次数。
 
-`rumqttc` 把事件循环交给调用方来驱动，而这个循环跑在哪里决定了一次投递的代价。本 crate 把它放在
-自己的任务上轮询，再通过通道把投递交给订阅，所以裸客户端那个循环也照这个样子搭。在消费任务内部
-轮询的循环换掉的是并发形态，而不是另一个消费者。
+## 与裸客户端对照 {/* #against-a-raw-client */}
 
-## 数字 {/* #the-numbers */}
+第一张图在真实的 MQTT 服务器上把每个场景用三种方式运行。`裸客户端` 直接驱动 `rumqttc`。`Broker crate` 用一个自己的循环驱动本 crate 的订阅，上面没有运行时。`RustStream` 是用户写的服务：应用里的一个 `#[subscriber]` 处理器。第一项差值是本 crate 比它所封装的客户端多付出的开销，第二项是运行时在其上增加的开销。
 
-三个交错轮次中的最佳值，括号里是中位的一轮。越大越好。
+每个循环画成一条横条，从最佳一轮延伸到最慢的一轮，圆点标出最佳一轮，缺口标出中位一轮。坐标轴的零点是裸客户端的最佳一轮，圆点在零点右侧表示更慢。空心圆点表示该循环与裸客户端的差异小于各轮的波动范围。图表下方的表格列出最佳一轮，括号里是中位数。
 
-<div id="benchmark-results" data-benchmark-results="../../benchmarks/results.json" data-benchmark-labels='{"loading": "正在加载公布的结果...", "scenario": "场景", "raw": "裸客户端", "adapter": "本 crate", "framework": "RustStream 服务", "adapterOverhead": "crate 开销", "overhead": "服务开销", "indistinguishable": "无法区分", "brokerBound": "受 Broker 限制", "machine": "机器", "os": "操作系统", "broker": "Broker", "roundTrip": "往返时延", "build": "构建", "versions": "版本", "measured": "测量于", "codeMeasured": "代码开销测量于", "instructions": "每条消息的指令数", "allocations": "每条消息的内存分配次数", "cold": "冷启动（指令 / 分配）", "unavailable": "读不到结果。它们公布在 {url}。", "unknownSchema": "公布的结果声明的 schema 是 {schema}，这一页不渲染它。"}'></div>
+两个场景就是服务读取消息时使用的两种[服务质量](../mqtt/qos.md)。在 QoS 0 下，服务器发送每条消息，不结算任何东西。在 QoS 1 下，服务用 PUBACK [确认](../../components/settlement/index.md)每个投递，[路径](../path.md)一页用图说明了这一点。
 
-表格由浏览器从上一次运行写下的文档读出，所以这一页上没有任何会过期的副本。
+## 代码的开销 {/* #cost-of-the-code */}
 
-两行之间的区别是服务质量，「受 Broker 限制」这个标记也由它决定。在 QoS 0 上 Broker 不做任何结
-算：一次投递就是一次主题匹配加一个消息体，什么也不往回走。在 QoS 1 上消费者要回应每一次投递，这
-就是每条消息一次传输往返。
+第二张图统计一条消息在服务线程上的开销：稳态下 callgrind 测得的指令数和 DHAT 测得的内存分配次数。每个场景都是一个基于 [`MqttBroker`](../../components/broker/index.md)、在同一台服务器上读取 QoS 1 主题的服务。服务运行在一个线程上，轮询 `rumqttc` 事件循环的任务也运行在这个线程上，所以计数包括框架、本 crate 以及客户端自己在套接字上的工作，PUBACK 也在其中。生产者的线程不计入。`冷启动` 是连接、订阅并取得第一条消息一次性付出的开销。
 
-标为「无法区分」的一列，是它与裸客户端的差值小于各自多次运行之间离散范围的那一列。低于运行噪声的数字
-读起来像是从未测到过的精度，所以不公布。
+## 结果 {/* #results */}
 
-「受 Broker 限制」这个标记是测出来的，不是推出来的。一次在三个循环之外的探测会对同一个 Broker 计
-时一个往返 —— 一次 QoS 1 发布，并等它的确认 —— 当一次投递让消费者付出的那些往返，抵得上一条消息耗时
-的一半或更多时，这一行就被标上。往返时延和下面的机器信息一起公布，算术可以重算一遍。凡是标上的地
-方，裸客户端整个运行里大半时间都在等套接字，本 crate 是在一段本来就要付的等待里做完自己的活；这
-样的一行是那份活的下界，而不是对它的测量。
-
-同一次运行的机器可读形式在
-[`benchmarks/results.json`](https://powersemmi.github.io/ruststream-rumqttc/latest/benchmarks/results.json)，
-框架的站点用它拼出跨 Broker 的汇总表。
-
-## crate 自身的代码 {/* #the-crates-own-code */}
-
-<div id="benchmark-code"></div>
-
-第二张表是一条消息在服务线程上的开销，是数出来的，不是计时得来的：指令数由 callgrind 统计，内存分配
-次数由 DHAT 统计。每个场景都是用户会写的那种服务，跑在 `MqttBroker` 上，连着 compose 环境里的
-mosquitto，每次投递都用 QoS 1。本 crate 在服务运行时的一个任务里驱动 `rumqttc` 的事件循环，所以计数
-同样包括框架、本 crate 和客户端的工作：报文解码、分发、`PUBACK`，回复场景里还有发出的 PUBLISH。
-等待套接字的时间不在其中，因为 valgrind 数的是指令，不是时间。
-
-指令数和分配次数都是稳态下每条消息的值：500 次投递的运行和 1000 次投递的运行之间的斜率。每次运行
-之前由一个单独的客户端灌入消息，它的工作不计入。最后一列是启动服务一次性付出的开销：连接、订阅和
-第一次投递。这些数字是绝对值；框架自身的开销由核心库在它的
-[基准测试页面](https://powersemmi.github.io/ruststream/latest/benchmarks/)上公布。
-
-同一个二进制文件跑三次，指令数相差不到三分之一个百分点，分配次数在四千次里只差几次，取决于套接字的
-读取怎样切分。`just bench-code` 在分配次数超过场景声明的下限时失败（下限是三次运行里的最大值再加百分
-之一），加上 `--baseline=main` 时，指令数多出百分之二以上也算失败；改变开销的合并请求要附上自己的
-数字。
+<Results entry={mqtt} labels={labels} details="/architecture/benchmarks/methodology/" />
 
 ## 机器 {/* #the-machine */}
 
-<div id="benchmark-environment"></div>
+<Environment entry={mqtt} labels={machine} />
 
-构建标志和数字一起公布，因为它们会改变数字：用 `-C target-cpu=native` 构建出的二进制给出的值，别
-的机器都复现不了，所以配方在构建前把这个变量清空。
+数字来自本版本的 `docs/benchmarks/results.json`，由基准测试命令写入。[方法论](methodology.md)说明它们是怎样测得的，[数字](numbers.md)说明可以从中得出什么结论。
 
-## 这些数字不代表什么 {/* #what-they-do-not-mean */}
-
-这里只有一个订阅、一个主题、一个很小的消息体，Broker 在回环地址上。它测的是一次投递在本 crate 里
-的代价，而不是 MQTT 能扛多少；这里的一行也不能拿去和别的 Broker 公布的一行比较，因为各个传输在每
-条消息上做的活并不一样。
-
-三个循环都跑在本 crate 所配置的客户端上：手动确认、`Receive Maximum` 为 1000、单个入站报文上限
-1 MiB；每个都在自己的第二条连接上喂自己。走 crate 的那两个用它的发布者来喂，因为服务发布走的正是
-这条路；区分它们的只有消费一侧的分发，别无其他。发布者最多只允许领先消费者 768 条
-消息。在 QoS 1 上这让每次投递都留在协议自身流量控制所计的窗口里，而不是落进 Broker 内部的队列
-（服务端会把放不下的丢掉）；在 QoS 0 上没有任何结算，它只是不让发布者跑得太远。在这个深度上消费
-者依然一次也不会挨饿。
-
-一次运行测量的窗口从第一次投递开始，到最后一条被解码并读过、其确认还没送出时结束，三个循环都一
-样。所以一次运行里几十万次确认中的那一次，落在这一页每个数字之外。
-
-QoS 2 没有测。它的四步握手会把 Broker 内部的记账变成被测对象，从那里得到的数字描述的是
-mosquitto，而不是本 crate。
-
-这些数字是一台机器在某一天的快照。
-它们由人手工重测，测量期间机器只跑这一项：这一页要讲的差值，比与其他任务共用的机器上的噪声还小。
-
-## 自己跑一遍 {/* #running-it-yourself */}
-
-```bash
-just bench
-```
-
-这个配方从 `docker-compose.test.yml` 起一套环境，跑完两个场景，再把它停掉，并用测到的结果重写
-`docs/benchmarks/results.json`。它需要独占这台机器。消息条数不是写死的：一次探测运行会把它定下
-来，使得每次被测的运行在跑它的那台机器上至少持续五秒。
-
-```bash
-just bench-code
-```
-
-这个配方启动同一套环境，在 valgrind 下统计代码表，停掉环境，并重写同一份文档里的 `code` 部分。它大约
-需要一分钟，需要 valgrind；基准测试运行器由配方自己安装，版本与 `Cargo.lock` 锁定的一致。超出限制的
-运行仍会跑完：先打印表格，再在表格下逐条列出每次超限，旧值和新值并列，然后以失败结束。
+<MovedSections />

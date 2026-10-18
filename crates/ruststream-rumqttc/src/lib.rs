@@ -20,6 +20,6 @@ pub use broker::{ConnectedMqttBroker, MqttBroker};
 pub use context::{DeliveryTopic, MqttContext};
 pub use error::MqttError;
 pub use filter::{MqttFilter, MqttTopic, Qos};
-pub use message::MqttMessage;
+pub use message::{MqttMessage, PARTITION_KEY_HEADER};
 pub use publisher::{MqttPublish, MqttPublishOptions, MqttPublishSteps, MqttPublisher};
 pub use subscriber::MqttSubscriber;

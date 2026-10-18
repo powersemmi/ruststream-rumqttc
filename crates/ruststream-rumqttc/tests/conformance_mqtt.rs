@@ -16,7 +16,6 @@
 
 use std::time::Duration;
 
-use ruststream::Name;
 use ruststream::conformance::harness::{self, InProcessBroker};
 use ruststream::conformance::in_process::{self, Refusal};
 use ruststream::conformance::message_shape::{self, OptionCases};
@@ -24,8 +23,10 @@ use ruststream::conformance::{
     capabilities, helpers::unique_subject, lifecycle, retry, settlement,
 };
 use ruststream::testing::Backlog;
+use ruststream::{Bytes, HeaderMap, Name};
 use ruststream_rumqttc::{
-    ConnectedMqttBroker, MqttBroker, MqttMessage, MqttPublish, MqttPublishOptions, MqttTopic, Qos,
+    ConnectedMqttBroker, MqttBroker, MqttMessage, MqttPublish, MqttPublishOptions, MqttTopic,
+    PARTITION_KEY_HEADER, Qos,
 };
 
 /// The production broker a service builds; the in-process passes dial nothing.
@@ -276,4 +277,40 @@ async fn mqtt_broker_passes_the_batch_suite() {
         |connected| connected.publisher(),
     )
     .await;
+}
+
+/// A key a publisher sets in the partition-key header, which rides a user property, is the key the
+/// delivery reports, and one key's messages arrive in publish order.
+#[allow(clippy::redundant_closure, clippy::redundant_closure_for_method_calls)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_in_process_broker_reports_the_partition_key() {
+    message_shape::keyed_order(
+        in_process,
+        &unique_subject("conformance.keyed"),
+        |name| MqttTopic::new(name).qos(Qos::AtLeastOnce),
+        |connected| connected.publisher(),
+        key_in_header,
+    )
+    .await;
+}
+
+/// The same key through a real server, where the header crosses the wire as a user property.
+#[allow(clippy::redundant_closure, clippy::redundant_closure_for_method_calls)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mqtt_broker_reports_the_partition_key() {
+    let Some(url) = test_url() else { return };
+    message_shape::keyed_order(
+        || live(&url, "keyed"),
+        &unique_subject("conformance.keyed"),
+        |name| MqttTopic::new(name).qos(Qos::AtLeastOnce),
+        |connected| connected.publisher(),
+        key_in_header,
+    )
+    .await;
+}
+
+/// MQTT carries a key in the partition-key header and has no per-message setting for it.
+fn key_in_header(key: &[u8], headers: &mut HeaderMap) -> Option<MqttPublishOptions> {
+    headers.insert(PARTITION_KEY_HEADER, Bytes::copy_from_slice(key));
+    None
 }

@@ -1,4 +1,19 @@
 {
+  "$schema": "https://context7.com/schema/context7.json",
+  "folders": [
+    "docs",
+    "crates/ruststream-rumqttc/src",
+    "crates/ruststream-rumqttc/examples",
+    "website/static"
+  ],
+  "excludeFolders": [
+    "docs/benchmarks",
+    "website/i18n",
+    "website/build",
+    "website/.docusaurus",
+    "website/node_modules",
+    "target"
+  ],
   "rules": [
     "Import `ruststream_rumqttc::prelude::*` in a routes file; it re-exports the framework's prelude along with the broker, the descriptors and the publish policy under the name `Publish`.",
     "Subscribe with `MqttTopic` for one topic and `MqttFilter` for a filter carrying `+` or `#`; a bare `#[subscriber(\"devices/dev42/telemetry\")]` string is an `MqttTopic` with the defaults.",

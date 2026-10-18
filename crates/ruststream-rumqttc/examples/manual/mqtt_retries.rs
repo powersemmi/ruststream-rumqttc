@@ -7,6 +7,7 @@
 //! cargo run --example manual_mqtt_retries -- run
 //! ```
 
+use std::future::{Future, ready};
 use std::process::ExitCode;
 use std::time::Duration;
 
@@ -70,15 +71,15 @@ fn readings() -> MqttTopic {
 struct OnDeadLetter;
 
 impl Handle<Reading> for OnDeadLetter {
-    async fn handle(
+    fn handle(
         &self,
         reading: &Reading,
         _outs: &(),
         ctx: &mut Context<'_>,
-    ) -> Result<(), HandlerOutcome> {
+    ) -> impl Future<Output = Result<(), HandlerOutcome>> {
         let deliveries = ctx.headers().get_str(RETRY_COUNT_HEADER).unwrap_or("1");
         tracing::error!(reading.meter, deliveries, "reading dead-lettered");
-        Ok(())
+        ready(Ok(()))
     }
 }
 

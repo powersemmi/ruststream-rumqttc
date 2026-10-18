@@ -1,5 +1,5 @@
 //! The MQTT publish policy: `Publish` in the prelude sets the quality of service and the retain
-//! flag of what a position sends, and a reply mounted without one sends at QoS 1, not retained.
+//! flag of what a position sends, and a reply mounted without one sends at `QoS` 1, not retained.
 //!
 //! ```text
 //! cargo test --example mqtt_publishing_publish --features testing

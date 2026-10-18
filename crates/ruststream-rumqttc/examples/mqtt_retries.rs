@@ -358,7 +358,7 @@ mod tests {
         )
     }
 
-    /// At QoS 0 a delivery has no acknowledgement, so the first step of the fallback reports
+    /// At `QoS` 0 a delivery has no acknowledgement, so the first step of the fallback reports
     /// itself unsupported; the copy is published all the same.
     async fn a_delivery_at_qos_0_is_deferred_too(tb: TestApp<()>) -> Result<(), Box<dyn Error>> {
         tb.broker::<MqttBroker>()

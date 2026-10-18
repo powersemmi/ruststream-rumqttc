@@ -19,7 +19,7 @@ struct Command {
 }
 
 // --8<-- [start:handler]
-/// The subscription reads at QoS 1, so returning from the handler acknowledges the delivery with
+/// The subscription reads at `QoS` 1, so returning from the handler acknowledges the delivery with
 /// a PUBACK. A command the device does not know is dropped: on MQTT that acknowledges it as well,
 /// and the server never sends it again.
 #[subscriber(MqttTopic::new("devices/dev42/commands").qos(Qos::AtLeastOnce))]

@@ -393,3 +393,15 @@ name = "manual_guide_topics"
 path = "examples/manual/guide/topics.rs"
 required-features = ["testing"]
 test = true
+
+[[example]]
+name = "guide_delivery"
+path = "examples/guide/delivery.rs"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "manual_guide_delivery"
+path = "examples/manual/guide/delivery.rs"
+required-features = ["testing"]
+test = true

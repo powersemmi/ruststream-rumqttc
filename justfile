@@ -52,8 +52,8 @@ test-brokers: brokers-up
 
 # What this crate costs over the rumqttc client it wraps: two scenarios, one per quality of
 # service, each run as a RustStream service and as a hand-written loop, against the stand the
-# tests use. On demand only - it takes minutes and it wants the machine to itself. The page it
-# feeds is docs/benchmarks.md.
+# tests use. On demand only - it takes minutes and it wants the machine to itself. It feeds the
+# site's benchmarks pages.
 bench *ARGS: brokers-up
     #!/usr/bin/env bash
     set -euo pipefail
@@ -69,7 +69,7 @@ bench *ARGS: brokers-up
 # What a message costs on the service's thread, counted under valgrind: instructions through
 # callgrind and allocations through DHAT, each scenario the service a user writes on the stand's
 # mosquitto. The counts repeat within a fraction of a percent, so it needs the stand and not a quiet
-# machine; it takes about a minute. The page it feeds is the code table of docs/benchmarks.md.
+# machine; it takes about a minute. It feeds the code table of the site's benchmarks pages.
 # RUSTFLAGS is cleared because valgrind aborts on the instructions a recent CPU advertises. Needs
 # valgrind.
 #

@@ -1,3 +1,8 @@
+---
+title: Benchmarks
+description: "What ruststream-rumqttc costs on every message: throughput against the raw rumqttc client, and instructions and allocations of its code."
+---
+
 # Benchmarks
 
 Between the `rumqttc` client and your code this crate does work on every message: the subscription

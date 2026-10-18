@@ -1,4 +1,9 @@
-# 基准测试 { #benchmarks }
+---
+title: 基准测试
+description: "ruststream-rumqttc 在每条消息上的开销：与裸 rumqttc 客户端对比的吞吐量，以及其代码的指令数和内存分配次数。"
+---
+
+# 基准测试 {/* #benchmarks */}
 
 在 `rumqttc` 客户端和你的代码之间，本 crate 在每条消息上都要做事：它打开的订阅、它给出的流、它交
 过来的消息、它送出的确认、它发布的报文。这一页说明这些花了多少，参照物是同样的活在客户端上手写
@@ -23,7 +28,7 @@ tokio 运行时和构建。这套流程属于框架本身，写在
 自己的任务上轮询，再通过通道把投递交给订阅，所以裸客户端那个循环也照这个样子搭。在消费任务内部
 轮询的循环换掉的是并发形态，而不是另一个消费者。
 
-## 数字 { #the-numbers }
+## 数字 {/* #the-numbers */}
 
 三个交错轮次中的最佳值，括号里是中位的一轮。越大越好。
 
@@ -48,7 +53,7 @@ tokio 运行时和构建。这套流程属于框架本身，写在
 [`benchmarks/results.json`](https://powersemmi.github.io/ruststream-rumqttc/latest/benchmarks/results.json)，
 框架的站点用它拼出跨 Broker 的汇总表。
 
-## crate 自身的代码 { #the-crates-own-code }
+## crate 自身的代码 {/* #the-crates-own-code */}
 
 <div id="benchmark-code"></div>
 
@@ -68,14 +73,14 @@ mosquitto，每次投递都用 QoS 1。本 crate 在服务运行时的一个任�
 之一），加上 `--baseline=main` 时，指令数多出百分之二以上也算失败；改变开销的合并请求要附上自己的
 数字。
 
-## 机器 { #the-machine }
+## 机器 {/* #the-machine */}
 
 <div id="benchmark-environment"></div>
 
 构建标志和数字一起公布，因为它们会改变数字：用 `-C target-cpu=native` 构建出的二进制给出的值，别
 的机器都复现不了，所以配方在构建前把这个变量清空。
 
-## 这些数字不代表什么 { #what-they-do-not-mean }
+## 这些数字不代表什么 {/* #what-they-do-not-mean */}
 
 这里只有一个订阅、一个主题、一个很小的消息体，Broker 在回环地址上。它测的是一次投递在本 crate 里
 的代价，而不是 MQTT 能扛多少；这里的一行也不能拿去和别的 Broker 公布的一行比较，因为各个传输在每
@@ -97,7 +102,7 @@ mosquitto，而不是本 crate。
 这些数字是一台机器在某一天的快照。
 它们由人手工重测，测量期间机器只跑这一项：这一页要讲的差值，比与其他任务共用的机器上的噪声还小。
 
-## 自己跑一遍 { #running-it-yourself }
+## 自己跑一遍 {/* #running-it-yourself */}
 
 ```bash
 just bench

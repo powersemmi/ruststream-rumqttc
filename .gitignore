@@ -1,8 +1,6 @@
 target/
 **/*.rs.bk
 
-# mkdocs build output
-site/
 .venv/
 __pycache__/
 

@@ -611,7 +611,9 @@ Eclipse Mosquitto covers them; `just test-brokers` starts the stand and runs it.
 * `max_packet_size(bytes)` defaults to 1 MiB, well above the client's own 10 KiB cap, which kills
   the connection on a larger payload. `receive_maximum(n)` is the protocol's flow control and
   defaults to 1000: it bounds the unacknowledged `QoS` 1/2 deliveries in flight, and with them an
-  unread subscriber's queue. `QoS` 0 has no such bound.
+  unread subscriber's queue. `QoS` 0 has no such bound. Both take a non-zero type (`NonZeroU32`,
+  `NonZeroU16`), because a server refuses a session that announces a zero limit; a constant such
+  as `const IN_FLIGHT: NonZeroU16 = NonZeroU16::new(8).unwrap();` is checked at compile time.
 * Credentials and the last will's payload stay out of the generated document; the coordinate a
   client connects to is what it reports.
 * A URL the connection will reject still produces a document, so a malformed address surfaces at

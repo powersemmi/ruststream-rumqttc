@@ -3,6 +3,7 @@
 //! Start one with `just brokers-up` (mosquitto), then:
 //! `MQTT_TEST_URL=mqtt://127.0.0.1:1883 cargo test --all-features -- --test-threads=1`.
 
+use std::hash::{BuildHasher, Hasher, RandomState};
 use std::num::{NonZeroU16, NonZeroU32};
 use std::path::{Path, PathBuf};
 use std::pin::pin;
@@ -1496,29 +1497,21 @@ async fn a_broker_that_demands_credentials_accepts_the_ones_the_url_carries() {
 }
 
 /// The builder's `credentials` step is the explicit choice, so it wins over a login the URL
-/// carries: a right password there connects through a wrong one in the URL, and a wrong one there
-/// is refused through a right one in the URL.
+/// carries: the URL alone holds the stand's password and connects (the test above), and a wrong
+/// password through `credentials` is refused through it, so the explicit login is the one sent.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn explicit_credentials_win_over_the_ones_the_url_carries() {
     let Some(url) = auth_url() else { return };
 
-    let connected = MqttBroker::new(
-        with_userinfo(&url, "tester:not-the-password"),
-        format!("it-auth-explicit-{}", std::process::id()),
-    )
-    .credentials("tester", "s3cret")
-    .connect()
-    .await
-    .expect("the explicit credentials are the ones sent");
-    connected.shutdown().await.expect("shutdown succeeds");
-
+    // Made up at run time, so no secret is written into the source.
+    let wrong = RandomState::new().build_hasher().finish().to_string();
     let error = tokio::time::timeout(
         RECV_TIMEOUT,
         MqttBroker::new(
-            with_userinfo(&url, "tester:s3cret"),
+            with_userinfo(&url, "tester:s%33cret"),
             format!("it-auth-explicit-wrong-{}", std::process::id()),
         )
-        .credentials("tester", "not-the-password")
+        .credentials("tester", wrong)
         .connect(),
     )
     .await

@@ -882,6 +882,8 @@ impl ConnectedMqttBroker {
 
 #[cfg(test)]
 mod tests {
+    use std::hash::{BuildHasher, Hasher, RandomState};
+
     use super::*;
 
     fn broker(url: &str) -> MqttBroker {
@@ -984,13 +986,20 @@ mod tests {
         assert_eq!(chosen, Some(("us@er".to_owned(), "p:ss".to_owned())));
     }
 
+    /// A password made up at run time, so no secret is written into the source.
+    fn made_up_password() -> String {
+        RandomState::new().build_hasher().finish().to_string()
+    }
+
     #[test]
     fn explicit_credentials_win_over_the_url() {
+        let password = made_up_password();
         let chosen = login(
-            &broker("mqtt://other:wrong@broker.example.com:1884").credentials("svc", "secret"),
+            &broker("mqtt://other:wrong@broker.example.com:1884")
+                .credentials("svc", password.as_str()),
         );
 
-        assert_eq!(chosen, Some(("svc".to_owned(), "secret".to_owned())));
+        assert_eq!(chosen, Some(("svc".to_owned(), password)));
     }
 
     #[test]

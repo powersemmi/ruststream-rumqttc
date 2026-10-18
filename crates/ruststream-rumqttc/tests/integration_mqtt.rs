@@ -3,6 +3,7 @@
 //! Start one with `just brokers-up` (mosquitto), then:
 //! `MQTT_TEST_URL=mqtt://127.0.0.1:1883 cargo test --all-features -- --test-threads=1`.
 
+use std::fmt::Write as _;
 use std::hash::{BuildHasher, Hasher, RandomState};
 use std::num::{NonZeroU16, NonZeroU32};
 use std::path::{Path, PathBuf};
@@ -1373,32 +1374,53 @@ async fn a_fire_and_forget_publish_leaves_the_strongest_subscription_nothing_to_
     connected.shutdown().await.expect("shutdown succeeds");
 }
 
-/// The URL of the listener that requires a user name and a password, or `None` when there is no
-/// stand. It is a second listener of the same broker, because authentication is the one capability
-/// an anonymous stand cannot answer for.
-fn auth_url() -> Option<String> {
-    match std::env::var("MQTT_TEST_AUTH_URL") {
-        Ok(url) if !url.is_empty() => Some(url),
+/// The URL of the listener that requires a user name and a password, and the password of the
+/// stand's user `tester`, or `None` when there is no stand. It is a second listener of the same
+/// broker, because authentication is the one capability an anonymous stand cannot answer for. The
+/// stand defines the password and the run hands it over, so none is written here.
+fn auth() -> Option<(String, String)> {
+    let var = |name: &str| match std::env::var(name) {
+        Ok(value) if !value.is_empty() => Some(value),
         _ => {
             assert!(
                 std::env::var_os("RUSTSTREAM_REQUIRE_LIVE").is_none(),
                 "RUSTSTREAM_REQUIRE_LIVE is set, so the credentials test must run, \
-                 but MQTT_TEST_AUTH_URL is missing or empty"
+                 but {name} is missing or empty"
             );
-            eprintln!("MQTT_TEST_AUTH_URL is not set; skipping the credentials test");
+            eprintln!("{name} is not set; skipping the credentials test");
             None
         }
-    }
+    };
+    Some((var("MQTT_TEST_AUTH_URL")?, var("MQTT_TEST_AUTH_PASSWORD")?))
+}
+
+/// A password made up at run time, so no secret is written into the source.
+fn made_up_password() -> String {
+    RandomState::new().build_hasher().finish().to_string()
+}
+
+/// Every byte of `password` percent-encoded, the most a URL may encode a password.
+fn percent_encoded(password: &str) -> String {
+    password.bytes().fold(
+        String::with_capacity(password.len() * 3),
+        |mut encoded, byte| {
+            // Writing into a `String` cannot fail.
+            let _ = write!(encoded, "%{byte:02X}");
+            encoded
+        },
+    )
 }
 
 /// Credentials are the broker's to accept, so the proof is a session that carries a message:
 /// a `CONNACK` on its own says the packet was well formed, not that the user exists.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_broker_that_demands_credentials_accepts_the_ones_the_builder_records() {
-    let Some(url) = auth_url() else { return };
+    let Some((url, password)) = auth() else {
+        return;
+    };
 
     let connected = MqttBroker::new(&url, format!("it-auth-{}", std::process::id()))
-        .credentials("tester", "s3cret")
+        .credentials("tester", password)
         .connect()
         .await
         .expect("the broker accepts the credentials");
@@ -1431,10 +1453,10 @@ async fn a_broker_that_demands_credentials_accepts_the_ones_the_builder_records(
 /// one. This is what tells a misconfigured deployment from an unreachable broker.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_broker_that_demands_credentials_refuses_the_wrong_ones() {
-    let Some(url) = auth_url() else { return };
+    let Some((url, _)) = auth() else { return };
 
     let wrong = MqttBroker::new(&url, format!("it-auth-wrong-{}", std::process::id()))
-        .credentials("tester", "not-the-password");
+        .credentials("tester", made_up_password());
     let absent = MqttBroker::new(&url, format!("it-auth-absent-{}", std::process::id()));
 
     for (broker, what) in [
@@ -1459,14 +1481,16 @@ fn with_userinfo(url: &str, userinfo: &str) -> String {
 }
 
 /// A connection string that carries the login is how most deployments configure a broker, so the
-/// user name and password in it authenticate. They are percent-decoded, as a URL writes them:
-/// `s%33cret` is the stand's `s3cret`.
+/// user name and password in it authenticate. They are percent-decoded, as a URL writes them: the
+/// stand's password arrives with every byte encoded.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_broker_that_demands_credentials_accepts_the_ones_the_url_carries() {
-    let Some(url) = auth_url() else { return };
+    let Some((url, password)) = auth() else {
+        return;
+    };
 
     let connected = MqttBroker::new(
-        with_userinfo(&url, "tester:s%33cret"),
+        with_userinfo(&url, &format!("tester:{}", percent_encoded(&password))),
         format!("it-auth-url-{}", std::process::id()),
     )
     .connect()
@@ -1501,17 +1525,17 @@ async fn a_broker_that_demands_credentials_accepts_the_ones_the_url_carries() {
 /// password through `credentials` is refused through it, so the explicit login is the one sent.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn explicit_credentials_win_over_the_ones_the_url_carries() {
-    let Some(url) = auth_url() else { return };
+    let Some((url, password)) = auth() else {
+        return;
+    };
 
-    // Made up at run time, so no secret is written into the source.
-    let wrong = RandomState::new().build_hasher().finish().to_string();
     let error = tokio::time::timeout(
         RECV_TIMEOUT,
         MqttBroker::new(
-            with_userinfo(&url, "tester:s%33cret"),
+            with_userinfo(&url, &format!("tester:{}", percent_encoded(&password))),
             format!("it-auth-explicit-wrong-{}", std::process::id()),
         )
-        .credentials("tester", wrong)
+        .credentials("tester", made_up_password())
         .connect(),
     )
     .await

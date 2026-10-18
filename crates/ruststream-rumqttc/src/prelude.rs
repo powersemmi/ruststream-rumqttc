@@ -70,7 +70,7 @@ pub use ruststream::prelude::*;
 // the framework's prelude, and never sees this one.
 pub use crate::{
     DeliveryTopic, MqttBroker, MqttContext, MqttFilter, MqttPublish as Publish, MqttPublishOptions,
-    MqttPublishSteps, MqttTopic, Qos,
+    MqttPublishSteps, MqttTopic, PARTITION_KEY_HEADER, Qos,
 };
 
 // Capability manifest deliberately empty. Of the framework's optional capabilities MQTT

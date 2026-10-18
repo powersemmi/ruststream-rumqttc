@@ -10,12 +10,16 @@
 
 use std::time::Duration;
 
+use futures::future::join_all;
+use ruststream::HeaderMap;
 // The derive and the value a publish transform reads share the name in different namespaces: the
 // prelude carries the macro `ruststream::Outgoing`, and this is the type `runtime::Outgoing`.
 use ruststream::runtime::{Outgoing, PublishContext, RETRY_COUNT_HEADER};
 use ruststream::testing::TestApp;
+use ruststream_rumqttc::PARTITION_KEY_HEADER;
 use ruststream_rumqttc::prelude::*;
 use serde::{Deserialize, Serialize};
+use tokio::time::Instant;
 
 // The topic a device publishes to. The handlers below name it as a literal and assert on the same
 // subscription; the one declared with `MqttFilter` covers it with a wildcard instead, so its
@@ -833,4 +837,66 @@ async fn overlapping_filters_run_each_handler_once() {
             .with(&reading)
             .settled(HandlerOutcome::ack());
     }
+}
+
+#[derive(Debug, PartialEq, Deserialize, Serialize, Outgoing)]
+struct Order {
+    id: u64,
+    tenant: String,
+}
+
+/// A second of waiting on a downstream service per order.
+#[subscriber("orders/placed", workers(8, by_key))]
+async fn place_order(order: &Order) -> HandlerOutcome {
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let _ = order.id;
+    HandlerOutcome::ack()
+}
+
+/// The partition-key header a publisher sets keys the lanes of `workers(n, by_key)`: one tenant's
+/// orders run one after the other, beside the other tenant's. Lanes chosen by rotation would run
+/// all four orders at once and finish in one second.
+#[tokio::test(start_paused = true)]
+async fn the_partition_key_header_keeps_one_key_on_one_lane() {
+    let app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(broker(), |b| {
+        b.include(place_order);
+    });
+    let tb = TestApp::start(app).await.expect("the harness starts");
+
+    let orders: Vec<(Order, HeaderMap)> = [(1, "acme"), (2, "globex"), (3, "acme"), (4, "globex")]
+        .into_iter()
+        .map(|(id, tenant)| {
+            let mut headers = HeaderMap::new();
+            headers.insert(PARTITION_KEY_HEADER, tenant);
+            let order = Order {
+                id,
+                tenant: tenant.to_owned(),
+            };
+            (order, headers)
+        })
+        .collect();
+
+    let started = Instant::now();
+    for published in join_all(orders.iter().map(|(order, headers)| {
+        tb.broker::<MqttBroker>()
+            .message(order)
+            .with_headers(headers.clone())
+            .to("orders/placed")
+            .publish()
+    }))
+    .await
+    {
+        published.expect("the injected order is routed");
+    }
+
+    assert_eq!(started.elapsed().as_secs(), 2);
+    let acme: Vec<u64> = tb
+        .broker::<MqttBroker>()
+        .subscriber("orders/placed")
+        .received::<Order>()
+        .iter()
+        .filter(|order| order.tenant == "acme")
+        .map(|order| order.id)
+        .collect();
+    assert_eq!(acme, [1, 3]);
 }

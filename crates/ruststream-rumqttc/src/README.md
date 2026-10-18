@@ -126,6 +126,11 @@ indefinitely for that first delivery. Nothing at the mount site says which side 
 a batch, so a batch handler written for another broker mounts here unchanged. Acknowledgement
 stays per delivery: a batch abandoned while it fills leaves its messages unacknowledged.
 
+`workers(n, by_key)` keys its lanes by the [`PARTITION_KEY_HEADER`] header, which the publisher
+sets and which rides a user property. The messages of one key run on one lane in the order they
+arrived, and different keys run side by side. A message without the header takes the next lane in
+turn.
+
 The per-delivery context is [`MqttContext`], with one key, [`DeliveryTopic`]: the topic this
 message arrived on. A body reads it with `Ctx(topic): Ctx<DeliveryTopic>` or through
 `ctx: &mut Context<'_, MqttContext>`.
@@ -436,9 +441,8 @@ fn app() -> impl App {
 # fn main() {}
 ```
 
-The correlated `RequestReply` call is not implemented, and neither is `TransactionalPublisher`,
-`OwnedTransactions` or `Partitioned`: MQTT has no transactions, no partitions and no routing keys,
-and ordering is per topic on a connection. A responder is an ordinary handler: the request carries
+The correlated `RequestReply` call is not implemented, and neither is `TransactionalPublisher` or
+`OwnedTransactions`: MQTT has no transactions, and ordering is per topic on a connection. A responder is an ordinary handler: the request carries
 its response topic in the `reply-to` header, and the handler reads `ctx.headers().reply_to()` and
 publishes the answer there through an injected publisher.
 

@@ -18,6 +18,7 @@ ruststream = { version = "0.7", default-features = false }
 rumqttc = "0.25"
 bytes = "1"
 futures = "0.3"
+percent-encoding = "2"
 thiserror = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
 tracing = "0.1"

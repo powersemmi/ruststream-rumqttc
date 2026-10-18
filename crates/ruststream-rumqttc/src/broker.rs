@@ -12,12 +12,14 @@
     allow(clippy::infallible_destructuring_match)
 )]
 
+use std::borrow::Cow;
 use std::collections::VecDeque;
 use std::num::{NonZeroU16, NonZeroU32};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
+use percent_encoding::percent_decode_str;
 use rumqttc::Transport;
 #[cfg(feature = "testing")]
 use rumqttc::v5::mqttbytes::matches;
@@ -280,6 +282,12 @@ pub struct MqttBroker {
 impl MqttBroker {
     /// Records the broker URL (`mqtt://host:port` or `mqtts://host:port`) and the client id.
     /// No I/O.
+    ///
+    /// A user name and a password in the URL (`mqtt://user:password@host:port`) log the
+    /// connection in, percent-decoded: `p%40ss` is the password `p@ss`. The URL logs in only
+    /// with both a non-empty user name and a password, and
+    /// [`credentials`](Self::credentials) wins over it. A login that is not UTF-8 once decoded
+    /// is refused when the broker connects, before any I/O.
     pub fn new(url: impl Into<String>, client_id: impl Into<String>) -> Self {
         Self {
             url: url.into(),
@@ -297,7 +305,8 @@ impl MqttBroker {
         }
     }
 
-    /// Username and password credentials.
+    /// The user name and password the connection logs in with. They win over a login the URL
+    /// carries.
     pub fn credentials(mut self, username: impl Into<String>, password: impl Into<String>) -> Self {
         self.credentials = Some((username.into(), password.into()));
         self
@@ -475,11 +484,52 @@ impl MqttBroker {
     /// The URL's authority: the host and port, without the scheme, the userinfo or anything after
     /// the host.
     ///
-    /// An MQTT URL routinely carries `user:password@`, and that password must reach neither the
-    /// connection nor the generated document. The framework owns that trimming, so the rule is
-    /// the same one every broker crate applies.
+    /// An MQTT URL routinely carries `user:password@`, which logs the connection in and must not
+    /// reach the generated document. The framework owns that trimming, so the rule is the same one
+    /// every broker crate applies.
     fn authority(&self) -> String {
         ServerSpec::host_from_url(&self.url)
+    }
+
+    /// The login the connection opens with: the one set with [`credentials`](Self::credentials),
+    /// or else the user name and password the URL carries, percent-decoded, or else none.
+    ///
+    /// A URL logs in only with both a non-empty user name and a password, the way the other
+    /// broker crates read one.
+    fn login(&self) -> Result<Option<(String, String)>, MqttError> {
+        if let Some(explicit) = &self.credentials {
+            return Ok(Some(explicit.clone()));
+        }
+        let after_scheme = self
+            .url
+            .split_once("://")
+            .map_or(self.url.as_str(), |(_, rest)| rest);
+        // The same authority `ServerSpec::host_from_url` reads the host from: it ends at the
+        // first '/', '?' or '#', and inside it the last '@' ends the userinfo.
+        let authority = after_scheme
+            .split_once(['/', '?', '#'])
+            .map_or(after_scheme, |(authority, _)| authority);
+        let Some((userinfo, _)) = authority.rsplit_once('@') else {
+            return Ok(None);
+        };
+        let Some((username, password)) = userinfo.split_once(':') else {
+            return Ok(None);
+        };
+        if username.is_empty() {
+            return Ok(None);
+        }
+        let decode = |part: &str| {
+            percent_decode_str(part)
+                .decode_utf8()
+                .map(Cow::into_owned)
+                .map_err(|_| {
+                    MqttError::Invalid(
+                        "the URL's user name or password is not UTF-8 once percent-decoded"
+                            .to_owned(),
+                    )
+                })
+        };
+        Ok(Some((decode(username)?, decode(password)?)))
     }
 
     /// The host and port a client connects to, and what the generated document reports.
@@ -520,8 +570,8 @@ impl MqttBroker {
         if let Some(clean_start) = self.clean_start {
             options.set_clean_start(clean_start);
         }
-        if let Some((username, password)) = &self.credentials {
-            options.set_credentials(username.clone(), password.clone());
+        if let Some((username, password)) = self.login()? {
+            options.set_credentials(username, password);
         }
         if let Some(expiry) = self.session_expiry {
             options.set_session_expiry_interval(Some(expiry));
@@ -916,6 +966,8 @@ impl ConnectedMqttBroker {
 
 #[cfg(test)]
 mod tests {
+    use std::hash::{BuildHasher, Hasher, RandomState};
+
     use super::*;
 
     fn broker(url: &str) -> MqttBroker {
@@ -1003,6 +1055,66 @@ mod tests {
         );
     }
 
+    /// The login the connection opens with, as the client will send it.
+    fn login(broker: &MqttBroker) -> Option<(String, String)> {
+        broker
+            .options()
+            .expect("the options build")
+            .credentials()
+            .map(|login| (login.username, login.password))
+    }
+
+    #[test]
+    fn the_url_user_name_and_password_log_in_percent_decoded() {
+        let chosen = login(&broker("mqtt://us%40er:p%3Ass@broker.example.com:1884"));
+
+        assert_eq!(chosen, Some(("us@er".to_owned(), "p:ss".to_owned())));
+    }
+
+    /// A password made up at run time, so no secret is written into the source.
+    fn made_up_password() -> String {
+        RandomState::new().build_hasher().finish().to_string()
+    }
+
+    #[test]
+    fn explicit_credentials_win_over_the_url() {
+        let password = made_up_password();
+        let chosen = login(
+            &broker("mqtt://other:wrong@broker.example.com:1884")
+                .credentials("svc", password.as_str()),
+        );
+
+        assert_eq!(chosen, Some(("svc".to_owned(), password)));
+    }
+
+    #[test]
+    fn a_url_without_a_user_name_and_a_password_logs_in_with_nothing() {
+        for url in [
+            "mqtt://broker.example.com:1884",
+            "mqtt://svc@broker.example.com:1884",
+            "mqtt://:secret@broker.example.com:1884",
+        ] {
+            let chosen = login(&broker(url));
+            assert!(chosen.is_none(), "{url}: got {chosen:?}");
+        }
+    }
+
+    #[test]
+    fn a_url_login_that_is_not_utf8_once_decoded_is_refused_before_any_io() {
+        for url in [
+            "mqtt://%FF:secret@broker.example.com:1884",
+            "mqtt://svc:%C3@broker.example.com:1884",
+        ] {
+            let refused = broker(url)
+                .options()
+                .expect_err("an MQTT user name and password are UTF-8");
+            assert!(
+                matches!(&refused, MqttError::Invalid(reason) if reason.contains("UTF-8")),
+                "{url}: got {refused}"
+            );
+        }
+    }
+
     #[test]
     fn a_url_with_credentials_describes_a_server_without_them() {
         let spec = broker("mqtt://alice:s3cret@broker.example.com:1884").describe_server();
@@ -1015,5 +1127,12 @@ mod tests {
         );
         assert!(!host.contains("alice"), "the user name is gone: {host}");
         assert!(!host.contains("s3cret"), "the password is gone: {host}");
+
+        let spec = broker("mqtt://us%40er:p%3Ass@broker.example.com:1884").describe_server();
+        let host = spec.host.expect("a networked broker states its host");
+        assert_eq!(
+            host, "broker.example.com:1884",
+            "percent-encoded userinfo is gone too"
+        );
     }
 }

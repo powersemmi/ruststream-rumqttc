@@ -35,6 +35,8 @@ rumqttc.workspace = true
 bytes.workspace = true
 serde = { version = "1", features = ["derive"], optional = true }
 futures.workspace = true
+# Decodes the user name and password a broker URL carries percent-encoded.
+percent-encoding.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true

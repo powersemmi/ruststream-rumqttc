@@ -3,6 +3,7 @@
 //! Start one with `just brokers-up` (mosquitto), then:
 //! `MQTT_TEST_URL=mqtt://127.0.0.1:1883 cargo test --all-features -- --test-threads=1`.
 
+use std::hash::{BuildHasher, Hasher, RandomState};
 use std::num::{NonZeroU16, NonZeroU32};
 use std::path::{Path, PathBuf};
 use std::pin::pin;
@@ -1449,6 +1450,77 @@ async fn a_broker_that_demands_credentials_refuses_the_wrong_ones() {
             "{what} is a connection refusal: {error}"
         );
     }
+}
+
+/// The password listener's URL with `userinfo` written into it, the way a deployment passes its
+/// login in one connection string.
+fn with_userinfo(url: &str, userinfo: &str) -> String {
+    url.replacen("://", &format!("://{userinfo}@"), 1)
+}
+
+/// A connection string that carries the login is how most deployments configure a broker, so the
+/// user name and password in it authenticate. They are percent-decoded, as a URL writes them:
+/// `s%33cret` is the stand's `s3cret`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_broker_that_demands_credentials_accepts_the_ones_the_url_carries() {
+    let Some(url) = auth_url() else { return };
+
+    let connected = MqttBroker::new(
+        with_userinfo(&url, "tester:s%33cret"),
+        format!("it-auth-url-{}", std::process::id()),
+    )
+    .connect()
+    .await
+    .expect("the broker accepts the URL's credentials");
+
+    let topic = unique("authenticated-by-url");
+    let mut subscriber = connected
+        .subscribe_topic(MqttTopic::new(&topic).qos(Qos::AtLeastOnce))
+        .await
+        .expect("subscription opens");
+    connected
+        .publisher()
+        .publish(OutgoingMessage::new(&topic, b"hello".as_slice()), None)
+        .await
+        .expect("publish succeeds");
+
+    let mut stream = pin!(subscriber.stream());
+    let message = tokio::time::timeout(RECV_TIMEOUT, stream.next())
+        .await
+        .expect("delivery arrives")
+        .expect("stream is open")
+        .expect("delivery is ok");
+    assert_eq!(message.payload(), b"hello");
+    message.ack().await.expect("ack succeeds");
+
+    connected.shutdown().await.expect("shutdown succeeds");
+}
+
+/// The builder's `credentials` step is the explicit choice, so it wins over a login the URL
+/// carries: the URL alone holds the stand's password and connects (the test above), and a wrong
+/// password through `credentials` is refused through it, so the explicit login is the one sent.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn explicit_credentials_win_over_the_ones_the_url_carries() {
+    let Some(url) = auth_url() else { return };
+
+    // Made up at run time, so no secret is written into the source.
+    let wrong = RandomState::new().build_hasher().finish().to_string();
+    let error = tokio::time::timeout(
+        RECV_TIMEOUT,
+        MqttBroker::new(
+            with_userinfo(&url, "tester:s%33cret"),
+            format!("it-auth-explicit-wrong-{}", std::process::id()),
+        )
+        .credentials("tester", wrong)
+        .connect(),
+    )
+    .await
+    .expect("connect reports the refusal instead of retrying")
+    .expect_err("the explicit wrong password is the one sent");
+    assert!(
+        matches!(error, MqttError::Connect(_)),
+        "a wrong explicit password is a connection refusal: {error}"
+    );
 }
 
 /// The TLS listener's URL and the directory the stand's certificate chain was generated into, or

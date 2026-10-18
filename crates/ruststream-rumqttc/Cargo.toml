@@ -233,3 +233,115 @@ name = "manual_mqtt_publishing_responders"
 path = "examples/manual/mqtt_publishing_responders.rs"
 required-features = ["testing"]
 test = true
+
+# --- examples: components-broker ---
+
+[[example]]
+name = "mqtt_service"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "manual_mqtt_service"
+path = "examples/manual/mqtt_service.rs"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "mqtt_broker_security"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "manual_mqtt_broker_security"
+path = "examples/manual/mqtt_broker_security.rs"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "mqtt_broker_session"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "manual_mqtt_broker_session"
+path = "examples/manual/mqtt_broker_session.rs"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "mqtt_broker_last_will"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "manual_mqtt_broker_last_will"
+path = "examples/manual/mqtt_broker_last_will.rs"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "mqtt_broker_limits"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "manual_mqtt_broker_limits"
+path = "examples/manual/mqtt_broker_limits.rs"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "mqtt_broker_startup"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "manual_mqtt_broker_startup"
+path = "examples/manual/mqtt_broker_startup.rs"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "mqtt_broker_reconnect"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "manual_mqtt_broker_reconnect"
+path = "examples/manual/mqtt_broker_reconnect.rs"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "mqtt_broker_shutdown"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "manual_mqtt_broker_shutdown"
+path = "examples/manual/mqtt_broker_shutdown.rs"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "mqtt_broker_prelude"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "manual_mqtt_broker_prelude"
+path = "examples/manual/mqtt_broker_prelude.rs"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "mqtt_broker_errors"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "manual_mqtt_broker_errors"
+path = "examples/manual/mqtt_broker_errors.rs"
+required-features = ["testing"]
+test = true

@@ -189,3 +189,47 @@ name = "manual_mqtt_settlement_retry"
 path = "examples/manual/mqtt_settlement_retry.rs"
 required-features = ["testing"]
 test = true
+
+[[example]]
+name = "mqtt_retained"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "manual_mqtt_retained"
+path = "examples/manual/mqtt_retained.rs"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "mqtt_publishing_publish"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "manual_mqtt_publishing_publish"
+path = "examples/manual/mqtt_publishing_publish.rs"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "mqtt_publishing_headers"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "manual_mqtt_publishing_headers"
+path = "examples/manual/mqtt_publishing_headers.rs"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "mqtt_publishing_responders"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "manual_mqtt_publishing_responders"
+path = "examples/manual/mqtt_publishing_responders.rs"
+required-features = ["testing"]
+test = true

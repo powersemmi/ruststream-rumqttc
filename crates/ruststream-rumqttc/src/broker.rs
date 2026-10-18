@@ -39,7 +39,7 @@ use crate::filter::{MqttFilter, MqttTopic, Qos};
 #[cfg(feature = "testing")]
 use crate::in_process::Bus;
 use crate::publisher::{MqttPublish, MqttPublisher};
-use crate::subscriber::MqttSubscriber;
+use crate::subscriber::{MqttSubscriber, OnDrop};
 
 /// What a connected broker and every handle derived from it speak over: the live client, or,
 /// under the `testing` feature, the in-process transport the test harness connected instead.
@@ -546,28 +546,52 @@ impl ConnectedMqttBroker {
 
     /// Opens the subscription described by `topic` and waits for the broker's `SUBACK`.
     ///
+    /// Dropping the subscriber unsubscribes the filter once no other subscriber on this
+    /// connection shares it.
+    ///
     /// # Errors
     ///
     /// Returns [`MqttError`] when the value is not a topic, the broker rejects it, or the broker
     /// is shut down.
     pub async fn subscribe_topic(&self, topic: MqttTopic) -> Result<MqttSubscriber, MqttError> {
-        topic.validate()?;
-        self.open(topic.into_filter()).await
+        self.open_topic(topic, OnDrop::Unsubscribe).await
     }
 
     /// Opens the subscription described by `filter` and waits for the broker's `SUBACK`.
+    ///
+    /// Dropping the subscriber unsubscribes the filter once no other subscriber on this
+    /// connection shares it.
     ///
     /// # Errors
     ///
     /// Returns [`MqttError`] when the descriptor is invalid, the broker rejects the filter,
     /// or the broker is shut down.
     pub async fn subscribe_filter(&self, filter: MqttFilter) -> Result<MqttSubscriber, MqttError> {
+        self.open_filter(filter, OnDrop::Unsubscribe).await
+    }
+
+    /// Opens the subscription described by `topic`, whose drop does `on_drop` to its filter.
+    pub(crate) async fn open_topic(
+        &self,
+        topic: MqttTopic,
+        on_drop: OnDrop,
+    ) -> Result<MqttSubscriber, MqttError> {
+        topic.validate()?;
+        self.open(topic.into_filter(), on_drop).await
+    }
+
+    /// Opens the subscription described by `filter`, whose drop does `on_drop` to its filter.
+    pub(crate) async fn open_filter(
+        &self,
+        filter: MqttFilter,
+        on_drop: OnDrop,
+    ) -> Result<MqttSubscriber, MqttError> {
         filter.validate()?;
-        self.open(filter).await
+        self.open(filter, on_drop).await
     }
 
     /// The wire half both descriptors share, with validation already done.
-    async fn open(&self, topic: MqttFilter) -> Result<MqttSubscriber, MqttError> {
+    async fn open(&self, topic: MqttFilter, on_drop: OnDrop) -> Result<MqttSubscriber, MqttError> {
         self.shared.ensure_open()?;
 
         let wire_filter = topic.wire_filter();
@@ -583,6 +607,7 @@ impl ConnectedMqttBroker {
             id,
             Arc::clone(&self.shared),
             self.link.clone(),
+            on_drop,
             rx,
         ))
     }
@@ -618,8 +643,10 @@ impl Subscribe for ConnectedMqttBroker {
     /// subscribe-only, and subscribing to one is what [`MqttFilter`] is for.
     type Copies = AddressedCopies;
 
+    /// Opens the subscription of a `#[subscriber("topic")]` handler, which stays in the session
+    /// when the service stops: its drop leaves the filter on the server.
     async fn subscribe(&self, name: &str) -> Result<Self::Subscriber, Self::Error> {
-        self.subscribe_topic(MqttTopic::new(name)).await
+        self.open_topic(MqttTopic::new(name), OnDrop::Keep).await
     }
 }
 

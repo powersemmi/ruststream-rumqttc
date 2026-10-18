@@ -25,7 +25,7 @@ use crate::asyncapi;
 use crate::broker::ConnectedMqttBroker;
 use crate::error::MqttError;
 use crate::message::is_mqtt_text;
-use crate::subscriber::MqttSubscriber;
+use crate::subscriber::{MqttSubscriber, OnDrop};
 
 /// Delivery quality of service for a subscription or a publish policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -331,8 +331,10 @@ impl SubscriptionSource<ConnectedMqttBroker> for MqttTopic {
         self.topic()
     }
 
+    /// The app's subscription stays in the session when the service stops: its drop leaves the
+    /// filter on the server.
     async fn subscribe(self, connected: &ConnectedMqttBroker) -> Result<MqttSubscriber, MqttError> {
-        connected.subscribe_topic(self).await
+        connected.open_topic(self, OnDrop::Keep).await
     }
 
     /// The quality of service this subscription receives at, which is the consumer's own setting
@@ -370,8 +372,10 @@ impl SubscriptionSource<ConnectedMqttBroker> for MqttFilter {
         self.filter()
     }
 
+    /// The app's subscription stays in the session when the service stops: its drop leaves the
+    /// filter on the server.
     async fn subscribe(self, connected: &ConnectedMqttBroker) -> Result<MqttSubscriber, MqttError> {
-        connected.subscribe_filter(self).await
+        connected.open_filter(self, OnDrop::Keep).await
     }
 
     /// The quality of service this subscription receives at, which is the consumer's own setting

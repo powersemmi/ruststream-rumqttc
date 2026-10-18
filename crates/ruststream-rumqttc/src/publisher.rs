@@ -97,10 +97,11 @@ fn into_packet(
 
 /// Publishes messages to MQTT topics through the shared connection.
 ///
-/// The publish is queued into the client session: for `QoS` 1/2 the session's state machine
-/// retransmits until the broker acknowledges (surviving reconnects), so `Ok` means "owned by
-/// the session", not "broker confirmed". Buildable before `connect` and usable until
-/// `shutdown`; afterwards every publish reports [`MqttError::NotConnected`].
+/// The publish is queued into the client session, so `Ok` means "owned by the session", not
+/// "broker confirmed". For `QoS` 1/2 the client keeps the message until the broker acknowledges
+/// it, across reconnects: a resumed session retransmits it, and a new session sends it again,
+/// where it may arrive twice. Buildable before `connect` and usable until `shutdown`; afterwards
+/// every publish reports [`MqttError::NotConnected`].
 #[derive(Clone)]
 pub struct MqttPublisher {
     cell: CoreCell,

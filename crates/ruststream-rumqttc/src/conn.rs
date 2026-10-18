@@ -19,7 +19,7 @@ use rumqttc::v5::mqttbytes::v5::{
     SubscribeReasonCode,
 };
 use rumqttc::v5::mqttbytes::{QoS, matches};
-use rumqttc::v5::{AsyncClient, ConnectionError, Event, EventLoop, StateError};
+use rumqttc::v5::{AsyncClient, ConnectionError, Event, EventLoop, Request, StateError};
 use tokio::sync::{Notify, oneshot};
 
 use crate::broker::Link;
@@ -463,6 +463,39 @@ pub(crate) struct Conn {
     pub(crate) eventloop: EventLoop,
     pub(crate) shared: Arc<Shared>,
     pub(crate) first_connack: Option<oneshot::Sender<Result<(), MqttError>>>,
+    /// What a lost connection left unconfirmed, held until the next `CONNACK` says whether the
+    /// server kept the session. The client drops all of it when the session is new, and a
+    /// publish in it already reported success to its caller.
+    pub(crate) parked: VecDeque<Request>,
+}
+
+impl Conn {
+    /// Takes over what the client set aside from the connection that just failed: the publishes
+    /// it had not seen confirmed and the requests still queued.
+    fn park(&mut self) {
+        self.parked.append(&mut self.eventloop.pending);
+    }
+
+    /// Hands back to the client what `park` took, before anything else goes out on the new
+    /// connection. A resumed session takes all of it, retransmitted the way the protocol says. A
+    /// new session knows none of the old packet ids, so only the publishes go back, as fresh ones:
+    /// the subscriptions are `connected`'s to restore, and the acknowledgements belonged to a
+    /// session that is gone.
+    fn unpark(&mut self, session_present: bool) {
+        if session_present {
+            self.eventloop.pending.append(&mut self.parked);
+            return;
+        }
+        let publishes = self.parked.drain(..).filter_map(|request| match request {
+            Request::Publish(mut publish) => {
+                publish.pkid = 0;
+                publish.dup = false;
+                Some(Request::Publish(publish))
+            }
+            _ => None,
+        });
+        self.eventloop.pending.extend(publishes);
+    }
 }
 
 /// Drives the event loop for the lifetime of the broker.
@@ -504,6 +537,9 @@ pub(crate) async fn run(mut conn: Conn) {
                     break;
                 }
                 tracing::debug!(error = %err, "mqtt connection error; backing off");
+                // The client clears what it set aside as soon as a CONNACK reports a new session,
+                // before this task sees that CONNACK.
+                conn.park();
                 // A refusal the broker issues after the TLS handshake - a client certificate it
                 // wanted and did not get - reaches the client wrapped as a deserialization error,
                 // which is what a corrupt stream looks like too. Reconnecting is right for one and
@@ -522,6 +558,7 @@ pub(crate) async fn run(mut conn: Conn) {
 fn handle_incoming(conn: &mut Conn, packet: Packet) {
     match packet {
         Packet::ConnAck(connack) => {
+            conn.unpark(connack.session_present);
             // Recorded before `connect` wakes: a subscription opened right after it reads whether
             // the server offers identifiers.
             conn.shared.connected(&conn.client, &connack);
@@ -641,5 +678,81 @@ pub(crate) fn demultiplex(
 fn unsubscribe(client: &AsyncClient, filter: &str) {
     if let Err(err) = client.try_unsubscribe(filter) {
         tracing::warn!(filter = %filter, error = %err, "mqtt unsubscribe failed");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rumqttc::v5::MqttOptions;
+    use rumqttc::v5::mqttbytes::v5::{PubRel, Publish, Subscribe};
+
+    use super::*;
+
+    /// A connection task that has never dialed, holding what a lost connection left behind.
+    fn after_a_lost_connection(left: impl IntoIterator<Item = Request>) -> Conn {
+        let (client, eventloop) = AsyncClient::new(MqttOptions::new("parked", "127.0.0.1", 1), 8);
+        let mut conn = Conn {
+            client,
+            eventloop,
+            shared: Arc::new(Shared::new()),
+            first_connack: None,
+            parked: VecDeque::new(),
+        };
+        conn.eventloop.pending.extend(left);
+        conn.park();
+        conn
+    }
+
+    fn unconfirmed(pkid: u16) -> Request {
+        let mut publish = Publish::new("readings", QoS::AtLeastOnce, "reading", None);
+        publish.pkid = pkid;
+        publish.dup = true;
+        Request::Publish(publish)
+    }
+
+    fn left_behind() -> Vec<Request> {
+        vec![
+            unconfirmed(7),
+            Request::PubRel(PubRel::new(3, None)),
+            Request::Subscribe(Subscribe::new(
+                Filter::new("readings", QoS::AtLeastOnce),
+                None,
+            )),
+            unconfirmed(0),
+        ]
+    }
+
+    #[test]
+    fn a_new_session_gets_the_publishes_again_as_fresh_ones() {
+        let mut conn = after_a_lost_connection(left_behind());
+        assert!(
+            conn.eventloop.pending.is_empty(),
+            "nothing is left for the client to clear"
+        );
+
+        conn.unpark(false);
+
+        let resent: Vec<_> = conn.eventloop.pending.drain(..).collect();
+        let mut fresh = Publish::new("readings", QoS::AtLeastOnce, "reading", None);
+        fresh.pkid = 0;
+        fresh.dup = false;
+        assert_eq!(
+            resent,
+            vec![Request::Publish(fresh.clone()), Request::Publish(fresh)]
+        );
+        assert!(conn.parked.is_empty());
+    }
+
+    #[test]
+    fn a_resumed_session_gets_everything_back_as_it_was() {
+        let mut conn = after_a_lost_connection(left_behind());
+
+        conn.unpark(true);
+
+        assert_eq!(
+            conn.eventloop.pending.drain(..).collect::<Vec<_>>(),
+            left_behind()
+        );
+        assert!(conn.parked.is_empty());
     }
 }

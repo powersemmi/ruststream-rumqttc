@@ -74,9 +74,9 @@ pub use crate::{
 };
 
 // Capability manifest deliberately empty. Of the framework's optional capabilities MQTT
-// implements only `BatchSubscriber` (see the crate overview), and the manifest is for the traits a
-// handler bounds its slot with: a batch handler names a size at its mount site and never that
-// trait. Add one here when a capability a body binds lands.
+// implements only `BatchSubscriber` (batches assembled on the client), and the manifest is for
+// the traits a handler bounds its slot with: a batch handler names a size at its mount site and
+// never that trait. Add one here when a capability a body binds lands.
 
 // Deliberately absent, do not add:
 // - `MqttMessage`, `MqttSubscriber`, `MqttPublisher`, `ConnectedMqttBroker`: a service reaches

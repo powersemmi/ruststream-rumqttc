@@ -29,7 +29,7 @@ use crate::message::MqttMessage;
 /// #[subscriber(MqttFilter::new("devices/+/telemetry"))]
 /// async fn record(telemetry: &Telemetry, ctx: &mut Context<'_, MqttContext>) -> HandlerOutcome {
 ///     let device = ctx.context(DeliveryTopic).split('/').nth(1).unwrap_or_default();
-///     println!("{device}: {}", telemetry.temperature);
+///     tracing::info!(device, telemetry.temperature, "reading recorded");
 ///     HandlerOutcome::ack()
 /// }
 ///

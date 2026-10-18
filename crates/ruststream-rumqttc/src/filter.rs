@@ -98,7 +98,7 @@ fn validate_share_group(group: Option<&String>) -> Result<(), MqttError> {
 ///
 /// #[subscriber(MqttFilter::new("devices/+/telemetry").qos(Qos::AtLeastOnce).shared("workers"))]
 /// async fn record(telemetry: &Telemetry, Ctx(topic): Ctx<DeliveryTopic>) -> HandlerOutcome {
-///     println!("{topic}: {}", telemetry.temperature);
+///     tracing::info!(%topic, telemetry.temperature, "reading recorded");
 ///     HandlerOutcome::ack()
 /// }
 ///
@@ -111,6 +111,62 @@ fn validate_share_group(group: Option<&String>) -> Result<(), MqttError> {
 ///             b.include(record)
 ///                 .out_retry(Publish::default())
 ///                 .to("devices/retry/telemetry");
+///         },
+///     )
+/// }
+/// # }
+/// # fn main() {}
+/// ```
+///
+/// A publish transform names the destination per delivery instead of once. Naming a topic with
+/// `.to(..)` and composing a naming transform are mutually exclusive: writing both does not
+/// compile.
+///
+/// ```
+/// # mod demo {
+/// use ruststream::runtime::{Names, Outgoing, PublishContext};
+/// use ruststream_rumqttc::prelude::*;
+/// use serde::Deserialize;
+///
+/// #[derive(Deserialize)]
+/// struct Command {
+///     action: String,
+/// }
+///
+/// #[subscriber(MqttFilter::new("devices/+/commands").qos(Qos::AtLeastOnce))]
+/// async fn execute(command: &Command, Ctx(topic): Ctx<DeliveryTopic>) -> HandlerOutcome {
+///     tracing::info!(command.action, %topic, "running");
+///     HandlerOutcome::ack()
+/// }
+///
+/// /// Sends every copy back to the topic its own delivery arrived on, which is the one topic of
+/// /// the filter's many that this message belongs to.
+/// struct ToDeliveryTopic;
+///
+/// impl<Options> PublishTransform<ForReply<MqttContext>, Options> for ToDeliveryTopic {
+///     type Destination = Names;
+///
+///     fn apply(
+///         &self,
+///         out: &mut Outgoing<'_>,
+///         _options: &mut Option<Options>,
+///         cx: &PublishContext<'_, MqttContext>,
+///     ) {
+///         out.set_name(cx.context(DeliveryTopic).to_owned());
+///     }
+/// }
+///
+/// #[ruststream::app]
+/// fn app() -> impl App {
+///     RustStream::new(AppInfo::new("commands", "0.1.0")).with_broker(
+///         MqttBroker::new("mqtt://localhost:1883", "commands-svc"),
+///         |b| {
+///             // A copy returns to the device it came from rather than to one topic for the fleet.
+///             b.include(execute)
+///                 .max_attempts(nonzero!(5u32))
+///                 .dead_letter("dead/commands")
+///                 .out_retry(Publish::default())
+///                 .transform(ToDeliveryTopic);
 ///         },
 ///     )
 /// }
@@ -197,29 +253,36 @@ impl FromName for MqttFilter {
 ///
 /// ```
 /// # mod demo {
+/// use std::time::Duration;
+///
 /// use ruststream_rumqttc::prelude::*;
 /// use serde::Deserialize;
 ///
 /// #[derive(Deserialize)]
-/// struct Command {
-///     action: String,
+/// struct Reading {
+///     device: String,
+///     temperature: f64,
 /// }
 ///
-/// #[subscriber(MqttTopic::new("devices/dev42/commands").qos(Qos::AtLeastOnce).shared("workers"))]
-/// async fn execute(command: &Command) -> HandlerOutcome {
-///     println!("running {}", command.action);
+/// #[subscriber(MqttTopic::new("devices/dev42/telemetry").shared("workers"))]
+/// async fn store(reading: &Reading) -> HandlerOutcome {
+///     if reading.temperature.is_nan() {
+///         // A sensor glitch: ask for the reading again in five seconds.
+///         return HandlerOutcome::retry_after(Duration::from_secs(5));
+///     }
+///     tracing::info!(reading.device, reading.temperature, "reading stored");
 ///     HandlerOutcome::ack()
 /// }
 ///
 /// #[ruststream::app]
 /// fn app() -> impl App {
-///     RustStream::new(AppInfo::new("commands", "0.1.0")).with_broker(
-///         MqttBroker::new("mqtt://localhost:1883", "commands-svc"),
+///     RustStream::new(AppInfo::new("telemetry", "0.1.0")).with_broker(
+///         MqttBroker::new("mqtt://localhost:1883", "telemetry-svc"),
 ///         |b| {
 ///             // A topic addresses its own retry copies, so the mount site names no destination.
-///             b.include(execute)
+///             b.include(store)
 ///                 .max_attempts(nonzero!(5u32))
-///                 .dead_letter("dead/commands");
+///                 .dead_letter("dead/telemetry");
 ///         },
 ///     )
 /// }

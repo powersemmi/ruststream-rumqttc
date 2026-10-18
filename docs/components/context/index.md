@@ -13,7 +13,7 @@ import TabItem from '@theme/TabItem';
 [`MqttContext`](api:ruststream_rumqttc::MqttContext) is what a delivery carries besides its payload and headers.
 The subscription builds it once per delivery.
 It holds one field, the topic, under the key [`DeliveryTopic`](api:ruststream_rumqttc::DeliveryTopic).
-Both are in the prelude.
+Both are in the [prelude](../broker/prelude.md).
 A handler binds the topic as a parameter with [`Ctx<DeliveryTopic>`](api:ruststream::runtime::Ctx), which hands it over as a `String`.
 A body that takes `ctx: &mut Context<'_, MqttContext>` reads it borrowed with `ctx.context(DeliveryTopic)`, as the manual form does.
 

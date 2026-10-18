@@ -18,7 +18,8 @@ The crate attaches an identifier only to a filter that meets another one on the 
 A share group next to a plain subscription on the same filter overlaps the same way.
 
 The same filter mounted twice, or two members of one share group, is one subscription to the server.
-The crate hands its deliveries to the mounts in turn, and the filter stays subscribed until the last of them is dropped.
+The crate hands its deliveries to the mounts in turn, and the filter stays subscribed while any of them is open.
+A [shutdown](../broker/shutdown.md) leaves it in the [session](../broker/session.md).
 
 A server announces whether it offers subscription identifiers when the connection opens.
 On a server without them, a filter that meets another one on the same connection does not open, and the error names both filters.

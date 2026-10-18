@@ -17,7 +17,7 @@ A filter that starts with a wildcard does not match a topic that starts with `$`
 [`qos`](api:ruststream_rumqttc::MqttFilter::qos) sets the [quality of service](./qos.md), and [`shared`](api:ruststream_rumqttc::MqttFilter::shared) puts the subscription in a [share group](./shared.md).
 The subscription's name is the filter.
 A handler reads the topic each message was published to through [`DeliveryTopic`](../context/index.md).
-A filter with `#` before its last level, or one with a control character, stops the service at startup.
+A filter with `#` before its last level, or one with a control character, stops the service at [startup](../broker/startup.md).
 
 A filter is no topic a publisher can use, so the subscription has no topic of its own for a [`retry_after`](../settlement/retry-after.md) copy.
 The mount site names one with `.out_retry(policy).to(topic)`, or names one per delivery with a [transform](../settlement/out-retry.md).

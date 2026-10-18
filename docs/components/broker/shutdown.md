@@ -14,15 +14,15 @@ Shutdown sends a clean `DISCONNECT` and waits up to 5 s for what is queued to le
 The runtime stops reading first and lets the handlers in flight finish.
 How long they get is the app's [`shutdown_timeout`](api:ruststream::runtime::RustStream::shutdown_timeout), with no bound by default.
 Their publishes and acknowledgements join the client's queue as they settle.
-Each subscription unsubscribes its filter as it closes, so a persistent [session](./session.md) keeps no subscription past a clean shutdown.
+Each subscription leaves its filter on the server as it closes, so a persistent [session](./session.md) keeps the app's subscriptions, and the server queues what arrives until the service returns.
 
 Then the broker sends a `DISCONNECT` behind everything already queued.
 It waits up to 5 seconds for the connection task to write the queue out, and logs a warning when they run out.
 The server discards the [last will](./last-will.md) of a connection that ends this way.
 
-A publisher taken before the shutdown keeps pointing at the closed connection.
+A [publisher](../publishing/index.md) taken before the shutdown keeps pointing at the closed connection.
 A publish through it returns `MqttError::NotConnected` and never succeeds against the dead connection.
-An acknowledgement after the shutdown is refused too.
+An [acknowledgement](../settlement/index.md) after the shutdown is refused too.
 
 ## Example
 

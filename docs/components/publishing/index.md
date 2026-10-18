@@ -1,6 +1,6 @@
 ---
 title: MqttPublish
-description: "MqttPublish, Publish in the prelude, sets the QoS and the retain flag; a publish returns once the client session owns the message."
+description: "MqttPublish, Publish in the prelude, sets the [QoS](../subscriptions/qos.md) and the [retain](./retained.md) flag; a publish returns once the client session owns the message."
 ---
 
 import Tabs from '@theme/Tabs';

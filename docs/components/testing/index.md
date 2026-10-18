@@ -14,16 +14,16 @@ A test hands the harness the app `main` runs, unchanged, and addresses the broke
 The `testing` feature in `[dev-dependencies]` adds the in-process mode, and turns on the core's harness with it.
 
 The in-process server has no settings of its own.
-It reads the broker's, and checks them as the connect does: a keep-alive under five seconds or an `mqtts://` URL without `tls_ca` fails `TestApp::start`.
+It reads the broker's, and checks them as the connect does: a [keep-alive](../broker/reconnect.md) under five seconds or an `mqtts://` URL without [`tls_ca`](../broker/security.md) fails `TestApp::start`.
 A publish goes through the same validation and the same mapping onto MQTT 5 properties as on the wire.
 
 It routes as a server routes.
 A publish reaches every subscription whose filter matches its topic, `+` and `#` included, and a filter starting with a wildcard skips the topics that start with `$`.
-A share group hands each message to one of its members.
-Two overlapping filters each receive their own copy, as a server sends them.
+A [share group](../subscriptions/shared.md) hands each message to one of its members.
+Two [overlapping filters](../subscriptions/overlaps.md) each receive their own copy, as a server sends them.
 A delivery arrives at the lower of the publish and the subscription QoS, and a QoS 0 delivery has nothing to acknowledge.
-A retained message reaches every later subscription outside a share group, and an empty retained payload clears it.
-A message over the broker's `max_packet_size` never arrives, and a publish or an acknowledgement after shutdown is refused.
+A [retained message](../publishing/retained.md) reaches every later subscription outside a share group, and an empty retained payload clears it.
+A message over the broker's [`max_packet_size`](../broker/limits.md) never arrives, and a publish or an acknowledgement after shutdown is refused.
 
 A publish through the harness returns once every handler it woke has settled, a reply included.
 The assertions that follow read finished state.

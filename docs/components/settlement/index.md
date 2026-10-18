@@ -10,7 +10,7 @@ import TabItem from '@theme/TabItem';
 
 An [`ack`](api:ruststream::runtime::HandlerOutcome::ack) sends PUBACK at QoS 1 and PUBREC at QoS 2; QoS 0 has no acknowledgement, and MQTT has no negative one.
 
-A message settles when the handler returns, and the delivery's own quality of service decides what that sends.
+A message settles when the handler returns, and the delivery's own [quality of service](../subscriptions/qos.md) decides what that sends.
 A delivery arrives at the lower of the publisher's QoS and the subscription's, so a QoS 1 subscription still receives a QoS 0 publish at QoS 0.
 At QoS 1 and 2 the server keeps a delivery until it is acknowledged; the client finishes the QoS 2 handshake on its own.
 A QoS 0 delivery has no acknowledgement packet, so settling it reports [`AckError::Unsupported`](api:ruststream::AckError::Unsupported), which the runtime logs as a warning.
@@ -18,7 +18,7 @@ A QoS 0 delivery has no acknowledgement packet, so settling it reports [`AckErro
 [`retry`](./retry.md) asks for a negative acknowledgement, which MQTT does not have, so the delivery stays unacknowledged.
 [`retry_after`](./retry-after.md) is the outcome that retries within the session.
 In the manual form `Ok` acknowledges and `Err(outcome)` settles by the outcome.
-When the server sends one packet for two overlapping filters, the acknowledgement belongs to one delivery, and settling the other reports `Unsupported`.
+When the server sends one packet for two [overlapping filters](../subscriptions/overlaps.md), the acknowledgement belongs to one delivery, and settling the other reports `Unsupported`.
 
 ## Example
 

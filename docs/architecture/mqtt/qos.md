@@ -60,10 +60,11 @@ default, and [`receive_maximum`](../../components/broker/limits.md) changes it. 
 bound on what a slow subscription has waiting for it. QoS 0 deliveries take no part in it.
 
 A publish from the service returns once `rumqttc` has taken the message onto its request channel,
-which holds 64 requests, not once the server has acknowledged it. `rumqttc` keeps each QoS 1 and
-QoS 2 publish until the server acknowledges it. After a reconnect it sends them again when the
-server reports the session present. A reconnect that starts a new session drops them, together
-with the requests still waiting on the channel.
+which holds 64 requests, not once the server has acknowledged it. Each QoS 1 and QoS 2 publish
+is kept until the server acknowledges it. After a reconnect that resumes the session, `rumqttc`
+sends them again the way the protocol says. After a reconnect that starts a new session, the
+connection task sends them again as new publishes. The server cannot tell a message it already
+received, so such a message may arrive twice, at QoS 2 too.
 
 The flows are the protocol's own, from sections 4.3 and 4.9 of the
 [MQTT 5.0 standard](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html).

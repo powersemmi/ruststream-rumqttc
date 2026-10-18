@@ -42,8 +42,8 @@ apart, and subscriptions on one filter take turns.
 The server subscribes a filter once per connection. Two handlers on the same filter, or the two
 members of a share group in one service, are one subscription on the server and two subscriptions
 in the service. The crate hands the filter's deliveries to them in turn. The filter stays
-subscribed until the last of them closes, and it is subscribed at the highest quality of service
-any of them asks for.
+subscribed while any of them is open, and a shutdown leaves it in the session. It is subscribed at
+the highest quality of service any of them asks for.
 
 Filters that differ but can match one topic, `devices/+/telemetry` next to `devices/#` or a share
 group next to a plain subscription on its filter, are separate subscriptions on the server. For a

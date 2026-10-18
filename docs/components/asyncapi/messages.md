@@ -11,7 +11,7 @@ import TabItem from '@theme/TabItem';
 
 Each message reports the MQTT 5 properties it rides: a delivery the response topic and correlation data, a published message the correlation data.
 
-The crate carries two headers in the protocol's own properties: `correlation-id` in Correlation Data and `reply-to` in Response Topic.
+The crate carries two [headers](../publishing/headers.md) in the protocol's own properties: `correlation-id` in Correlation Data and `reply-to` in Response Topic.
 The message binding describes them, each as a string.
 A message a subscription reads reports both.
 A requester sets the response topic on its own request, and a message a service publishes is not that request.

@@ -14,9 +14,9 @@ import TabItem from '@theme/TabItem';
 The outcome asks the broker for a negative acknowledgement, and MQTT has none.
 The runtime logs the refusal and moves on, and nothing acknowledges the delivery later.
 At QoS 1 and 2 the server keeps the message in the client's session.
-It sends the message again when the service connects with the same client id and the session is still there: [`clean_start(false)`](api:ruststream_rumqttc::MqttBroker::clean_start) and a [`session_expiry`](api:ruststream_rumqttc::MqttBroker::session_expiry) longer than the gap.
+It sends the message again when the service connects with the same client id and the session is still there: [`clean_start(false)`](../broker/session.md) and a [`session_expiry`](../broker/session.md) longer than the gap.
 With a clean start, or once the session expired, the message is gone; at QoS 0 it is gone at once.
-Until the connection ends, the delivery holds one slot of the [`receive_maximum`](api:ruststream_rumqttc::MqttBroker::receive_maximum) window, 1000 by default.
+Until the connection ends, the delivery holds one slot of the [`receive_maximum`](../broker/limits.md) window, 1000 by default.
 When the window is full of unacknowledged deliveries, the server sends no more QoS 1 or 2 messages on that connection.
 For a retry within the session, a handler returns [`retry_after`](./retry-after.md).
 A registration with a [cap](./retries.md) turns `retry()` into an immediate copy of the message instead.

@@ -17,7 +17,7 @@ The values reach the client as the protocol fields they are, so a subscriber rec
 A publish with no call site of its own, a reply or a retry copy, takes the policy whole.
 The steps are reached from a slot whose bound names the options type: `Out<impl Publisher<Options = MqttPublishOptions>, Slot>`.
 That bound and this crate's prelude are the one place a handler body names the broker.
-A test reads what the steps set with `tb.out::<Slot>().with_options(&MqttPublishOptions::default().retain(true))`.
+A [test](../testing/index.md) reads what the steps set with `tb.out::<Slot>().with_options(&MqttPublishOptions::default().retain(true))`.
 
 ## Example
 

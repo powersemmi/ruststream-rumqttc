@@ -24,6 +24,20 @@ use crate::message::MqttMessage;
 /// the harness as it does on a server.
 pub(crate) const BATCH_MAX_WAIT: Duration = Duration::from_millis(20);
 
+/// What dropping a subscription does to its filter on the server.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum OnDrop {
+    /// Opened by hand, so the drop is the caller's decision to stop reading while the connection
+    /// lives on: the filter leaves the server once no other subscription on the connection shares
+    /// it.
+    Unsubscribe,
+    /// Opened for the service's app, whose runtime drops its subscriptions only while the service
+    /// stops, right before it shuts the connection down. The filter stays on the server: a
+    /// persistent session keeps receiving for it while the service is away, and a clean one ends
+    /// with the `DISCONNECT` anyway.
+    Keep,
+}
+
 /// The wire half of a subscription: whatever the connection demultiplexed onto this filter's
 /// channel, one delivery at a time, which is all the protocol offers.
 ///
@@ -33,6 +47,7 @@ struct WireSubscriber {
     id: u64,
     shared: Arc<Shared>,
     link: Link,
+    on_drop: OnDrop,
     rx: mpsc::UnboundedReceiver<Result<MqttMessage, MqttError>>,
 }
 
@@ -44,7 +59,10 @@ impl std::fmt::Debug for WireSubscriber {
 
 impl Drop for WireSubscriber {
     fn drop(&mut self) {
-        self.shared.release(self.id, &self.link);
+        match self.on_drop {
+            OnDrop::Unsubscribe => self.shared.release(self.id, &self.link),
+            OnDrop::Keep => self.shared.leave(self.id),
+        }
     }
 }
 
@@ -64,8 +82,15 @@ impl Subscriber for WireSubscriber {
 ///
 /// Delivery back-pressure is the protocol's receive-maximum: the broker bounds unacked
 /// `QoS` 1/2 deliveries, so unsettled messages cap what sits in this subscriber's queue
-/// (`QoS` 0 has no such bound by design). Dropping the subscriber unsubscribes the filter once no
-/// other subscriber on this connection shares it.
+/// (`QoS` 0 has no such bound by design).
+///
+/// A subscription the app opened stays in the session when the service stops: the broker keeps
+/// its filter, and a persistent session queues what arrives for it until the service starts
+/// again. Dropping one opened by hand ([`subscribe_topic`], [`subscribe_filter`]) unsubscribes
+/// the filter once no other subscriber on this connection shares it.
+///
+/// [`subscribe_topic`]: crate::ConnectedMqttBroker::subscribe_topic
+/// [`subscribe_filter`]: crate::ConnectedMqttBroker::subscribe_filter
 ///
 /// MQTT has no batch fetch - a PUBLISH packet carries one message - so the batches a `&[T]`
 /// handler consumes are assembled on the client by the framework's
@@ -91,6 +116,7 @@ impl MqttSubscriber {
         id: u64,
         shared: Arc<Shared>,
         link: Link,
+        on_drop: OnDrop,
         rx: mpsc::UnboundedReceiver<Result<MqttMessage, MqttError>>,
     ) -> Self {
         Self {
@@ -99,6 +125,7 @@ impl MqttSubscriber {
                 id,
                 shared,
                 link,
+                on_drop,
                 rx,
             })
             .max_wait(BATCH_MAX_WAIT),

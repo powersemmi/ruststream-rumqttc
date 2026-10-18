@@ -328,6 +328,12 @@ impl Shared {
         }
     }
 
+    /// Takes the local subscription `member` out and leaves its filter on the server, where the
+    /// session keeps it.
+    pub(crate) fn leave(&self, member: u64) {
+        self.release_with(member, |_| {});
+    }
+
     /// Takes the local subscription `member` out, and hands its filter to `take_off` when no other
     /// local subscription shares it.
     pub(crate) fn release_with(&self, member: u64, take_off: impl FnOnce(String)) {

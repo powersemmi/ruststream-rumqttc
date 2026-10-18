@@ -153,7 +153,7 @@ pub(crate) type CoreCell = Arc<OnceCell<Core>>;
 ///
 /// #[subscriber(MqttTopic::new("orders/created"))]
 /// async fn confirm(order: &Order) -> HandlerOutcome {
-///     println!("order {} confirmed", order.id);
+///     tracing::info!(order.id, "order confirmed");
 ///     HandlerOutcome::ack()
 /// }
 ///
@@ -171,6 +171,88 @@ pub(crate) type CoreCell = Arc<OnceCell<Core>>;
 ///     )
 /// }
 /// # }
+/// # fn main() {}
+/// ```
+///
+/// With the `testing` feature the same broker has an in-process mode, so a test hands the app
+/// `main` runs to `TestApp::start` unchanged and addresses the broker by this type. The
+/// in-process server reads this broker's settings and models the one this connection talks to:
+/// wildcards, share groups, retained messages and the quality of service each subscription reads
+/// at. `TestApp::start_live` runs the same test body against a running server, for a persistent
+/// session, the last will and the receive-maximum window.
+///
+/// ```
+/// # #[cfg(feature = "testing")]
+/// # mod demo {
+/// use std::error::Error;
+///
+/// use ruststream::testing::TestApp;
+/// use ruststream_rumqttc::prelude::*;
+/// use serde::{Deserialize, Serialize};
+///
+/// #[derive(Debug, Deserialize, Serialize, Outgoing)]
+/// struct Telemetry {
+///     device: String,
+///     temperature: f64,
+/// }
+///
+/// #[derive(Debug, PartialEq, Deserialize, Serialize, Outgoing)]
+/// #[outgoing(name = "alerts")]
+/// struct Alert {
+///     device: String,
+/// }
+///
+/// #[subscriber(MqttFilter::new("devices/+/telemetry").qos(Qos::AtLeastOnce).shared("workers"))]
+/// async fn handle(telemetry: &Telemetry, Out(alerts): Out<impl Publisher>) -> HandlerOutcome {
+///     if telemetry.temperature <= 30.0 {
+///         return HandlerOutcome::ack();
+///     }
+///     let alert = Alert { device: telemetry.device.clone() };
+///     if alerts.message(&alert).publish().await.is_err() {
+///         return HandlerOutcome::retry();
+///     }
+///     HandlerOutcome::ack()
+/// }
+///
+/// /// The app `main` runs, and the one the tests hand the harness.
+/// pub fn app() -> impl App {
+///     RustStream::new(AppInfo::new("telemetry", "0.1.0")).with_broker(
+///         MqttBroker::new("mqtt://localhost:1883", "telemetry-svc"),
+///         |b| {
+///             b.include(handle)
+///                 .out(DefaultSlot, Publish::default().qos(Qos::AtLeastOnce))
+///                 .out_retry(Publish::default())
+///                 .to("devices/retry/telemetry")
+///                 .build();
+///         },
+///     )
+/// }
+///
+/// pub async fn a_hot_reading_raises_an_alert() -> Result<(), Box<dyn Error>> {
+///     let tb = TestApp::start(app()).await?;
+///
+///     tb.broker::<MqttBroker>()
+///         .message(&Telemetry { device: "dev42".to_owned(), temperature: 31.5 })
+///         .to("devices/dev42/telemetry")
+///         .publish()
+///         .await?;
+///
+///     tb.broker::<MqttBroker>()
+///         .published::<Alert>("alerts")
+///         .assert_called_once()
+///         .with(&Alert { device: "dev42".to_owned() });
+///     tb.shutdown().await?;
+///     Ok(())
+/// }
+/// # }
+/// # #[cfg(feature = "testing")]
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// #     tokio::runtime::Builder::new_multi_thread()
+/// #         .enable_all()
+/// #         .build()?
+/// #         .block_on(demo::a_hot_reading_raises_an_alert())
+/// # }
+/// # #[cfg(not(feature = "testing"))]
 /// # fn main() {}
 /// ```
 #[derive(Debug, Clone)]
@@ -217,7 +299,9 @@ impl MqttBroker {
         self
     }
 
-    /// Sets the keep-alive interval (the protocol floor is 5 seconds).
+    /// Sets the keep-alive interval: the longest silence the connection allows before the server
+    /// ends it. The `rumqttc` client's minimum is 5 seconds, and a shorter interval fails
+    /// [`connect`](Broker::connect) with [`MqttError::Invalid`] before any I/O.
     pub fn keep_alive(mut self, keep_alive: Duration) -> Self {
         self.keep_alive = Some(keep_alive);
         self
@@ -330,7 +414,7 @@ impl MqttBroker {
             && keep_alive < Duration::from_secs(5)
         {
             return Err(MqttError::Invalid(
-                "keep_alive must be at least 5 seconds".into(),
+                "keep_alive must be at least 5 seconds, the rumqttc client's minimum".into(),
             ));
         }
 
@@ -806,20 +890,21 @@ mod tests {
         }
     }
 
-    /// The floor is the protocol's, and a value below it is refused where the service can still
-    /// see it: before any I/O, with the number named. A broker that took it would negotiate a
-    /// keep-alive nobody asked for.
+    /// The minimum is the `rumqttc` client's, which asserts on a smaller value, so a value below
+    /// it is refused where the service can still see it: before any I/O, naming the number and
+    /// whose minimum it is, instead of a panic inside the client.
     #[tokio::test]
-    async fn a_keep_alive_below_the_protocol_floor_is_refused_before_any_io() {
+    async fn a_keep_alive_below_the_client_minimum_is_refused_before_any_io() {
         let error = broker("mqtt://127.0.0.1:1")
             .keep_alive(Duration::from_secs(1))
             .connect()
             .await
-            .expect_err("the protocol floor is five seconds");
+            .expect_err("the client's minimum is five seconds");
 
         assert!(
-            matches!(&error, MqttError::Invalid(reason) if reason.contains("5 seconds")),
-            "the refusal names the floor: {error}"
+            matches!(&error, MqttError::Invalid(reason)
+                if reason.contains("5 seconds") && reason.contains("rumqttc client's minimum")),
+            "the refusal names the minimum and whose it is: {error}"
         );
     }
 

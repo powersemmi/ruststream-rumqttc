@@ -13,6 +13,7 @@
 )]
 
 use std::collections::VecDeque;
+use std::num::{NonZeroU16, NonZeroU32};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -130,6 +131,10 @@ impl std::fmt::Debug for Core {
 }
 
 pub(crate) type CoreCell = Arc<OnceCell<Core>>;
+
+// The client's incoming default is 10 KiB, far below real payloads.
+const DEFAULT_MAX_PACKET_SIZE: NonZeroU32 = NonZeroU32::new(1024 * 1024).unwrap();
+const DEFAULT_RECEIVE_MAXIMUM: NonZeroU16 = NonZeroU16::new(1000).unwrap();
 
 /// An MQTT 5 broker for the `RustStream` messaging framework.
 ///
@@ -264,8 +269,8 @@ pub struct MqttBroker {
     keep_alive: Option<Duration>,
     clean_start: Option<bool>,
     session_expiry: Option<u32>,
-    max_packet_size: u32,
-    receive_maximum: u16,
+    max_packet_size: NonZeroU32,
+    receive_maximum: NonZeroU16,
     last_will: Option<(String, Vec<u8>, Qos, bool)>,
     tls_ca: Option<Vec<u8>>,
     tls_client_auth: Option<(Vec<u8>, Vec<u8>)>,
@@ -283,9 +288,8 @@ impl MqttBroker {
             keep_alive: None,
             clean_start: None,
             session_expiry: None,
-            // The client's incoming default is 10 KiB, far below real payloads.
-            max_packet_size: 1024 * 1024,
-            receive_maximum: 1000,
+            max_packet_size: DEFAULT_MAX_PACKET_SIZE,
+            receive_maximum: DEFAULT_RECEIVE_MAXIMUM,
             last_will: None,
             tls_ca: None,
             tls_client_auth: None,
@@ -323,15 +327,106 @@ impl MqttBroker {
     }
 
     /// The maximum incoming packet size. Defaults to 1 MiB (the client's own default is a
-    /// 10 KiB cap that kills the connection on larger payloads).
-    pub fn max_packet_size(mut self, bytes: u32) -> Self {
+    /// 10 KiB cap that kills the connection on larger payloads). The server discards a message
+    /// larger than this instead of sending it.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # mod demo {
+    /// use std::num::NonZeroU32;
+    ///
+    /// use ruststream_rumqttc::prelude::*;
+    /// use serde::Deserialize;
+    ///
+    /// // A telemetry frame never exceeds 4 KiB; a larger packet is not worth receiving.
+    /// const MAX_FRAME: NonZeroU32 = NonZeroU32::new(4 * 1024).unwrap();
+    ///
+    /// #[derive(Deserialize)]
+    /// struct Frame {
+    ///     sensor: String,
+    /// }
+    ///
+    /// #[subscriber(MqttTopic::new("telemetry/frames"))]
+    /// async fn record(frame: &Frame) -> HandlerOutcome {
+    ///     tracing::info!(sensor = %frame.sensor, "frame recorded");
+    ///     HandlerOutcome::ack()
+    /// }
+    ///
+    /// #[ruststream::app]
+    /// fn app() -> impl App {
+    ///     RustStream::new(AppInfo::new("telemetry", "0.1.0")).with_broker(
+    ///         MqttBroker::new("mqtt://localhost:1883", "telemetry-svc").max_packet_size(MAX_FRAME),
+    ///         |b| {
+    ///             b.include(record);
+    ///         },
+    ///     )
+    /// }
+    /// # }
+    /// # fn main() {}
+    /// ```
+    ///
+    /// A zero limit is a protocol error the server refuses the connection with, so it does not
+    /// compile:
+    ///
+    /// ```compile_fail,E0308
+    /// use ruststream_rumqttc::MqttBroker;
+    ///
+    /// let broker = MqttBroker::new("mqtt://localhost:1883", "telemetry-svc").max_packet_size(0);
+    /// ```
+    pub fn max_packet_size(mut self, bytes: NonZeroU32) -> Self {
         self.max_packet_size = bytes;
         self
     }
 
     /// Flow control: how many unacknowledged `QoS` 1/2 deliveries the broker may have in
     /// flight, which is also what bounds an unread subscriber queue. Defaults to 1000.
-    pub fn receive_maximum(mut self, maximum: u16) -> Self {
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # mod demo {
+    /// use std::num::NonZeroU16;
+    ///
+    /// use ruststream_rumqttc::prelude::*;
+    /// use serde::Deserialize;
+    ///
+    /// // Each render takes seconds, so the broker holds the rest of the backlog.
+    /// const IN_FLIGHT: NonZeroU16 = NonZeroU16::new(8).unwrap();
+    ///
+    /// #[derive(Deserialize)]
+    /// struct Render {
+    ///     scene: String,
+    /// }
+    ///
+    /// #[subscriber(MqttTopic::new("renders/requested").qos(Qos::AtLeastOnce))]
+    /// async fn render(job: &Render) -> HandlerOutcome {
+    ///     tracing::info!(scene = %job.scene, "scene rendered");
+    ///     HandlerOutcome::ack()
+    /// }
+    ///
+    /// #[ruststream::app]
+    /// fn app() -> impl App {
+    ///     RustStream::new(AppInfo::new("renderer", "0.1.0")).with_broker(
+    ///         MqttBroker::new("mqtt://localhost:1883", "renderer-svc").receive_maximum(IN_FLIGHT),
+    ///         |b| {
+    ///             b.include(render);
+    ///         },
+    ///     )
+    /// }
+    /// # }
+    /// # fn main() {}
+    /// ```
+    ///
+    /// A zero maximum is a protocol error the server refuses the connection with, so it does not
+    /// compile:
+    ///
+    /// ```compile_fail,E0308
+    /// use ruststream_rumqttc::MqttBroker;
+    ///
+    /// let broker = MqttBroker::new("mqtt://localhost:1883", "renderer-svc").receive_maximum(0);
+    /// ```
+    pub fn receive_maximum(mut self, maximum: NonZeroU16) -> Self {
         self.receive_maximum = maximum;
         self
     }
@@ -431,8 +526,8 @@ impl MqttBroker {
         if let Some(expiry) = self.session_expiry {
             options.set_session_expiry_interval(Some(expiry));
         }
-        options.set_max_packet_size(Some(self.max_packet_size));
-        options.set_receive_maximum(Some(self.receive_maximum));
+        options.set_max_packet_size(Some(self.max_packet_size.get()));
+        options.set_receive_maximum(Some(self.receive_maximum.get()));
         options.set_manual_acks(true);
         if let Some((topic, payload, qos, retain)) = &self.last_will {
             options.set_last_will(LastWill::new(
@@ -533,7 +628,7 @@ impl Broker for MqttBroker {
 impl InProcess for MqttBroker {
     async fn connect_in_process(self) -> Result<Self::Connected, Self::Error> {
         self.options()?;
-        let max_packet_size = self.max_packet_size;
+        let max_packet_size = self.max_packet_size.get();
         let core = self
             .cell
             .get_or_try_init(async || {
@@ -575,7 +670,7 @@ impl MqttBroker {
                 }),
             keep_alive: self.keep_alive.map(|interval| interval.as_secs()),
             session_expiry_interval: self.session_expiry,
-            maximum_packet_size: self.max_packet_size,
+            maximum_packet_size: self.max_packet_size.get(),
         })
     }
 }

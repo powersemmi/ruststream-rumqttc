@@ -3,6 +3,7 @@
 //! Start one with `just brokers-up` (mosquitto), then:
 //! `MQTT_TEST_URL=mqtt://127.0.0.1:1883 cargo test --all-features -- --test-threads=1`.
 
+use std::num::{NonZeroU16, NonZeroU32};
 use std::path::{Path, PathBuf};
 use std::pin::pin;
 use std::time::Duration;
@@ -865,7 +866,7 @@ async fn the_announced_maximum_packet_size_decides_what_the_broker_sends() {
     let topic = unique("large");
     let roomy = connect(&url, "roomy").await;
     let cramped = MqttBroker::new(&url, format!("it-cramped-{}", std::process::id()))
-        .max_packet_size(1024)
+        .max_packet_size(const { NonZeroU32::new(1024).unwrap() })
         .connect()
         .await
         .expect("broker connects");
@@ -930,7 +931,7 @@ async fn the_receive_maximum_holds_deliveries_at_the_broker_until_one_is_settled
 
     let topic = unique("inflight");
     let consumer = MqttBroker::new(&url, format!("it-inflight-{}", std::process::id()))
-        .receive_maximum(1)
+        .receive_maximum(NonZeroU16::MIN)
         .connect()
         .await
         .expect("broker connects");

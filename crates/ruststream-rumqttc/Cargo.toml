@@ -381,3 +381,15 @@ name = "manual_guide_getting_started"
 path = "examples/manual/guide/getting_started.rs"
 required-features = ["testing"]
 test = true
+
+[[example]]
+name = "guide_topics"
+path = "examples/guide/topics.rs"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "manual_guide_topics"
+path = "examples/manual/guide/topics.rs"
+required-features = ["testing"]
+test = true

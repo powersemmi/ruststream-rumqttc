@@ -53,3 +53,104 @@ ruststream = { workspace = true, features = [
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time"] }
+
+# --- examples: components-subscriptions ---
+
+[[example]]
+name = "mqtt_subscriptions_name"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "manual_mqtt_subscriptions_name"
+path = "examples/manual/mqtt_subscriptions_name.rs"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "mqtt_subscriptions_topic"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "manual_mqtt_subscriptions_topic"
+path = "examples/manual/mqtt_subscriptions_topic.rs"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "mqtt_subscriptions_filter"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "manual_mqtt_subscriptions_filter"
+path = "examples/manual/mqtt_subscriptions_filter.rs"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "mqtt_subscriptions_qos"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "manual_mqtt_subscriptions_qos"
+path = "examples/manual/mqtt_subscriptions_qos.rs"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "mqtt_subscriptions_shared"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "manual_mqtt_subscriptions_shared"
+path = "examples/manual/mqtt_subscriptions_shared.rs"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "mqtt_subscriptions_overlaps"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "manual_mqtt_subscriptions_overlaps"
+path = "examples/manual/mqtt_subscriptions_overlaps.rs"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "mqtt_batches"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "manual_mqtt_batches"
+path = "examples/manual/mqtt_batches.rs"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "mqtt_context"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "manual_mqtt_context"
+path = "examples/manual/mqtt_context.rs"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "mqtt_asyncapi"
+required-features = ["asyncapi"]
+test = true
+
+[[example]]
+name = "manual_mqtt_asyncapi"
+path = "examples/manual/mqtt_asyncapi.rs"
+required-features = ["asyncapi"]
+test = true

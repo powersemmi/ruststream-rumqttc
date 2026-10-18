@@ -52,9 +52,15 @@ jobs:
               - '.github/workflows/ci.yml'
             docs:
               - 'docs/**'
-              - 'properdocs.yml'
-              - 'overrides/**'
+              - 'website/**'
               - 'crates/ruststream-rumqttc/examples/**'
+              # API links on the pages resolve against the crates' rustdoc, so a renamed item
+              # rebuilds the site and fails it on a link that no longer resolves
+              - 'crates/ruststream-rumqttc/src/**'
+              - 'crates/ruststream-rumqttc/Cargo.toml'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'scripts/site_rustdoc.sh'
               - 'scripts/lint_doc_fences.py'
               - 'scripts/check_doc_i18n.py'
               - 'scripts/doc_glossary.toml'
@@ -348,12 +354,15 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-node@v7
         with:
-          python-version: "3.12"
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: website/package-lock.json
 
-      - name: Install docs toolchain
-        run: pip install -r docs/requirements.txt
+      - name: Install site toolchain
+        working-directory: website
+        run: npm ci
 
       - name: Lint doc code fences
         run: python3 scripts/lint_doc_fences.py
@@ -361,8 +370,27 @@ jobs:
       - name: Check translated pages against their originals
         run: python3 scripts/check_doc_i18n.py
 
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      # The API links on the pages resolve against this rustdoc, the one docs.rs renders for the
+      # same code; an item it lacks fails the build below.
+      - name: Build the rustdoc the API links resolve against
+        run: scripts/site_rustdoc.sh
+
+      # Strict: a broken link, anchor, Markdown link or API link fails the build.
       - name: Build site (strict)
-        run: properdocs build --strict
+        working-directory: website
+        run: npm run build
+
+      - name: Type-check and test site components
+        working-directory: website
+        run: |
+          npm run typecheck
+          npm run test
 
   codeql:
     name: CodeQL (${{ matrix.language }})

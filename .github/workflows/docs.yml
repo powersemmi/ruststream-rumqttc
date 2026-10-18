@@ -11,15 +11,14 @@ on:
     # check, or the label leaves a stale red run blocking the merge.
     types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
     paths:
-      - docs/**
-      - properdocs.yml
-      - overrides/**
-      - crates/ruststream-rumqttc/examples/**
-      - scripts/lint_doc_fences.py
-      - scripts/check_doc_i18n.py
-      - scripts/check_doc_parity.py
-      - scripts/doc_glossary.toml
-      - .github/workflows/docs.yml
+      - "docs/**"
+      - "website/i18n/**"
+      - "crates/ruststream-rumqttc/examples/**"
+      - "scripts/lint_doc_fences.py"
+      - "scripts/check_doc_i18n.py"
+      - "scripts/check_doc_parity.py"
+      - "scripts/doc_glossary.toml"
+      - ".github/workflows/docs.yml"
 
 permissions:
   contents: read
@@ -46,9 +45,9 @@ jobs:
           # reachable.
           fetch-depth: 0
 
-      # The base branch name reaches the script through the environment rather than through a
-      # template expansion, which is a branch name executing as shell.
       - name: Check that an edit reached every language
+        # The branch name goes through the environment, not into the script text: a name is
+        # attacker-controlled input, and a template expansion inside `run` is an injection.
         env:
           BASE_REF: ${{ github.base_ref }}
         run: python3 scripts/check_doc_parity.py --base "origin/$BASE_REF"

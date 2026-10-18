@@ -142,8 +142,16 @@ tb.shutdown().await?;
 
 ## Documentation
 
-- This crate: <https://docs.rs/ruststream-rumqttc>
-- The framework: <https://powersemmi.github.io/ruststream/latest>
+- [Getting started](https://powersemmi.github.io/ruststream-rumqttc/latest/guides/getting-started/) - installation and a first service against a
+  local Mosquitto.
+- [Guides](https://powersemmi.github.io/ruststream-rumqttc/latest/) - topics and share groups, delivery guarantees, device state, publishing
+  commands, retries, request and response, testing and a production server.
+- [Components](https://powersemmi.github.io/ruststream-rumqttc/latest/components/) - one page per part of the crate: the broker, subscriptions,
+  settlement, the context, publishing, AsyncAPI and testing.
+- [Architecture](https://powersemmi.github.io/ruststream-rumqttc/latest/architecture/) - how the crate sits between `rumqttc` and the runtime.
+- [Benchmarks](https://powersemmi.github.io/ruststream-rumqttc/latest/architecture/benchmarks/) - what the crate costs over the raw client.
+- [API reference](https://docs.rs/ruststream-rumqttc) - every item on docs.rs.
+- The framework: <https://powersemmi.github.io/ruststream/latest/>
 
 ## Minimum supported Rust version
 

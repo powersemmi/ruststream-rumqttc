@@ -12,6 +12,7 @@
 
 #![cfg(feature = "testing")]
 
+use std::num::NonZeroU32;
 use std::pin::pin;
 use std::time::Duration;
 
@@ -247,7 +248,7 @@ async fn a_retained_message_reaches_a_later_plain_subscription_only() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_message_over_the_packet_limit_never_arrives() {
     let connected = broker()
-        .max_packet_size(64)
+        .max_packet_size(const { NonZeroU32::new(64).unwrap() })
         .connect_in_process()
         .await
         .expect("the production broker connects in process");

@@ -167,3 +167,25 @@ name = "manual_mqtt_retries"
 path = "examples/manual/mqtt_retries.rs"
 required-features = ["testing"]
 test = true
+
+[[example]]
+name = "mqtt_settlement_ack"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "manual_mqtt_settlement_ack"
+path = "examples/manual/mqtt_settlement_ack.rs"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "mqtt_settlement_retry"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "manual_mqtt_settlement_retry"
+path = "examples/manual/mqtt_settlement_retry.rs"
+required-features = ["testing"]
+test = true

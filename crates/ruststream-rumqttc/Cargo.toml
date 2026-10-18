@@ -154,3 +154,16 @@ name = "manual_mqtt_asyncapi"
 path = "examples/manual/mqtt_asyncapi.rs"
 required-features = ["asyncapi"]
 test = true
+
+# --- examples: components-settlement ---
+
+[[example]]
+name = "mqtt_retries"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "manual_mqtt_retries"
+path = "examples/manual/mqtt_retries.rs"
+required-features = ["testing"]
+test = true

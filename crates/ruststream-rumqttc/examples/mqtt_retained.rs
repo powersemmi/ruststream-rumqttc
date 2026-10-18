@@ -1,19 +1,21 @@
-//! Retained messages: the broker keeps the last message per topic and hands it to new
-//! subscribers.
+//! Retained messages: the server keeps the last message per topic and hands it to every later
+//! subscriber.
 //!
-//! Retain is declared for a whole publisher on the publish policy, or for one message on the
-//! publish. A startup announcement goes through the scope's `after_startup` hook, which runs once
-//! the broker is connected, so it cannot race the connection; a handler announces from its own
-//! slot.
+//! Retain is declared for a whole publisher on the publish policy, or for one message with a step
+//! on the publish. A startup announcement goes through the scope's `after_startup` hook, which
+//! runs once the broker is connected; a handler announces through its own slot.
 //!
-//! Run a broker first (`just brokers-up`), then:
-//! `cargo run --example mqtt_retained -- run`
+//! ```text
+//! cargo test --example mqtt_retained --features testing
+//! cargo run --example mqtt_retained -- run
+//! ```
 
 use ruststream::runtime::PublishError;
-// The error type is named here because this example handles it, in the hooks' return types.
+use ruststream::schemars::JsonSchema;
+// The error type is named here because this example handles it, in the hook's return type.
 use ruststream_rumqttc::MqttError;
 use ruststream_rumqttc::prelude::*;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 // --8<-- [start:state]
 /// A device state announcement. An MQTT state is bytes on the wire rather than an encoded
@@ -22,9 +24,16 @@ use serde::Deserialize;
 #[derive(Outgoing, Serialized)]
 #[outgoing(name = "devices/{device}/state")]
 struct DeviceState(Vec<u8>);
+
+/// The service's own status, announced once it is connected.
+#[derive(Outgoing, Serialized)]
+#[outgoing(name = "services/state-tracker/status")]
+struct ServiceStatus(Vec<u8>);
 // --8<-- [end:state]
 
-#[derive(Debug, Deserialize)]
+/// A reading. The type names no topic: each device publishes to its own.
+#[derive(Debug, PartialEq, Deserialize, Serialize, Outgoing, JsonSchema)]
+#[schemars(crate = "ruststream::schemars")]
 struct Telemetry {
     device: String,
     temperature: f64,
@@ -37,11 +46,11 @@ struct States;
 
 // --8<-- [start:stepped_handler]
 /// A reading is one of many; the state it puts the device in is the one a service joining later
-/// must see. So the handler publishes the state retained, and only the state: the argument
-/// belongs to this message, not to the publisher.
+/// must see. So the handler publishes the state retained, and only the state: the step belongs
+/// to this message, not to the publisher.
 ///
-/// Naming a per-message setting is the one thing that ties a body to a broker, and its signature
-/// says so - the options type is this crate's, and so is the prelude the file imports.
+/// Naming a per-message setting is what ties a body to a broker, and its signature says so: the
+/// options type is this crate's, and so is the prelude the file imports.
 #[subscriber(MqttFilter::new("devices/+/telemetry").qos(Qos::AtLeastOnce))]
 async fn announce_state(
     telemetry: &Telemetry,
@@ -52,64 +61,202 @@ async fn announce_state(
     } else {
         "ok"
     };
-    if states
+    if let Err(err) = states
         .message(&DeviceState(state.as_bytes().to_vec()))
         .retain(true)
         .to()
         .device(&telemetry.device)
         .publish()
         .await
-        .is_err()
     {
+        tracing::warn!(telemetry.device, %err, "state not announced");
         return HandlerOutcome::retry();
     }
     HandlerOutcome::ack()
 }
 // --8<-- [end:stepped_handler]
 
+// --8<-- [start:app]
 #[ruststream::app]
 fn app() -> impl App {
-    RustStream::new(AppInfo::new("retained", "0.1.0")).with_broker(
-        MqttBroker::new("mqtt://localhost:1883", "retained-example"),
-        |b| {
-            // --8<-- [start:retained]
-            b.after_startup(
-                Publish::default().qos(Qos::AtLeastOnce).retain(true),
-                async move |publisher| -> Result<(), PublishError<MqttError>> {
-                    publisher
-                        .message(&DeviceState(b"online".to_vec()))
-                        .to()
-                        .device("dev42")
-                        .publish()
-                        .await
-                },
-            );
-            // --8<-- [end:retained]
+    service(MqttBroker::new("mqtt://localhost:1883", "state-tracker"))
+}
 
-            // --8<-- [start:per_publish]
-            b.after_startup(
-                Publish::default(),
-                async move |publisher| -> Result<(), PublishError<MqttError>> {
-                    publisher
-                        .message(&DeviceState(b"online".to_vec()))
-                        .retain(true)
-                        .to()
-                        .device("dev43")
-                        .publish()
-                        .await
-                },
-            );
-            // --8<-- [end:per_publish]
+fn service(broker: MqttBroker) -> RustStream {
+    RustStream::new(AppInfo::new("state-tracker", "0.1.0")).with_broker(broker, |b| {
+        // Every publish of this policy is retained, so a dashboard that starts later still
+        // reads the status.
+        b.after_startup(
+            Publish::default().qos(Qos::AtLeastOnce).retain(true),
+            async move |publisher| -> Result<(), PublishError<MqttError>> {
+                publisher
+                    .message(&ServiceStatus(b"online".to_vec()))
+                    .publish()
+                    .await
+            },
+        );
+        // The mount site fixes what every publish through the slot takes; the handler's step is
+        // what one message changes.
+        b.include(announce_state)
+            .out(States, Publish::default().qos(Qos::AtLeastOnce))
+            .out_retry(Publish::default())
+            .to("devices/retry/telemetry")
+            .build();
+    })
+}
+// --8<-- [end:app]
 
-            // --8<-- [start:stepped_mount]
-            // The mount site fixes what every publish through the slot takes; the handler's step
-            // is what one message changes.
-            b.include(announce_state)
-                .out(States, Publish::default().qos(Qos::AtLeastOnce))
-                .out_retry(Publish::default())
-                .to("devices/retry/telemetry")
-                .build();
-            // --8<-- [end:stepped_mount]
-        },
-    )
+#[cfg(test)]
+mod tests {
+    use std::error::Error;
+    use std::time::Duration;
+
+    use ruststream::runtime::PublishError;
+    use ruststream::testing::TestApp;
+    use ruststream_rumqttc::MqttError;
+    use ruststream_rumqttc::prelude::*;
+
+    use super::{DeviceState, ServiceStatus, States, Telemetry, app, service};
+
+    /// The stand's URL, or `None` without one; `RUSTSTREAM_REQUIRE_LIVE` turns the skip into a
+    /// failure.
+    fn live_url() -> Option<String> {
+        match std::env::var("MQTT_TEST_URL") {
+            Ok(url) if !url.is_empty() => Some(url),
+            _ => {
+                assert!(
+                    std::env::var_os("RUSTSTREAM_REQUIRE_LIVE").is_none(),
+                    "RUSTSTREAM_REQUIRE_LIVE is set, but MQTT_TEST_URL is missing or empty"
+                );
+                None
+            }
+        }
+    }
+
+    fn hot() -> Telemetry {
+        Telemetry {
+            device: "dev42".to_owned(),
+            temperature: 31.5,
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_reading_publishes_the_device_state_retained() -> Result<(), Box<dyn Error>> {
+        let tb = TestApp::start(app()).await?;
+        tb.broker::<MqttBroker>()
+            .message(&hot())
+            .to("devices/dev42/telemetry")
+            .publish()
+            .await?;
+
+        tb.out::<States>()
+            .assert_called_once()
+            .with_raw(b"hot")
+            .with_options(&MqttPublishOptions::default().retain(true));
+        tb.broker::<MqttBroker>()
+            .published::<()>("devices/dev42/state")
+            .assert_called_once()
+            .with_raw(b"hot");
+        tb.shutdown().await?;
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_service_announces_its_status_at_startup() -> Result<(), Box<dyn Error>> {
+        let tb = TestApp::start(app()).await?;
+        tb.settle().await?;
+
+        tb.broker::<MqttBroker>()
+            .published::<()>("services/state-tracker/status")
+            .assert_called_once()
+            .with_raw(b"online");
+        tb.shutdown().await?;
+        Ok(())
+    }
+
+    /// A payload read as the bytes it is.
+    #[derive(Deserialized)]
+    struct Raw<'a>(&'a [u8]);
+
+    #[subscriber(MqttTopic::new("services/state-tracker/status"))]
+    async fn watch_status(status: &Raw<'_>) {
+        tracing::info!(bytes = status.0.len(), "status");
+    }
+
+    #[subscriber(MqttTopic::new("devices/dev42/state"))]
+    async fn watch_state(state: &Raw<'_>) {
+        tracing::info!(bytes = state.0.len(), "state");
+    }
+
+    /// A dashboard that subscribes after the announcements were made.
+    fn dashboard(url: &str) -> RustStream {
+        RustStream::new(AppInfo::new("dashboard", "0.1.0")).with_broker(
+            MqttBroker::new(url, format!("dashboard-{}", std::process::id())),
+            |b| {
+                b.include(watch_status);
+                b.include(watch_state);
+            },
+        )
+    }
+
+    /// Clears what an earlier run left on the two topics: an empty retained payload removes the
+    /// retained message.
+    fn clearing(url: &str) -> RustStream {
+        RustStream::new(AppInfo::new("clearing", "0.1.0")).with_broker(
+            MqttBroker::new(url, format!("clearing-{}", std::process::id())),
+            |b| {
+                b.after_startup(
+                    Publish::default().retain(true),
+                    async move |publisher| -> Result<(), PublishError<MqttError>> {
+                        publisher
+                            .message(&ServiceStatus(Vec::new()))
+                            .publish()
+                            .await?;
+                        publisher
+                            .message(&DeviceState(Vec::new()))
+                            .to()
+                            .device("dev42")
+                            .publish()
+                            .await
+                    },
+                );
+            },
+        )
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_dashboard_that_starts_later_reads_the_retained_states() -> Result<(), Box<dyn Error>>
+    {
+        let Some(url) = live_url() else {
+            return Ok(());
+        };
+        TestApp::start_live(clearing(&url))
+            .await?
+            .shutdown()
+            .await?;
+
+        let id = format!("state-tracker-{}", std::process::id());
+        let tb = TestApp::start_live(service(MqttBroker::new(&url, id))).await?;
+        tb.broker::<MqttBroker>()
+            .message(&hot())
+            .to("devices/dev42/telemetry")
+            .publish()
+            .await?;
+        tb.shutdown().await?;
+
+        let tb = TestApp::start_live(dashboard(&url)).await?;
+        // Nothing is published here: the retained messages arrive with the subscriptions, so the
+        // harness lets a moment of real time pass for them.
+        tb.advance(Duration::from_secs(1)).await?;
+        tb.broker::<MqttBroker>()
+            .subscriber("services/state-tracker/status")
+            .assert_called_once()
+            .with_raw(b"online");
+        tb.broker::<MqttBroker>()
+            .subscriber("devices/dev42/state")
+            .assert_called_once()
+            .with_raw(b"hot");
+        tb.shutdown().await?;
+        Ok(())
+    }
 }

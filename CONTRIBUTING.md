@@ -39,7 +39,7 @@ git clone https://github.com/powersemmi/ruststream-rumqttc.git
 | `just typo`, `just zizmor` | uv | the uv documentation |
 | `just bench` | Python 3 | the system package manager |
 | `just bench-code` | valgrind | the system package manager; the recipe installs the benchmark runner itself, at the release `Cargo.lock` pins |
-| the documentation site | Python 3.12 | `pip install -r docs/requirements.txt`, then `properdocs serve` |
+| the documentation site | Node.js 22 and Python 3 | `scripts/site_rustdoc.sh` (the rustdoc the API links resolve against), then `npm ci` in `website/` and `npm start` (one language) or `npm run build` (all three, strict); `npm run test` and `npm run typecheck` check the site's own code |
 
 ## Checking a change
 
@@ -81,6 +81,7 @@ with the core patched in, and stop the stand:
 just brokers-up
 MQTT_TEST_URL=mqtt://127.0.0.1:1883 \
 MQTT_TEST_AUTH_URL=mqtt://127.0.0.1:1884 \
+MQTT_TEST_AUTH_PASSWORD=s3cret \
 MQTT_TEST_TLS_URL=mqtts://127.0.0.1:8883 \
 MQTT_TEST_TLS_DIR="$PWD/.stand-tls" \
 RUSTSTREAM_REQUIRE_LIVE=1 \
@@ -96,5 +97,9 @@ just brokers-down
 - A pull request merges as one squashed commit, after the `CI result` check and one approving
   review. Commits are signed.
 - Documentation changes with the code. An item's rustdoc says what it is and does, and the crate's
-  module overviews are its guides. The site holds the entry pages in English, Russian and Chinese,
-  and an edit reaches all three.
+  overview maps each topic to its page on the site. The site in `docs/` holds the guides, one page
+  per component and the architecture with the benchmarks, in English, Russian and Chinese
+  (`website/i18n/`), and an edit reaches all three. Its code blocks come from the compiled
+  examples in `crates/ruststream-rumqttc/examples/`. `scripts/lint_doc_fences.py`,
+  `scripts/check_doc_parity.py` and `scripts/check_doc_i18n.py` check the fences and the
+  translations.

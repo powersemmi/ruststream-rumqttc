@@ -21,7 +21,8 @@ futures = "0.3"
 percent-encoding = "2"
 thiserror = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
-tracing = "0.1"
+# The examples log `String` fields, which the oldest releases do not record; 0.1.36 does.
+tracing = "0.1.36"
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
@@ -41,3 +42,16 @@ module_name_repetitions = "allow"
 missing_const_for_fn = "allow"
 multiple_crate_versions = "allow"
 redundant_pub_crate = "allow"
+
+# What ships is optimized across crate boundaries: the framework is generic to the point where a
+# dispatch path is only as cheap as the inlining it gets, and a build that stops at each crate
+# boundary is not the one to publish numbers from.
+[profile.release]
+lto = "fat"
+
+# The benchmarks measure what ships, so they are built the way a release is: the profile inherits
+# it whole, and the only addition is the line tables a profile needs to name functions. Debug
+# information is metadata and changes no codegen decision.
+[profile.bench]
+inherits = "release"
+debug = "line-tables-only"

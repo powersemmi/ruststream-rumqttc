@@ -91,8 +91,10 @@ pub const PARTITION_KEY_HEADER: &str = "partition-key";
 /// A handler's `HandlerOutcome::retry()` settles through that refused negative acknowledgement, so
 /// it does not retry inside the live connection: the delivery stays unacknowledged and comes back
 /// only when a persistent session resumes. `retry_after` with a retry publisher is the outcome
-/// that retries within the session; the crate overview's acknowledgement section spells both
-/// out.
+/// that retries within the session. The site's
+/// [retry](https://powersemmi.github.io/ruststream-rumqttc/latest/components/settlement/retry/) and
+/// [retry_after](https://powersemmi.github.io/ruststream-rumqttc/latest/components/settlement/retry-after/)
+/// pages show both in a service.
 ///
 /// A delivery reports no redelivery count. The protocol carries a duplicate flag and no counter,
 /// so a registration's cap is counted on the framework's retry-count header instead, which the

@@ -28,7 +28,9 @@ pub enum MqttError {
     #[error("mqtt receive error: {0}")]
     Receive(String),
 
-    /// Publishing failed (the connection task is gone, or the topic is invalid).
+    /// Publishing failed: the connection task is gone, the topic is not one a publish can name
+    /// (empty, or carrying a wildcard), or the topic or a header is not text an MQTT string
+    /// carries (not UTF-8, or holding a control character or a Unicode non-character).
     #[error("mqtt publish error to '{topic}': {reason}")]
     Publish {
         /// The topic the message targeted.

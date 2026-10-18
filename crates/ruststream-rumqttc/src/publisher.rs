@@ -102,6 +102,77 @@ fn into_packet(
 /// it, across reconnects: a resumed session retransmits it, and a new session sends it again,
 /// where it may arrive twice. Buildable before `connect` and usable until `shutdown`; afterwards
 /// every publish reports [`MqttError::NotConnected`].
+///
+/// Headers are sent as MQTT 5 user properties, so non-Rust peers see plain MQTT messages. The
+/// `content-type`, `reply-to` and `correlation-id` headers take the matching first-class
+/// properties (content type, response topic, correlation data), in both directions, and a
+/// message with no headers carries no properties at all. A textual content type
+/// (`application/json`, any `text/` subtype, any `+json` vendor type) sets the payload format
+/// indicator to 1, and every other one to 0. A header name or value that is not text an MQTT
+/// string carries refuses the publish with [`MqttError::Publish`]; the correlation data is binary
+/// on the wire and takes any bytes.
+///
+/// # Examples
+///
+/// Nothing writes the media type for a service: a reply, a deferred retry copy and a plain
+/// publish carry the headers something put on them. A service whose peers read the content type
+/// property sets it once at the mount site, through a publish transform over the position:
+///
+/// ```
+/// # mod demo {
+/// use ruststream::runtime::{Outgoing, Reads};
+/// use ruststream_rumqttc::prelude::*;
+/// use serde::{Deserialize, Serialize};
+///
+/// /// States the media type of every message this position sends, which is what fills the content
+/// /// type property and decides the payload format indicator. It reads nothing about the delivery,
+/// /// so it is generic over the position and mounts on any of them.
+/// struct Json;
+///
+/// impl<K: ContextKind, Options> PublishTransform<K, Options> for Json {
+///     type Destination = Reads;
+///
+///     fn apply(&self, out: &mut Outgoing<'_>, _options: &mut Option<Options>, _cx: &K::View<'_>) {
+///         out.headers_mut().insert("content-type", "application/json");
+///     }
+/// }
+///
+/// #[derive(Deserialize)]
+/// struct Telemetry {
+///     device: String,
+///     temperature: f64,
+/// }
+///
+/// #[derive(Serialize, Outgoing)]
+/// #[outgoing(name = "devices/state")]
+/// struct DeviceState {
+///     device: String,
+///     hot: bool,
+/// }
+///
+/// #[subscriber(MqttFilter::new("devices/+/telemetry"), reply)]
+/// async fn track(telemetry: &Telemetry) -> DeviceState {
+///     DeviceState { device: telemetry.device.clone(), hot: telemetry.temperature > 30.0 }
+/// }
+///
+/// #[ruststream::app]
+/// fn app() -> impl App {
+///     RustStream::new(AppInfo::new("states", "0.1.0")).with_broker(
+///         MqttBroker::new("mqtt://localhost:1883", "states-svc"),
+///         |b| {
+///             // Every reply now carries the content type property and the payload format
+///             // indicator 1, so a peer reads the body as UTF-8 JSON.
+///             b.include(track)
+///                 .out_reply(Publish::default())
+///                 .transform(Json)
+///                 .out_retry(Publish::default())
+///                 .to("devices/retry/telemetry");
+///         },
+///     )
+/// }
+/// # }
+/// # fn main() {}
+/// ```
 #[derive(Clone)]
 pub struct MqttPublisher {
     cell: CoreCell,
@@ -276,20 +347,54 @@ impl MqttPublishOptions {
 /// use ruststream::runtime::PublishError;
 /// use ruststream_rumqttc::MqttError;
 /// use ruststream_rumqttc::prelude::*;
+/// use serde::Deserialize;
 ///
-/// // An MQTT state is bytes on the wire rather than an encoded model, so the type carries its
-/// // own bytes and no codec runs on them.
+/// #[derive(Deserialize)]
+/// struct Telemetry {
+///     device: String,
+///     temperature: f64,
+/// }
+///
+/// /// An MQTT state is bytes on the wire rather than an encoded model, so the type carries its own
+/// /// bytes and no codec runs on them; the `{device}` segment becomes a setter the call fills in.
 /// #[derive(Outgoing, Serialized)]
-/// #[outgoing(name = "devices/dev42/state")]
+/// #[outgoing(name = "devices/{device}/state")]
 /// struct DeviceState(Vec<u8>);
+///
+/// #[derive(OutSlot)]
+/// #[publishes(DeviceState)]
+/// struct States;
+///
+/// /// The reading is one of many; the state it puts the device in is what a service joining later
+/// /// must see. So the state is published retained, and only the state.
+/// #[subscriber(MqttFilter::new("devices/+/telemetry").qos(Qos::AtLeastOnce))]
+/// async fn announce_state(
+///     telemetry: &Telemetry,
+///     Out(states): Out<impl Publisher<Options = MqttPublishOptions>, States>,
+/// ) -> HandlerOutcome {
+///     let state = if telemetry.temperature > 30.0 { "hot" } else { "ok" };
+///     if states
+///         .message(&DeviceState(state.as_bytes().to_vec()))
+///         .retain(true)
+///         .to()
+///         .device(&telemetry.device)
+///         .publish()
+///         .await
+///         .is_err()
+///     {
+///         return HandlerOutcome::retry();
+///     }
+///     HandlerOutcome::ack()
+/// }
 ///
 /// #[ruststream::app]
 /// fn app() -> impl App {
-///     RustStream::new(AppInfo::new("states", "0.1.0")).with_broker(
-///         MqttBroker::new("mqtt://localhost:1883", "states-svc"),
+///     RustStream::new(AppInfo::new("retained", "0.1.0")).with_broker(
+///         MqttBroker::new("mqtt://localhost:1883", "retained-example"),
 ///         |b| {
 ///             // The policy publishes plain; this one announcement is retained and exactly once,
-///             // so a subscriber that joins later still sees the device online.
+///             // so a subscriber that joins later still sees the device online. The hook runs once
+///             // the broker is connected, so the announcement cannot race it.
 ///             b.after_startup(
 ///                 Publish::default(),
 ///                 async move |publisher| -> Result<(), PublishError<MqttError>> {
@@ -297,10 +402,19 @@ impl MqttPublishOptions {
 ///                         .message(&DeviceState(b"online".to_vec()))
 ///                         .retain(true)
 ///                         .qos(Qos::ExactlyOnce)
+///                         .to()
+///                         .device("dev42")
 ///                         .publish()
 ///                         .await
 ///                 },
 ///             );
+///             // The mount site fixes what every publish through the slot takes; the handler's
+///             // step is what one message changes.
+///             b.include(announce_state)
+///                 .out(States, Publish::default().qos(Qos::AtLeastOnce))
+///                 .out_retry(Publish::default())
+///                 .to("devices/retry/telemetry")
+///                 .build();
 ///         },
 ///     )
 /// }

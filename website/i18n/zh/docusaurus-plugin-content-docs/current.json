@@ -10,5 +10,9 @@
   "sidebar.architecture.doc.Benchmarks": {
     "message": "基准测试",
     "description": "The label for the doc item 'Benchmarks' in sidebar 'architecture', linking to the doc architecture/benchmarks/index"
+  },
+  "sidebar.architecture.category.MQTT": {
+    "message": "MQTT",
+    "description": "The label for category 'MQTT' in sidebar 'architecture'"
   }
 }

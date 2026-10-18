@@ -47,5 +47,6 @@ question, and the comparison measures none of them. The code chart counts a
 [batch handler](../../components/subscriptions/batches.md) and a reply on the same stand.
 
 The numbers are a snapshot of one machine on one day, with the build recorded beside them. They are
-measured again by hand, on a machine given to the run alone: the differences they show are smaller
-than the noise of a shared one.
+measured again by hand, with no other benchmark on the machine, and the load average is recorded
+beside them. A loaded machine widens the spread between rounds, and a row inside that spread reads
+as `indistinguishable`.

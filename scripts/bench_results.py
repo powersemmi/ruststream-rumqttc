@@ -163,7 +163,17 @@ def environment(summary: dict) -> dict[str, str]:
         "profile": profile(),
         "features": FEATURES,
         "rustflags": RUSTFLAGS,
+        "load": load(),
     }
+
+
+def load() -> str:
+    """The load average as the run ends, so a reader sees whether the machine was shared."""
+    try:
+        one, five, fifteen = Path("/proc/loadavg").read_text(encoding="utf-8").split()[:3]
+    except (OSError, ValueError):
+        return "unknown"
+    return f"{one} / {five} / {fifteen} over 1, 5 and 15 minutes when the run ended"
 
 
 # Deliveries per measured run of the code-cost benches, the default of their `MESSAGES`. Every

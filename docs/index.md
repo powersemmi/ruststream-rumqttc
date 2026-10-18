@@ -19,19 +19,14 @@ ruststream-rumqttc = "0.6"
 serde = { version = "1", features = ["derive"] }
 ```
 
-```rust
---8<-- "crates/ruststream-rumqttc/examples/mqtt_service.rs:app"
+```rust reference="examples/mqtt_service.rs#app"
 ```
 
 ## Where to go next
 
-<div class="grid cards" markdown>
-
-- :material-access-point: **[MQTT guide](mqtt.md)** - topic filters, quality of service, shared subscriptions, retained publishes, and testing.
-- :material-book-open-variant: **[RustStream docs](https://powersemmi.github.io/ruststream/)** - the framework itself: subscribers, routing, codecs, middleware, the CLI.
-- :material-language-rust: **[API reference](https://docs.rs/ruststream-rumqttc)** - the crate's rustdoc on docs.rs.
-
-</div>
+- **[MQTT guide](mqtt.md)** - topic filters, quality of service, shared subscriptions, retained publishes, and testing.
+- **[RustStream docs](https://powersemmi.github.io/ruststream/)** - the framework itself: subscribers, routing, codecs, middleware, the CLI.
+- **[API reference](https://docs.rs/ruststream-rumqttc)** - the crate's rustdoc on docs.rs.
 
 ## How this site relates to the RustStream docs
 

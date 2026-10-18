@@ -1,0 +1,27 @@
+{
+  "docs": [
+    {
+      "type": "doc",
+      "id": "index",
+      "label": "Home"
+    },
+    {
+      "type": "category",
+      "label": "Guide",
+      "collapsible": false,
+      "items": [
+        "mqtt"
+      ]
+    },
+    {
+      "type": "link",
+      "label": "RustStream docs",
+      "href": "https://powersemmi.github.io/ruststream/0.6/"
+    },
+    {
+      "type": "link",
+      "label": "API reference",
+      "href": "https://docs.rs/ruststream-rumqttc/0.6/"
+    }
+  ]
+}

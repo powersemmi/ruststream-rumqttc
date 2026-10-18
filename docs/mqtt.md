@@ -59,14 +59,12 @@ managed MQTT services that require a client certificate.
 share group. It implements `SubscriptionSource`, so it sits inline in the `#[subscriber(..)]`
 decorator:
 
-```rust
---8<-- "crates/ruststream-rumqttc/examples/mqtt_service.rs:handler"
+```rust reference="examples/mqtt_service.rs#handler"
 ```
 
 Wiring the handler onto the broker is identical to any other broker:
 
-```rust
---8<-- "crates/ruststream-rumqttc/examples/mqtt_service.rs:app"
+```rust reference="examples/mqtt_service.rs#app"
 ```
 
 ### Wildcards
@@ -165,8 +163,7 @@ The retain flag is declaration on the policy, so the publish itself is ordinary.
 `after_startup` hook runs it once the broker is connected, which is where an announcement of this
 kind belongs:
 
-```rust
---8<-- "crates/ruststream-rumqttc/examples/mqtt_retained.rs:retained"
+```rust reference="examples/mqtt_retained.rs#retained"
 ```
 
 ## Headers

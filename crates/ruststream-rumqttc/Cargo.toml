@@ -441,3 +441,15 @@ name = "manual_guide_retries"
 path = "examples/manual/guide/retries.rs"
 required-features = ["testing"]
 test = true
+
+[[example]]
+name = "guide_request_response"
+path = "examples/guide/request_response.rs"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "manual_guide_request_response"
+path = "examples/manual/guide/request_response.rs"
+required-features = ["testing"]
+test = true

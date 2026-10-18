@@ -453,3 +453,15 @@ name = "manual_guide_request_response"
 path = "examples/manual/guide/request_response.rs"
 required-features = ["testing"]
 test = true
+
+[[example]]
+name = "guide_testing"
+path = "examples/guide/testing.rs"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "manual_guide_testing"
+path = "examples/manual/guide/testing.rs"
+required-features = ["testing"]
+test = true

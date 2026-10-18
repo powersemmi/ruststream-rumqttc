@@ -594,7 +594,10 @@ Eclipse Mosquitto covers them; `just test-brokers` starts the stand and runs it.
 
 # Operations
 
-* Authentication is `credentials(username, password)` on the synchronous builder. TLS is
+* Authentication is the user name and password in the URL (`mqtt://user:password@host:1883`,
+  percent-decoded, so `p%40ss` is `p@ss`), or `credentials(username, password)` on the
+  synchronous builder, which wins over the URL. A URL logs in only with both a non-empty user name
+  and a password. TLS is
   `tls_ca(pem)`, which selects TLS whatever the URL scheme says, plus `tls_client_auth(cert, key)`
   for the managed services that require a client certificate. The client verifies the server
   against that certificate authority and no other store, so a `mqtts://` URL without `tls_ca` is

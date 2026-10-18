@@ -85,6 +85,66 @@ mod tests {
         Ok(())
     }
 
+    /// Publishes a reading from a client of its own while the service is not connected.
+    async fn publish_while_down(url: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
+        let sender = RustStream::new(AppInfo::new("sender", "0.1.0")).register_broker(
+            MqttBroker::new(url, live::client_id("broker-session-sender")),
+        );
+        let sender = TestApp::start_live(sender).await?;
+        sender
+            .broker::<MqttBroker>()
+            .message(&reading(30.5))
+            .publish()
+            .await?;
+        sender.shutdown().await?;
+        Ok(())
+    }
+
+    /// Starts the service again under `id` and checks that the server sends the reading it kept
+    /// before the one published now, then ends the session the test left on the server.
+    async fn resume_and_receive_the_kept_reading(
+        url: &str,
+        id: &str,
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+        let tb = TestApp::start_live(service(broker(url, id))).await?;
+        tb.broker::<MqttBroker>()
+            .message(&reading(21.5))
+            .publish()
+            .await?;
+        let received = tb
+            .broker::<MqttBroker>()
+            .subscriber("broker-session/telemetry")
+            .received::<Telemetry>();
+        assert_eq!(received.first(), Some(&reading(30.5)), "{received:?}");
+        tb.shutdown().await?;
+
+        // A clean start under the same id ends the session.
+        TestApp::start_live(service(MqttBroker::new(url, id)))
+            .await?
+            .shutdown()
+            .await?;
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_reading_published_while_the_service_was_stopped_arrives_on_restart()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let Some(url) = live::url("MQTT_TEST_URL") else {
+            return Ok(());
+        };
+        let id = live::client_id("broker-session-restart");
+
+        // The first run opens the session and its subscription, then stops cleanly: the
+        // subscription stays in the session.
+        TestApp::start_live(service(broker(&url, &id)))
+            .await?
+            .shutdown()
+            .await?;
+
+        publish_while_down(&url).await?;
+        resume_and_receive_the_kept_reading(&url, &id).await
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_reading_published_while_the_service_was_down_arrives_on_return()
     -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -98,37 +158,7 @@ mod tests {
         let crash_id = id.clone();
         live::crash(move || service(broker(&crash_url, &crash_id)))?;
 
-        // Another client publishes while the service is down.
-        let sender = RustStream::new(AppInfo::new("sender", "0.1.0")).register_broker(
-            MqttBroker::new(&url, live::client_id("broker-session-sender")),
-        );
-        let sender = TestApp::start_live(sender).await?;
-        sender
-            .broker::<MqttBroker>()
-            .message(&reading(30.5))
-            .publish()
-            .await?;
-        sender.shutdown().await?;
-
-        // The second run resumes the session: the server sends the reading it kept before the one
-        // published now.
-        let tb = TestApp::start_live(service(broker(&url, &id))).await?;
-        tb.broker::<MqttBroker>()
-            .message(&reading(21.5))
-            .publish()
-            .await?;
-        let received = tb
-            .broker::<MqttBroker>()
-            .subscriber("broker-session/telemetry")
-            .received::<Telemetry>();
-        assert_eq!(received.first(), Some(&reading(30.5)), "{received:?}");
-        tb.shutdown().await?;
-
-        // A clean start under the same id ends the session the test left on the server.
-        TestApp::start_live(service(MqttBroker::new(&url, &id)))
-            .await?
-            .shutdown()
-            .await?;
-        Ok(())
+        publish_while_down(&url).await?;
+        resume_and_receive_the_kept_reading(&url, &id).await
     }
 }

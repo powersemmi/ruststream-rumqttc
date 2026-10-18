@@ -22,8 +22,8 @@ Without an expiry the server drops the session with the connection, whatever `cl
 
 While the session lives, the server queues every QoS 1 and 2 message that matches its subscriptions.
 When the service connects again under the same id, the server sends what it queued, then what arrives next.
-This covers a lost connection, a [reconnect](./reconnect.md) and a process that dies.
-A clean [shutdown](./shutdown.md) unsubscribes every filter before it disconnects, so after it the session holds no subscription and the server queues nothing for it.
+This covers a lost connection, a [reconnect](./reconnect.md), a process that dies and a clean [shutdown](./shutdown.md).
+A clean shutdown leaves the app's subscriptions in the session, so a service that restarts receives what was published while it was stopped.
 
 A QoS 0 message is never queued.
 A delivery the handler left unacknowledged, such as one [`HandlerOutcome::retry()`](../settlement/retry.md) settled, comes back when the session resumes.

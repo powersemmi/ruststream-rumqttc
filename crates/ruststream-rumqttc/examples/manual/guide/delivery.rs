@@ -8,6 +8,7 @@
 //! ```
 
 use std::future::{Future, ready};
+use std::num::NonZeroU16;
 use std::process::ExitCode;
 use std::time::Duration;
 
@@ -97,12 +98,14 @@ fn power_of_every_meter() -> MqttFilter {
 // --8<-- [end:chart]
 
 // --8<-- [start:app]
+const IN_FLIGHT: NonZeroU16 = NonZeroU16::new(100).unwrap();
+
 /// The server keeps the session of this client id for a day after the service disconnects.
 fn broker(url: &str, client_id: &str) -> MqttBroker {
     MqttBroker::new(url, client_id)
         .clean_start(false)
         .session_expiry(Duration::from_hours(24))
-        .receive_maximum(100)
+        .receive_maximum(IN_FLIGHT)
 }
 
 fn service(broker: MqttBroker) -> RustStream {

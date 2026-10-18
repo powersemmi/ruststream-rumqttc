@@ -8,6 +8,7 @@
 //!     cargo run --example guide_production --features testing -- run
 //! ```
 
+use std::num::{NonZeroU16, NonZeroU32};
 use std::time::Duration;
 use std::{env, fs};
 
@@ -42,14 +43,17 @@ impl Deployment {
     }
 }
 
+const LARGEST_PACKET: NonZeroU32 = NonZeroU32::new(256 * 1024).unwrap();
+const IN_FLIGHT: NonZeroU16 = NonZeroU16::new(200).unwrap();
+
 fn broker(deployment: Deployment) -> MqttBroker {
     MqttBroker::new(deployment.url, deployment.client_id)
         .credentials(deployment.username, deployment.password)
         .tls_ca(deployment.ca)
         .tls_client_auth(deployment.cert, deployment.key)
         .keep_alive(Duration::from_secs(30))
-        .max_packet_size(256 * 1024)
-        .receive_maximum(200)
+        .max_packet_size(LARGEST_PACKET)
+        .receive_maximum(IN_FLIGHT)
 }
 // --8<-- [end:broker]
 

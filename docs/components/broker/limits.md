@@ -12,6 +12,8 @@ import TabItem from '@theme/TabItem';
 [`max_packet_size`](api:ruststream_rumqttc::MqttBroker::max_packet_size) caps what the server may send, 1 MiB by default; [`receive_maximum`](api:ruststream_rumqttc::MqttBroker::receive_maximum) caps unacknowledged QoS 1 and 2 deliveries, 1000 by default.
 
 Both travel to the server in the `CONNECT` packet, and the server holds itself to them.
+Both take a non-zero type, `NonZeroU32` and `NonZeroU16`, because a server refuses a session that announces a zero limit.
+A constant such as `const IN_FLIGHT: NonZeroU16 = NonZeroU16::new(100).unwrap();` is checked when the service compiles.
 A message larger than `max_packet_size` never reaches the service: the server drops it for this client and delivers it to everyone else.
 The `rumqttc` client alone would allow 10 KiB and close the connection on a larger packet, so the crate raises its default to 1 MiB.
 A service whose payloads are larger raises it to fit them.

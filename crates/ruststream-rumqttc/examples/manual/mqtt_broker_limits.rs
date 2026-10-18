@@ -10,6 +10,7 @@
 #![cfg_attr(not(test), allow(dead_code, unused_imports))]
 
 use std::future::{Future, ready};
+use std::num::{NonZeroU16, NonZeroU32};
 use std::process::ExitCode;
 
 use ruststream::runtime::cli::run_main;
@@ -47,11 +48,14 @@ fn service(broker: MqttBroker) -> impl App<State = ()> {
 }
 
 // --8<-- [start:broker]
+const LARGEST_PACKET: NonZeroU32 = NonZeroU32::new(256 * 1024).unwrap();
+const IN_FLIGHT: NonZeroU16 = NonZeroU16::new(100).unwrap();
+
 /// Firmware images reach 256 KiB, and at most 100 deliveries wait for an acknowledgement.
 fn broker(url: &str, client_id: &str) -> MqttBroker {
     MqttBroker::new(url, client_id)
-        .max_packet_size(256 * 1024)
-        .receive_maximum(100)
+        .max_packet_size(LARGEST_PACKET)
+        .receive_maximum(IN_FLIGHT)
 }
 
 fn app() -> impl App<State = ()> {
@@ -84,6 +88,7 @@ impl MessageHeaders for Firmware {
 #[cfg(test)]
 mod tests {
     use std::error::Error;
+    use std::num::NonZeroU16;
     use std::time::Duration;
 
     use std::future::{Future, ready};
@@ -159,7 +164,8 @@ mod tests {
         let Some(url) = live::url("MQTT_TEST_URL") else {
             return Ok(());
         };
-        let broker = broker(&url, &live::client_id("broker-limits")).receive_maximum(1);
+        let broker =
+            broker(&url, &live::client_id("broker-limits")).receive_maximum(NonZeroU16::MIN);
         let app = RustStream::new(AppInfo::new("jobs", "0.1.0")).with_broker(broker, |b| {
             b.include(subscriber("broker-limits/held", Hold).build());
         });

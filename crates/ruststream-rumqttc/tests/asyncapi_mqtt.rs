@@ -7,6 +7,7 @@
 
 #![cfg(all(feature = "asyncapi", feature = "testing"))]
 
+use std::hash::{BuildHasher, Hasher, RandomState};
 use std::time::Duration;
 
 use ruststream::asyncapi::build_spec;
@@ -122,25 +123,34 @@ const MESSAGE_BINDING: &str = include_str!("bindings/message.json");
 /// the response topic is a property the requester sets.
 const OUTGOING_MESSAGE_BINDING: &str = include_str!("bindings/outgoing_message.json");
 
-fn broker() -> MqttBroker {
-    MqttBroker::new("mqtt://alice:hunter2@localhost:1883", "telemetry-svc")
-        .credentials("alice", "hunter2")
-        .keep_alive(Duration::from_secs(30))
-        .clean_start(false)
-        .session_expiry(Duration::from_hours(1))
-        .last_will(
-            "devices/svc/status",
-            b"offline".to_vec(),
-            Qos::AtLeastOnce,
-            true,
-        )
+/// A password made up at run time, so no secret is written into the source.
+fn made_up_password() -> String {
+    RandomState::new().build_hasher().finish().to_string()
+}
+
+/// A broker that holds `password` twice: in its URL and through the `credentials` step.
+fn broker(password: &str) -> MqttBroker {
+    MqttBroker::new(
+        format!("mqtt://alice:{password}@localhost:1883"),
+        "telemetry-svc",
+    )
+    .credentials("alice", password)
+    .keep_alive(Duration::from_secs(30))
+    .clean_start(false)
+    .session_expiry(Duration::from_hours(1))
+    .last_will(
+        "devices/svc/status",
+        b"offline".to_vec(),
+        Qos::AtLeastOnce,
+        true,
+    )
 }
 
 /// The whole document of a service on this broker, as JSON.
 fn document() -> Value {
     let app = RustStream::new(AppInfo::new("telemetry", "1.0.0")).with_broker_labeled(
         "mqtt",
-        broker(),
+        broker(&made_up_password()),
         |b| {
             b.include(collect)
                 .out(Alerts, Publish::default().retain(true))
@@ -239,10 +249,11 @@ fn a_reply_named_per_delivery_reports_where_its_address_is_read() {
 /// must not carry it anywhere.
 #[test]
 fn the_document_carries_no_credentials() {
+    let password = made_up_password();
     harness::describes_without_credentials(
-        &broker(),
+        &broker(&password),
         &MqttFilter::new("devices/+/telemetry").shared("workers"),
-        "hunter2",
+        &password,
     );
 }
 
@@ -253,7 +264,7 @@ fn the_document_carries_no_credentials() {
 fn a_publish_policy_carries_no_credentials() {
     message_shape::publishes_without_credentials::<ConnectedMqttBroker, _>(
         &MqttPublish::default().qos(Qos::ExactlyOnce).retain(true),
-        "hunter2",
+        &made_up_password(),
     );
 }
 

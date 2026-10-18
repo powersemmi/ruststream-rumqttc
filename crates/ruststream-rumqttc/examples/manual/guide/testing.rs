@@ -15,7 +15,7 @@ use ruststream_rumqttc::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[cfg(test)]
-#[path = "../../guide/live/mod.rs"]
+#[path = "../../../tests/live_broker/mod.rs"]
 mod live;
 
 // --8<-- [start:service]
@@ -233,7 +233,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_warm_freezer_raises_an_alert_on_mosquitto()
     -> Result<(), Box<dyn Error + Send + Sync>> {
-        let Some(url) = live::url() else {
+        let Some(url) = live::url("MQTT_TEST_URL") else {
             return Ok(());
         };
         let broker = MqttBroker::new(url, live::client_id("cold-chain"));

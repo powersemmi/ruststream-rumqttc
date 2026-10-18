@@ -13,7 +13,7 @@ use ruststream_rumqttc::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[cfg(test)]
-#[path = "live/mod.rs"]
+#[path = "../../tests/live_broker/mod.rs"]
 mod live;
 
 #[derive(Debug, PartialEq, Deserialize, Serialize, Outgoing)]
@@ -201,7 +201,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn usage_reported_while_the_service_was_down_is_billed_on_return()
     -> Result<(), Box<dyn Error + Send + Sync>> {
-        let Some(url) = live::url() else {
+        let Some(url) = live::url("MQTT_TEST_URL") else {
             return Ok(());
         };
         let id = live::client_id("guide-delivery");

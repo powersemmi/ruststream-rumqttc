@@ -367,3 +367,113 @@ name = "manual_mqtt_testing_live"
 path = "examples/manual/mqtt_testing_live.rs"
 required-features = ["testing"]
 test = true
+
+# --- examples: guides ---
+
+[[example]]
+name = "guide_getting_started"
+path = "examples/guide/getting_started.rs"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "manual_guide_getting_started"
+path = "examples/manual/guide/getting_started.rs"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "guide_topics"
+path = "examples/guide/topics.rs"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "manual_guide_topics"
+path = "examples/manual/guide/topics.rs"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "guide_delivery"
+path = "examples/guide/delivery.rs"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "manual_guide_delivery"
+path = "examples/manual/guide/delivery.rs"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "guide_device_state"
+path = "examples/guide/device_state.rs"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "manual_guide_device_state"
+path = "examples/manual/guide/device_state.rs"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "guide_publishing"
+path = "examples/guide/publishing.rs"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "manual_guide_publishing"
+path = "examples/manual/guide/publishing.rs"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "guide_retries"
+path = "examples/guide/retries.rs"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "manual_guide_retries"
+path = "examples/manual/guide/retries.rs"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "guide_request_response"
+path = "examples/guide/request_response.rs"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "manual_guide_request_response"
+path = "examples/manual/guide/request_response.rs"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "guide_testing"
+path = "examples/guide/testing.rs"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "manual_guide_testing"
+path = "examples/manual/guide/testing.rs"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "guide_production"
+path = "examples/guide/production.rs"
+required-features = ["testing"]
+test = true
+
+[[example]]
+name = "manual_guide_production"
+path = "examples/manual/guide/production.rs"
+required-features = ["testing"]
+test = true

@@ -62,6 +62,14 @@ fn app() -> impl App<State = ()> {
 }
 // --8<-- [end:password]
 
+// --8<-- [start:url]
+/// The deployment hands over one connection string with the login in it, such as
+/// `mqtt://telemetry-svc:p%40ss@broker.internal:1884` for the password `p@ss`.
+fn url_broker(url: &str, client_id: &str) -> MqttBroker {
+    MqttBroker::new(url, client_id)
+}
+// --8<-- [end:url]
+
 // --8<-- [start:tls]
 /// A TLS listener that verifies the service by its certificate. `dir` holds the PEM files the
 /// deployment mounts: the authority that signed the server's certificate, and the service's own
@@ -105,7 +113,7 @@ mod tests {
     use ruststream::testing::TestApp;
     use ruststream_rumqttc::prelude::*;
 
-    use super::{Telemetry, app, live, password_broker, service, tls_broker};
+    use super::{Telemetry, app, live, password_broker, service, tls_broker, url_broker};
 
     /// The body every mode runs: a reading reaches the handler through the secured connection.
     async fn records_a_reading(tb: TestApp<()>) -> Result<(), Box<dyn Error>> {
@@ -149,6 +157,17 @@ mod tests {
         let id = live::client_id("broker-security-password");
         let broker = password_broker(&url, &id, "tester", "s3cret");
         records_a_reading(TestApp::start_live(service(broker)).await?).await
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_password_listener_accepts_the_login_in_the_url() -> Result<(), Box<dyn Error>> {
+        let Some(url) = live::url("MQTT_TEST_AUTH_URL") else {
+            return Ok(());
+        };
+        // The stand's password, percent-encoded the way a connection string writes it.
+        let url = url.replacen("://", "://tester:s%33cret@", 1);
+        let id = live::client_id("broker-security-url");
+        records_a_reading(TestApp::start_live(service(url_broker(&url, &id))).await?).await
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

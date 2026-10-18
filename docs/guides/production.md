@@ -19,7 +19,7 @@ This guide configures the broker for one, from the deployment's environment.
 
 The deployment provides every setting in environment variables, and the certificates as files.
 [`credentials`](api:ruststream_rumqttc::MqttBroker::credentials) sets the user name and the password of the `CONNECT` packet.
-They go through this call only, never inside the URL.
+A login inside the URL, such as `mqtt://user:p%40ss@host`, works too and is percent-decoded; `credentials` wins over it.
 They stay out of the generated AsyncAPI document, which reports only the host and port the service connects to.
 
 `mqtts://` selects TLS, on port 8883 when the URL names none.

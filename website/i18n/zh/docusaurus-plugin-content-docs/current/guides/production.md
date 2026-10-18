@@ -20,7 +20,7 @@ import TabItem from '@theme/TabItem';
 
 部署环境通过环境变量提供每一项设置，通过文件提供证书。
 [`credentials`](api:ruststream_rumqttc::MqttBroker::credentials) 设置 `CONNECT` 报文中的用户名和密码。
-它们只经由这个调用传入，从不放在 URL 里。
+URL 中的登录信息（例如 `mqtt://user:p%40ss@host`）同样有效，并按百分号编码解码；`credentials` 优先于它。
 它们不会进入生成的 AsyncAPI 文档，文档只报告服务连接的主机和端口。
 
 `mqtts://` 选择 TLS，URL 没有指定端口时使用 8883。

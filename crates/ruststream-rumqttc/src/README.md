@@ -263,7 +263,10 @@ for what the handler returns, `.out(marker, policy)` for a slot the body holds, 
 for the copy a deferred retry publishes.
 
 A publish returns once the client session owns the message, not once the broker has confirmed it.
-For `QoS` 1 and 2 the session retransmits until the broker acknowledges, across reconnects.
+For `QoS` 1 and 2 the client keeps the message until the broker acknowledges it, across reconnects:
+a resumed session retransmits it, and a new session sends it again. A broker that started a new
+session cannot tell a message it already received, so one sent again there may arrive twice, at
+`QoS` 2 too.
 
 ## Per-message arguments
 

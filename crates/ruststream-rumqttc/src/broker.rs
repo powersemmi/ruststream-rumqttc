@@ -12,6 +12,7 @@
     allow(clippy::infallible_destructuring_match)
 )]
 
+use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -393,6 +394,7 @@ impl Broker for MqttBroker {
                     eventloop,
                     shared: Arc::clone(&shared),
                     first_connack: Some(connack_tx),
+                    parked: VecDeque::new(),
                 }));
                 // The task retries transient failures itself; the first CONNACK (or a fatal
                 // refusal) decides whether connect succeeds.

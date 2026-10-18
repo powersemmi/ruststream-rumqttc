@@ -162,7 +162,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -644,9 +644,9 @@ dependencies = [
 
 [[package]]
 name = "ruststream"
-version = "0.7.4"
+version = "0.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d9ffd683ac3a21e9396260df1390909295c296db2a4f8738de205bb2c496ad46"
+checksum = "16703bcc614b0bb6fa741b6e5805428f059e47d41491b72e66da47ff49121697"
 dependencies = [
  "bytes",
  "bytes-utils",
@@ -666,9 +666,9 @@ dependencies = [
 
 [[package]]
 name = "ruststream-macros"
-version = "0.7.4"
+version = "0.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57cad28d048e6680053ef6e4361af0688c0902b18ed90c927f08e769cd786c19"
+checksum = "c6b01a6d229bf75a76d5806e57e7c7bf64d6f9b022681f3414816e7a0d63c74b"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -677,7 +677,7 @@ dependencies = [
 
 [[package]]
 name = "ruststream-rumqttc"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "bytes",
  "futures",
@@ -693,7 +693,7 @@ dependencies = [
 
 [[package]]
 name = "ruststream-rumqttc-bench"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "bytes",
  "futures",

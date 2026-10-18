@@ -101,6 +101,7 @@ impl MessageHeaders for Status {
 mod tests {
     use std::error::Error;
     use std::fs;
+    use std::hash::{BuildHasher, Hasher, RandomState};
     use std::time::{Duration, Instant};
 
     use ruststream::testing::TestApp;
@@ -108,6 +109,11 @@ mod tests {
     use ruststream_rumqttc::prelude::*;
 
     use super::{Status, app, live, service};
+
+    /// A secret made up at run time, so none is written into the source.
+    fn made_up_secret() -> String {
+        RandomState::new().build_hasher().finish().to_string()
+    }
 
     /// The `MqttError` a failed startup carries, found down its chain of causes.
     fn mqtt_error<'e>(err: &'e (dyn Error + 'static)) -> Option<&'e MqttError> {
@@ -138,7 +144,7 @@ mod tests {
             return Ok(());
         };
         let broker = MqttBroker::new(&url, live::client_id("broker-startup-login"))
-            .credentials("tester", "wrong");
+            .credentials("tester", made_up_secret());
 
         let started = Instant::now();
         let failed = TestApp::start_live(service(broker)).await.err();

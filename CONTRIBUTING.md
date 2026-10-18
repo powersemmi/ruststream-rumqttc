@@ -81,6 +81,7 @@ with the core patched in, and stop the stand:
 just brokers-up
 MQTT_TEST_URL=mqtt://127.0.0.1:1883 \
 MQTT_TEST_AUTH_URL=mqtt://127.0.0.1:1884 \
+MQTT_TEST_AUTH_PASSWORD=s3cret \
 MQTT_TEST_TLS_URL=mqtts://127.0.0.1:8883 \
 MQTT_TEST_TLS_DIR="$PWD/.stand-tls" \
 RUSTSTREAM_REQUIRE_LIVE=1 \

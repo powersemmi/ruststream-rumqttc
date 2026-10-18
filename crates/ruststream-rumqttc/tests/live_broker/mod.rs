@@ -43,6 +43,14 @@ pub(crate) fn url(name: &str) -> Option<String> {
     }
 }
 
+/// The password listener's address and the password of the stand's user `tester`, or `None` to
+/// skip. The stand defines the password, and the run hands it over, so none is written here.
+pub(crate) fn auth() -> Option<(String, String)> {
+    let url = url("MQTT_TEST_AUTH_URL")?;
+    let password = self::url("MQTT_TEST_AUTH_PASSWORD")?;
+    Some((url, password))
+}
+
 /// The TLS listener's address and the directory of the stand's certificates, or `None` to skip.
 pub(crate) fn tls() -> Option<(String, PathBuf)> {
     let url = url("MQTT_TEST_TLS_URL")?;

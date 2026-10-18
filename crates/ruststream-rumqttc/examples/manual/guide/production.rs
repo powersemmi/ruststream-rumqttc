@@ -108,6 +108,7 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use std::error::Error;
+    use std::hash::{BuildHasher, Hasher, RandomState};
     use std::time::Duration;
 
     use ruststream::testing::TestApp;
@@ -115,12 +116,17 @@ mod tests {
 
     use super::{Deployment, Telemetry, broker, service};
 
+    /// A secret made up at run time, so none is written into the source.
+    fn made_up_secret() -> String {
+        RandomState::new().build_hasher().finish().to_string()
+    }
+
     fn deployment() -> Deployment {
         Deployment {
             url: "mqtts://mqtt.example.com:8883".to_owned(),
             client_id: "telemetry-1".to_owned(),
             username: "telemetry".to_owned(),
-            password: "s3cret-pa55".to_owned(),
+            password: made_up_secret(),
             ca: b"-----BEGIN CERTIFICATE-----".to_vec(),
             cert: b"-----BEGIN CERTIFICATE-----".to_vec(),
             key: b"-----BEGIN PRIVATE KEY-----".to_vec(),
@@ -170,7 +176,7 @@ mod tests {
     #[tokio::test]
     async fn a_tls_url_without_a_certificate_authority_fails_the_start() {
         let unverifiable = MqttBroker::new("mqtts://mqtt.example.com:8883", "telemetry-1")
-            .credentials("telemetry", "s3cret-pa55");
+            .credentials("telemetry", made_up_secret());
 
         let error = TestApp::start(service(unverifiable))
             .await

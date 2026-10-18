@@ -45,6 +45,7 @@ test-brokers: brokers-up
     # developer without a broker.
     MQTT_TEST_URL=mqtt://127.0.0.1:1883 \
     MQTT_TEST_AUTH_URL=mqtt://127.0.0.1:1884 \
+    MQTT_TEST_AUTH_PASSWORD=s3cret \
     MQTT_TEST_TLS_URL=mqtts://127.0.0.1:8883 \
     MQTT_TEST_TLS_DIR={{justfile_directory()}}/.stand-tls \
     RUSTSTREAM_REQUIRE_LIVE=1 \

@@ -134,23 +134,27 @@ fn app() -> impl App<State = ()> {
 #[cfg(test)]
 mod tests {
     use std::error::Error;
+    use std::hash::{BuildHasher, Hasher, RandomState};
 
     use ruststream::asyncapi::build_spec;
     use serde_json::{Value, json};
 
     use super::{broker, service};
 
-    const PASSWORD: &str = "hunter2";
+    /// A secret made up at run time, so none is written into the source.
+    fn made_up_secret() -> String {
+        RandomState::new().build_hasher().finish().to_string()
+    }
 
-    fn document() -> Result<Value, Box<dyn Error>> {
+    fn document(password: &str) -> Result<Value, Box<dyn Error>> {
         Ok(serde_json::from_str(
-            &build_spec(&service(broker(PASSWORD))).to_json()?,
+            &build_spec(&service(broker(password))).to_json()?,
         )?)
     }
 
     #[test]
     fn every_part_of_the_document_speaks_mqtt() -> Result<(), Box<dyn Error>> {
-        let spec = document()?;
+        let spec = document(&made_up_secret())?;
 
         for bindings in [
             &spec["servers"]["mqtt"]["bindings"],
@@ -164,7 +168,7 @@ mod tests {
 
     #[test]
     fn the_server_reports_the_session_the_client_opens() -> Result<(), Box<dyn Error>> {
-        let spec = document()?;
+        let spec = document(&made_up_secret())?;
         let server = &spec["servers"]["mqtt"];
 
         assert_eq!(server["host"], "mqtt.internal:1883");
@@ -187,9 +191,10 @@ mod tests {
 
     #[test]
     fn the_document_carries_no_credential() -> Result<(), Box<dyn Error>> {
-        let text = document()?.to_string();
+        let password = made_up_secret();
+        let text = document(&password)?.to_string();
 
-        assert!(!text.contains(PASSWORD), "{text}");
+        assert!(!text.contains(&password), "{text}");
         assert!(
             !text.contains("offline"),
             "the will's payload stays out: {text}"
@@ -199,7 +204,7 @@ mod tests {
 
     #[test]
     fn each_operation_reports_its_quality_of_service() -> Result<(), Box<dyn Error>> {
-        let spec = document()?;
+        let spec = document(&made_up_secret())?;
         let operations = &spec["operations"];
 
         assert_eq!(
@@ -215,7 +220,7 @@ mod tests {
 
     #[test]
     fn each_message_reports_the_properties_it_rides() -> Result<(), Box<dyn Error>> {
-        let spec = document()?;
+        let spec = document(&made_up_secret())?;
         let messages = &spec["components"]["messages"];
 
         let read = &messages["Telemetry"]["bindings"]["mqtt"];
@@ -231,7 +236,7 @@ mod tests {
 
     #[test]
     fn a_reply_named_per_request_points_at_the_response_topic() -> Result<(), Box<dyn Error>> {
-        let spec = document()?;
+        let spec = document(&made_up_secret())?;
 
         assert_eq!(
             spec["operations"]["receive_devices_dev42_ping"]["reply"]["address"]["location"],

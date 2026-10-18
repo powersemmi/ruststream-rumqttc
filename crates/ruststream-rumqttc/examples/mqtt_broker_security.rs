@@ -5,7 +5,8 @@
 //! ```text
 //! cargo test --example mqtt_broker_security --features testing
 //! just brokers-up
-//! MQTT_TEST_AUTH_URL=mqtt://127.0.0.1:1884 MQTT_TEST_TLS_URL=mqtts://127.0.0.1:8883 \
+//! MQTT_TEST_AUTH_URL=mqtt://127.0.0.1:1884 MQTT_TEST_AUTH_PASSWORD=s3cret \
+//!     MQTT_TEST_TLS_URL=mqtts://127.0.0.1:8883 \
 //!     MQTT_TEST_TLS_DIR=.stand-tls cargo test --example mqtt_broker_security --features testing
 //! ```
 
@@ -85,11 +86,17 @@ struct Telemetry {
 #[cfg(test)]
 mod tests {
     use std::error::Error;
+    use std::hash::{BuildHasher, Hasher, RandomState};
 
     use ruststream::testing::TestApp;
     use ruststream_rumqttc::prelude::*;
 
     use super::{Telemetry, app, live, password_broker, service, tls_broker, url_broker};
+
+    /// A secret made up at run time, so none is written into the source.
+    fn made_up_secret() -> String {
+        RandomState::new().build_hasher().finish().to_string()
+    }
 
     /// The body every mode runs: a reading reaches the handler through the secured connection.
     async fn records_a_reading(tb: TestApp<()>) -> Result<(), Box<dyn Error>> {
@@ -118,7 +125,12 @@ mod tests {
 
     #[tokio::test]
     async fn a_tls_address_without_an_authority_does_not_start() {
-        let broker = password_broker("mqtts://localhost:8883", "telemetry-svc", "u", "p");
+        let broker = password_broker(
+            "mqtts://localhost:8883",
+            "telemetry-svc",
+            "telemetry-svc",
+            &made_up_secret(),
+        );
 
         let refused = TestApp::start(service(broker)).await.err();
         let refused = refused.map(|err| err.to_string()).unwrap_or_default();
@@ -127,11 +139,11 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn the_password_listener_accepts_the_credentials() -> Result<(), Box<dyn Error>> {
-        let Some(url) = live::url("MQTT_TEST_AUTH_URL") else {
+        let Some((url, password)) = live::auth() else {
             return Ok(());
         };
         let id = live::client_id("broker-security-password");
-        let broker = password_broker(&url, &id, "tester", "s3cret");
+        let broker = password_broker(&url, &id, "tester", &password);
         records_a_reading(TestApp::start_live(service(broker)).await?).await
     }
 

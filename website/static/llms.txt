@@ -6,26 +6,76 @@ A subscription is a descriptor: `MqttTopic` for one topic, `MqttFilter` for a to
 
 This site holds the guides, one page per component and the architecture of the crate; the API reference is on docs.rs, and the framework itself is documented on the RustStream site.
 
-## Site
+## Guides
 
-- [Guides](https://powersemmi.github.io/ruststream-rumqttc/latest/): building an MQTT 5 service with the crate
-- [Components](https://powersemmi.github.io/ruststream-rumqttc/latest/components/): one page per component of the crate
-- [Architecture](https://powersemmi.github.io/ruststream-rumqttc/latest/architecture/): how the crate sits between the `rumqttc` client and the framework's runtime
-- [Benchmarks](https://powersemmi.github.io/ruststream-rumqttc/latest/architecture/benchmarks/): what this crate and the framework's runtime cost over the raw `rumqttc` client, per quality of service, and how to re-measure it with `just bench`
+- [Guides](https://powersemmi.github.io/ruststream-rumqttc/latest/): building an MQTT 5 service with the crate, from a first subscriber to a production server
+- [Getting started](https://powersemmi.github.io/ruststream-rumqttc/latest/guides/getting-started/): installation, a local Mosquitto, a first subscriber against it and its test without a server
+- [Topics, wildcards and shared subscriptions](https://powersemmi.github.io/ruststream-rumqttc/latest/guides/topics/): topic design, many topics through `+` and `#`, work shared between replicas in a share group, and overlapping filters
+- [Delivery guarantees](https://powersemmi.github.io/ruststream-rumqttc/latest/guides/delivery/): the quality of service, what each handler outcome sends, a persistent session across restarts and the deliveries in flight
+- [Device state: retained messages and the last will](https://powersemmi.github.io/ruststream-rumqttc/latest/guides/device-state/): each device's current state kept on the server, clearing it, and the service's online status through a last will
+- [Publishing commands](https://powersemmi.github.io/ruststream-rumqttc/latest/guides/publishing/): a command to one device out of many, the quality of service per message, and headers as MQTT 5 properties
+- [Retries and dead letters](https://powersemmi.github.io/ruststream-rumqttc/latest/guides/retries/): a retry now or later, the attempt cap, the dead-letter topic, and the copies of a filter sent back to their own topics
+- [Request and response](https://powersemmi.github.io/ruststream-rumqttc/latest/guides/request-response/): answers on the response topic each request names, with its correlation data, and a fixed topic as the fallback
+- [Testing an MQTT service](https://powersemmi.github.io/ruststream-rumqttc/latest/guides/testing/): `TestApp` on the production app with wildcard topics, published alerts and delays, and the same test on Mosquitto
+- [Connecting to production](https://powersemmi.github.io/ruststream-rumqttc/latest/guides/production/): credentials, TLS with a client certificate, one client id per process, limits, reconnects and a configuration test
 
-## Guide
+## Components
 
-- [Overview](https://docs.rs/ruststream-rumqttc/latest/ruststream_rumqttc/index.html): the transport, its connection task and what MQTT keeps
-- [Subscribing](https://docs.rs/ruststream-rumqttc/latest/ruststream_rumqttc/index.html#subscribing): the two descriptors, wildcards, share groups, several subscriptions on one connection, and batches
-- [Acknowledgement](https://docs.rs/ruststream-rumqttc/latest/ruststream_rumqttc/index.html#acknowledgement): what each handler outcome means on a transport with no server-side retry
-- [Publishing](https://docs.rs/ruststream-rumqttc/latest/ruststream_rumqttc/index.html#publishing): the publish policy, the quality of service and retain flag of one message, headers and replies
-- [The prelude](https://docs.rs/ruststream-rumqttc/latest/ruststream_rumqttc/index.html#the-prelude): what a routes file and a handler file import
-- [The generated document](https://docs.rs/ruststream-rumqttc/latest/ruststream_rumqttc/index.html#the-generated-document): the MQTT bindings the `asyncapi` feature reports
-- [Testing](https://docs.rs/ruststream-rumqttc/latest/ruststream_rumqttc/index.html#testing): the production app under `TestApp`, `MqttBroker` in process behind the `testing` feature or against a live MQTT broker
-- [Operations](https://docs.rs/ruststream-rumqttc/latest/ruststream_rumqttc/index.html#operations): authentication, TLS, sessions, last wills, keep-alive and packet limits
+- [Components](https://powersemmi.github.io/ruststream-rumqttc/latest/components/): the parts of the crate an MQTT service uses, one page each
+- [MqttBroker](https://powersemmi.github.io/ruststream-rumqttc/latest/components/broker/): the broker type, its URL and client id, and its lazy connection
+- [Security](https://powersemmi.github.io/ruststream-rumqttc/latest/components/broker/security/): `credentials`, `tls_ca` and `tls_client_auth`
+- [Session](https://powersemmi.github.io/ruststream-rumqttc/latest/components/broker/session/): `clean_start(false)` and `session_expiry`, a session the server keeps between connections
+- [last_will](https://powersemmi.github.io/ruststream-rumqttc/latest/components/broker/last-will/): the message the server publishes when the connection ends without a clean disconnect
+- [Limits](https://powersemmi.github.io/ruststream-rumqttc/latest/components/broker/limits/): `max_packet_size` and `receive_maximum`, the packet size cap and the flow-control window
+- [Reconnect](https://powersemmi.github.io/ruststream-rumqttc/latest/components/broker/reconnect/): the backoff from 100 ms to 5 s, the resubscribe, and `keep_alive`
+- [Startup](https://powersemmi.github.io/ruststream-rumqttc/latest/components/broker/startup/): the wait for the server's `CONNACK`, and the refusals that fail it at once
+- [Shutdown](https://powersemmi.github.io/ruststream-rumqttc/latest/components/broker/shutdown/): the clean `DISCONNECT`, and `MqttError::NotConnected` for a publisher used afterwards
+- [Prelude](https://powersemmi.github.io/ruststream-rumqttc/latest/components/broker/prelude/): `ruststream_rumqttc::prelude`, the one glob an MQTT service imports
+- [Errors](https://powersemmi.github.io/ruststream-rumqttc/latest/components/broker/errors/): `MqttError`, the one error type of the crate
+- [Subscriptions](https://powersemmi.github.io/ruststream-rumqttc/latest/components/subscriptions/): a topic in `#[subscriber]` and the descriptors that carry every other setting
+- [MqttTopic](https://powersemmi.github.io/ruststream-rumqttc/latest/components/subscriptions/mqtt-topic/): one topic with no wildcard, which answers for its own retry copies
+- [MqttFilter](https://powersemmi.github.io/ruststream-rumqttc/latest/components/subscriptions/mqtt-filter/): a topic filter with the `+` and `#` wildcards
+- [Qos](https://powersemmi.github.io/ruststream-rumqttc/latest/components/subscriptions/qos/): at most once, at least once or exactly once, and the level a delivery arrives at
+- [shared](https://powersemmi.github.io/ruststream-rumqttc/latest/components/subscriptions/shared/): a share group, where the server hands each message to one member
+- [Overlaps](https://powersemmi.github.io/ruststream-rumqttc/latest/components/subscriptions/overlaps/): overlapping filters on one connection, told apart by subscription identifiers
+- [Batches](https://powersemmi.github.io/ruststream-rumqttc/latest/components/subscriptions/batches/): slice handlers over batches the crate assembles on the client
+- [Acknowledgement](https://powersemmi.github.io/ruststream-rumqttc/latest/components/settlement/): what an `ack` and a `drop` send at each quality of service
+- [retry](https://powersemmi.github.io/ruststream-rumqttc/latest/components/settlement/retry/): a delivery left unacknowledged until a persistent session resumes
+- [retry_after](https://powersemmi.github.io/ruststream-rumqttc/latest/components/settlement/retry-after/): a copy the runtime publishes after a delay, within the session
+- [Retries](https://powersemmi.github.io/ruststream-rumqttc/latest/components/settlement/retries/): `max_attempts`, counted on the framework's retry-count header
+- [Dead letters](https://powersemmi.github.io/ruststream-rumqttc/latest/components/settlement/dead-letters/): `dead_letter`, the topic a delivery that reached its cap goes to
+- [out_retry](https://powersemmi.github.io/ruststream-rumqttc/latest/components/settlement/out-retry/): where the retry copies of a filter subscription go, once or per delivery
+- [MqttContext](https://powersemmi.github.io/ruststream-rumqttc/latest/components/context/): the topic a delivery was published to, read through `Ctx<DeliveryTopic>`
+- [MqttPublish](https://powersemmi.github.io/ruststream-rumqttc/latest/components/publishing/): the publish policy, `Publish` in the prelude, with its QoS and retain flag
+- [MqttPublishSteps](https://powersemmi.github.io/ruststream-rumqttc/latest/components/publishing/mqtt-publish-steps/): the `qos` and `retain` steps of one message
+- [Retained](https://powersemmi.github.io/ruststream-rumqttc/latest/components/publishing/retained/): a message the server keeps on its topic for later subscribers
+- [Headers](https://powersemmi.github.io/ruststream-rumqttc/latest/components/publishing/headers/): headers as MQTT 5 user properties, and the three that take the protocol's own properties
+- [Responders](https://powersemmi.github.io/ruststream-rumqttc/latest/components/publishing/responders/): a handler that answers on the response topic of each request
+- [MQTT bindings](https://powersemmi.github.io/ruststream-rumqttc/latest/components/asyncapi/): the `mqtt` bindings of the AsyncAPI document behind the `asyncapi` feature
+- [Server](https://powersemmi.github.io/ruststream-rumqttc/latest/components/asyncapi/server/): the server's host and port and the session the client opens, never credentials
+- [Operations](https://powersemmi.github.io/ruststream-rumqttc/latest/components/asyncapi/operations/): the QoS of a receive operation, and the QoS and retain flag of a send operation
+- [Messages](https://powersemmi.github.io/ruststream-rumqttc/latest/components/asyncapi/messages/): the MQTT 5 properties each message rides
+- [Replies](https://powersemmi.github.io/ruststream-rumqttc/latest/components/asyncapi/replies/): a reply address read from the `reply-to` header of the request
+- [Testing](https://powersemmi.github.io/ruststream-rumqttc/latest/components/testing/): `TestApp::start` with `MqttBroker` on an in-process MQTT server behind the `testing` feature
+- [Live](https://powersemmi.github.io/ruststream-rumqttc/latest/components/testing/live/): `TestApp::start_live`, the same test body against a running MQTT server
+
+## Architecture
+
+- [Architecture](https://powersemmi.github.io/ruststream-rumqttc/latest/architecture/): how MQTT 5 works, where the crate sits between the server and the RustStream runtime, and what that costs
+- [Topics](https://powersemmi.github.io/ruststream-rumqttc/latest/architecture/mqtt/): topics, filters, share groups and retained messages on an MQTT server
+- [Quality of service](https://powersemmi.github.io/ruststream-rumqttc/latest/architecture/mqtt/qos/): the QoS 1 and QoS 2 flows, the receive window, and what a publish keeps across a reconnect
+- [Sessions](https://powersemmi.github.io/ruststream-rumqttc/latest/architecture/mqtt/sessions/): a session's subscriptions and unacknowledged messages, keep-alive and the last will
+- [Design](https://powersemmi.github.io/ruststream-rumqttc/latest/architecture/design/): one connection and one task between the runtime and the `rumqttc` client
+- [Lifecycle](https://powersemmi.github.io/ruststream-rumqttc/latest/architecture/lifecycle/): `new`, `connect`, the subscriptions at startup, the reconnect and the `DISCONNECT` at shutdown
+- [Path](https://powersemmi.github.io/ruststream-rumqttc/latest/architecture/path/): one message from the event loop through the handler and the reply to its acknowledgement
+- [Demultiplexing](https://powersemmi.github.io/ruststream-rumqttc/latest/architecture/demultiplexing/): subscription identifiers for overlapping filters, and subscriptions taking turns on one filter
+- [Settlement](https://powersemmi.github.io/ruststream-rumqttc/latest/architecture/settlement/): what `ack`, drop, retry and `retry_after` become on MQTT
+- [Benchmarks](https://powersemmi.github.io/ruststream-rumqttc/latest/architecture/benchmarks/): what the crate and the framework's runtime cost over the raw `rumqttc` client, and the cost of the crate's own code
+- [Benchmarks: Numbers](https://powersemmi.github.io/ruststream-rumqttc/latest/architecture/benchmarks/numbers/): what each published number measures, and what it does not allow you to conclude
+- [Benchmarks: Methodology](https://powersemmi.github.io/ruststream-rumqttc/latest/architecture/benchmarks/methodology/): the three loops, the run on a real MQTT server and the code count with `just bench`
 
 ## Optional
 
-- [API reference](https://docs.rs/ruststream-rumqttc): the full rustdoc of the crate
+- [API reference](https://docs.rs/ruststream-rumqttc): the full rustdoc of the crate, whose overview maps each topic to its page here
 - [RustStream llms.txt](https://powersemmi.github.io/ruststream/llms.txt): the index of the framework's own documentation
 - [Source](https://github.com/powersemmi/ruststream-rumqttc): the crate's repository

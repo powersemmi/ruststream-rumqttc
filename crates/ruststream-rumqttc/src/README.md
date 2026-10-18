@@ -58,7 +58,7 @@ runtime connects the broker at startup and disconnects it when the service stops
 
 The [guides][guides] take an MQTT service from installation to production, in this order:
 [getting started][g-start], [topics, wildcards and shared subscriptions][g-topics],
-[delivery guarantees][g-delivery], [device state][g-state], [publishing][g-publishing],
+[delivery guarantees][g-delivery], [device state][g-state], [publishing commands][g-publishing],
 [retries and dead letters][g-retries], [request and response][g-request-response],
 [testing][g-testing] and [connecting to production][g-production]. The
 [architecture][architecture] pages show how the crate sits between `rumqttc` and the runtime, and

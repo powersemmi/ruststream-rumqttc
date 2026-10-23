@@ -14,6 +14,9 @@ categories = ["asynchronous", "network-programming"]
 
 # The overview links the `testing` and `asyncapi` modules, and both are off by default, so a
 # default build of the page would document neither and every link into them would 404.
+# Every file under `tests/` is a module of one test binary: one link instead of one per file.
+autotests = false
+
 [package.metadata.docs.rs]
 all-features = true
 
@@ -57,6 +60,10 @@ serde_json = "1"
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
 
 # --- examples: components-subscriptions ---
+
+[[test]]
+name = "suite"
+path = "tests/main.rs"
 
 [[example]]
 name = "mqtt_subscriptions_name"

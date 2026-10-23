@@ -3,7 +3,7 @@ name: Pull request labels
 # The labeling rules live in the core repository and are shared by every repository of the family.
 
 on:
-  pull_request_target:
+  pull_request:
     types: [opened, reopened, synchronize, ready_for_review]
 
 permissions:

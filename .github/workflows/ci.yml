@@ -176,9 +176,14 @@ jobs:
         env:
           RUSTUP_TOOLCHAIN: "1.95"
           CARGO_TARGET_DIR: ${{ runner.temp }}/target-minimal
+        # The test lines build no example (each one's tests are a module of one test binary), so
+        # the examples get a check of their own against the minimal graph.
         run: |
           cargo check --locked -p ruststream-rumqttc-bench --all-targets
-          cargo test --locked --workspace --all-features --no-fail-fast
+          cargo check --locked --workspace --exclude ruststream-rumqttc-bench --examples \
+            --all-features
+          cargo test --locked --workspace --all-features --no-fail-fast --tests
+          cargo test --locked --workspace --all-features --no-fail-fast --doc
 
       - name: Delete the minimal versions build
         if: always()
@@ -226,7 +231,8 @@ jobs:
         run: cargo check --locked --workspace --no-default-features
 
       # The benchmark package is built with the feature set a service ships, so it gets a check of
-      # its own. The test step below builds every other target with all features.
+      # its own. The test step below builds the tests with all features, and clippy has compiled
+      # every other target.
       - name: cargo check (benchmarks)
         run: cargo check --locked -p ruststream-rumqttc-bench --all-targets
 
@@ -235,7 +241,11 @@ jobs:
       # --no-fail-fast: a failing target must not hide failures in the targets behind it; the log
       # then lists every red test, not just the first binary's.
       - name: cargo test (handler-stub only, no live broker)
-        run: cargo test --locked --workspace --all-features --no-fail-fast
+        # `--tests` and not every target: the examples' tests are modules of one test binary, so
+        # an example needs no binary of its own, and clippy has already compiled each one.
+        run: |
+          cargo test --locked --workspace --all-features --no-fail-fast --tests
+          cargo test --locked --workspace --all-features --no-fail-fast --doc
 
       # The gate the later toolchains wait on: it succeeds only when every stable step did.
       - name: Stable passed
@@ -274,7 +284,11 @@ jobs:
         env:
           RUSTUP_TOOLCHAIN: beta
           CARGO_TARGET_DIR: ${{ runner.temp }}/target-beta
-        run: cargo test --locked --workspace --all-features --no-fail-fast
+        # `--tests` and not every target: the examples' tests are modules of one test binary, so
+        # an example needs no binary of its own, and clippy has already compiled each one.
+        run: |
+          cargo test --locked --workspace --all-features --no-fail-fast --tests
+          cargo test --locked --workspace --all-features --no-fail-fast --doc
 
       - name: Delete the beta build
         if: always()
@@ -299,7 +313,14 @@ jobs:
         env:
           RUSTUP_TOOLCHAIN: "1.95"
           CARGO_TARGET_DIR: ${{ runner.temp }}/target-floor
-        run: cargo test --locked --workspace --all-features --no-fail-fast
+        # `--tests` and not every target: the examples' tests are modules of one test binary, so
+        # an example needs no binary of its own. Nothing else compiles the examples on the floor,
+        # so they get a check of their own.
+        run: |
+          cargo check --locked --workspace --exclude ruststream-rumqttc-bench --examples \
+            --all-features
+          cargo test --locked --workspace --all-features --no-fail-fast --tests
+          cargo test --locked --workspace --all-features --no-fail-fast --doc
 
       - name: Delete the floor build
         if: always()

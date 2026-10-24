@@ -57,336 +57,287 @@ ruststream = { workspace = true, features = [
 ] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Builds the examples' tests into one test binary (`tests/examples.rs`) instead of a test binary
+# per example. It lives in the core repository and is not published: a dev-dependency without a
+# version is dropped on publish.
+ruststream-example-suite = { git = "https://github.com/powersemmi/ruststream", branch = "main" }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
-
-# --- examples: components-subscriptions ---
 
 [[test]]
 name = "suite"
 path = "tests/main.rs"
 
+# The tests of the examples, one module per example, in a binary of their own beside the suite.
+[[test]]
+name = "examples"
+path = "tests/examples.rs"
+
+# --- examples: components-subscriptions ---
+
 [[example]]
 name = "mqtt_subscriptions_name"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "manual_mqtt_subscriptions_name"
 path = "examples/manual/mqtt_subscriptions_name.rs"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "mqtt_subscriptions_topic"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "manual_mqtt_subscriptions_topic"
 path = "examples/manual/mqtt_subscriptions_topic.rs"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "mqtt_subscriptions_filter"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "manual_mqtt_subscriptions_filter"
 path = "examples/manual/mqtt_subscriptions_filter.rs"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "mqtt_subscriptions_qos"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "manual_mqtt_subscriptions_qos"
 path = "examples/manual/mqtt_subscriptions_qos.rs"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "mqtt_subscriptions_shared"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "manual_mqtt_subscriptions_shared"
 path = "examples/manual/mqtt_subscriptions_shared.rs"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "mqtt_subscriptions_lanes"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "manual_mqtt_subscriptions_lanes"
 path = "examples/manual/mqtt_subscriptions_lanes.rs"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "mqtt_subscriptions_overlaps"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "manual_mqtt_subscriptions_overlaps"
 path = "examples/manual/mqtt_subscriptions_overlaps.rs"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "mqtt_batches"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "manual_mqtt_batches"
 path = "examples/manual/mqtt_batches.rs"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "mqtt_context"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "manual_mqtt_context"
 path = "examples/manual/mqtt_context.rs"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "mqtt_asyncapi"
 required-features = ["asyncapi"]
-test = true
 
 [[example]]
 name = "manual_mqtt_asyncapi"
 path = "examples/manual/mqtt_asyncapi.rs"
 required-features = ["asyncapi"]
-test = true
 
 # --- examples: components-settlement ---
 
 [[example]]
 name = "mqtt_retries"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "manual_mqtt_retries"
 path = "examples/manual/mqtt_retries.rs"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "mqtt_settlement_ack"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "manual_mqtt_settlement_ack"
 path = "examples/manual/mqtt_settlement_ack.rs"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "mqtt_settlement_retry"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "manual_mqtt_settlement_retry"
 path = "examples/manual/mqtt_settlement_retry.rs"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "mqtt_retained"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "manual_mqtt_retained"
 path = "examples/manual/mqtt_retained.rs"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "mqtt_publishing_publish"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "manual_mqtt_publishing_publish"
 path = "examples/manual/mqtt_publishing_publish.rs"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "mqtt_publishing_headers"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "manual_mqtt_publishing_headers"
 path = "examples/manual/mqtt_publishing_headers.rs"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "mqtt_publishing_responders"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "manual_mqtt_publishing_responders"
 path = "examples/manual/mqtt_publishing_responders.rs"
 required-features = ["testing"]
-test = true
 
 # --- examples: components-broker ---
 
 [[example]]
 name = "mqtt_service"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "manual_mqtt_service"
 path = "examples/manual/mqtt_service.rs"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "mqtt_broker_security"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "manual_mqtt_broker_security"
 path = "examples/manual/mqtt_broker_security.rs"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "mqtt_broker_session"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "manual_mqtt_broker_session"
 path = "examples/manual/mqtt_broker_session.rs"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "mqtt_broker_last_will"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "manual_mqtt_broker_last_will"
 path = "examples/manual/mqtt_broker_last_will.rs"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "mqtt_broker_limits"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "manual_mqtt_broker_limits"
 path = "examples/manual/mqtt_broker_limits.rs"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "mqtt_broker_startup"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "manual_mqtt_broker_startup"
 path = "examples/manual/mqtt_broker_startup.rs"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "mqtt_broker_reconnect"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "manual_mqtt_broker_reconnect"
 path = "examples/manual/mqtt_broker_reconnect.rs"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "mqtt_broker_shutdown"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "manual_mqtt_broker_shutdown"
 path = "examples/manual/mqtt_broker_shutdown.rs"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "mqtt_broker_prelude"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "manual_mqtt_broker_prelude"
 path = "examples/manual/mqtt_broker_prelude.rs"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "mqtt_broker_errors"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "manual_mqtt_broker_errors"
 path = "examples/manual/mqtt_broker_errors.rs"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "mqtt_testing"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "manual_mqtt_testing"
 path = "examples/manual/mqtt_testing.rs"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "mqtt_testing_live"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "manual_mqtt_testing_live"
 path = "examples/manual/mqtt_testing_live.rs"
 required-features = ["testing"]
-test = true
 
 # --- examples: guides ---
 
@@ -394,106 +345,88 @@ test = true
 name = "guide_getting_started"
 path = "examples/guide/getting_started.rs"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "manual_guide_getting_started"
 path = "examples/manual/guide/getting_started.rs"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "guide_topics"
 path = "examples/guide/topics.rs"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "manual_guide_topics"
 path = "examples/manual/guide/topics.rs"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "guide_delivery"
 path = "examples/guide/delivery.rs"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "manual_guide_delivery"
 path = "examples/manual/guide/delivery.rs"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "guide_device_state"
 path = "examples/guide/device_state.rs"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "manual_guide_device_state"
 path = "examples/manual/guide/device_state.rs"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "guide_publishing"
 path = "examples/guide/publishing.rs"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "manual_guide_publishing"
 path = "examples/manual/guide/publishing.rs"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "guide_retries"
 path = "examples/guide/retries.rs"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "manual_guide_retries"
 path = "examples/manual/guide/retries.rs"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "guide_request_response"
 path = "examples/guide/request_response.rs"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "manual_guide_request_response"
 path = "examples/manual/guide/request_response.rs"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "guide_testing"
 path = "examples/guide/testing.rs"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "manual_guide_testing"
 path = "examples/manual/guide/testing.rs"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "guide_production"
 path = "examples/guide/production.rs"
 required-features = ["testing"]
-test = true
 
 [[example]]
 name = "manual_guide_production"
 path = "examples/manual/guide/production.rs"
 required-features = ["testing"]
-test = true

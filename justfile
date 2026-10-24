@@ -25,7 +25,11 @@ check:
     RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps
 
 test:
-    cargo test --workspace --all-features
+    # The examples' tests are modules of one test binary, so `--tests` builds none per example;
+    # `check` compiles every example on its own. `--tests` leaves the doc examples out, so they
+    # run on their own line.
+    cargo test --workspace --all-features --tests
+    cargo test --workspace --all-features --doc
 
 brokers-up: tls-certs
     docker compose -f docker-compose.test.yml up -d --wait
@@ -49,7 +53,7 @@ test-brokers: brokers-up
     MQTT_TEST_TLS_URL=mqtts://127.0.0.1:8883 \
     MQTT_TEST_TLS_DIR={{justfile_directory()}}/.stand-tls \
     RUSTSTREAM_REQUIRE_LIVE=1 \
-        cargo test --workspace --all-features -- --test-threads=1
+        cargo test --workspace --all-features --tests -- --test-threads=1
 
 # What this crate costs over the rumqttc client it wraps: two scenarios, one per quality of
 # service, each run as a RustStream service and as a hand-written loop, against the stand the

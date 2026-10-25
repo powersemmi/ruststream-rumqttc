@@ -18,7 +18,7 @@ export const words = {
   "options": ["检查设置：", "端口、keep-alive、TLS"],
   "dial": ["启动任务，最多等待", "30 秒 CONNACK"],
   "subscribe": ["每个订阅：", "SUBSCRIBE、SUBACK"],
-  "running": ["带退避地重连，", "重新订阅"],
+  "running": ["按重连模式", "恢复丢失的连接"],
   "disconnect": ["标记为已关闭，发送", "DISCONNECT，刷出"],
   "afterShutdown": ["比连接活得更久的发布者", "返回 MqttError::NotConnected，绝不默默成功"],
   "connect": "connect(self)",
@@ -39,7 +39,7 @@ connect 先检查设置，然后才做任何 I/O。端口不是数字、keep-ali
 
 每个订阅的[描述符](../components/subscriptions/index.md)针对已连接的 Broker 解析一次。它发送 SUBSCRIBE 并等待 SUBACK，因此在应用报告启动完成之前，服务器已经持有该订阅。服务器拒绝的过滤器会让启动失败，并返回 `MqttError::Subscribe`。
 
-服务运行期间，任务会[重连](../components/broker/reconnect.md)丢失的连接。第一次尝试前等待 100 毫秒，此后每次等待时间加倍，最长 5 秒。CONNACK 报告会话已不存在时，它重新订阅每个过滤器。连接无法靠重试克服的拒绝则会结束任务，每个订阅都以 `MqttError::Receive` 返回它。
+服务运行期间，任务按 Broker 的[重连模式](../components/broker/reconnect.md)恢复丢失的连接。默认情况下，第一次尝试前等待 100 毫秒，此后每次等待时间加倍，最长 5 秒。CONNACK 报告会话已不存在时，它重新订阅每个过滤器。连接无法靠重试克服的拒绝会结束任务，放弃恢复的模式也会结束任务：每个订阅都以 `MqttError::Receive` 返回原因，随后它的流结束。
 
 [关闭](../components/broker/shutdown.md)首先把连接标记为已关闭，因此引用它的发布者无法再塞进一条消息。随后它把 DISCONNECT 排在所有已排队的确认之后，并最多等待 5 秒，让任务把它们全部写出。服务器看到的是连接的正常结束，不会发布遗嘱消息。关闭不再返回其他内容：已关闭状态不携带诊断信息。
 

@@ -16,7 +16,6 @@ use std::borrow::Cow;
 use std::collections::VecDeque;
 use std::num::{NonZeroU16, NonZeroU32};
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use percent_encoding::percent_decode_str;
@@ -43,6 +42,7 @@ use crate::filter::{MqttFilter, MqttTopic, Qos};
 #[cfg(feature = "testing")]
 use crate::in_process::Bus;
 use crate::publisher::{MqttPublish, MqttPublisher};
+use crate::reconnect::{Policy, Reconnect};
 use crate::subscriber::{MqttSubscriber, OnDrop};
 
 /// What a connected broker and every handle derived from it speak over: the live client, or,
@@ -276,6 +276,7 @@ pub struct MqttBroker {
     last_will: Option<(String, Vec<u8>, Qos, bool)>,
     tls_ca: Option<Vec<u8>>,
     tls_client_auth: Option<(Vec<u8>, Vec<u8>)>,
+    reconnect: Reconnect,
     cell: CoreCell,
 }
 
@@ -301,6 +302,7 @@ impl MqttBroker {
             last_will: None,
             tls_ca: None,
             tls_client_auth: None,
+            reconnect: Reconnect::default(),
             cell: Arc::new(OnceCell::new()),
         }
     }
@@ -470,6 +472,66 @@ impl MqttBroker {
         self
     }
 
+    /// What the service does when the connection is lost after startup: the client's own
+    /// reconnection by default ([`Reconnect::automatic`]), none at all ([`Reconnect::never`]), or
+    /// a reconnection of the service's own ([`Reconnect::custom`]).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # mod demo {
+    /// use ruststream::runtime::SubscriptionEnd;
+    /// use ruststream_rumqttc::prelude::*;
+    /// use serde::Deserialize;
+    ///
+    /// #[derive(Deserialize)]
+    /// struct Command {
+    ///     name: String,
+    /// }
+    ///
+    /// #[subscriber(MqttTopic::new("devices/commands"))]
+    /// async fn run(command: &Command) -> HandlerOutcome {
+    ///     tracing::info!(command.name, "command run");
+    ///     HandlerOutcome::ack()
+    /// }
+    ///
+    /// // An orchestrator restarts the service, which is cheaper than a reconnection that might
+    /// // miss what the lost session held.
+    /// #[ruststream::app]
+    /// fn app() -> impl App {
+    ///     RustStream::new(AppInfo::new("device", "0.1.0"))
+    ///         .on_subscription_end(SubscriptionEnd::FailFast)
+    ///         .with_broker(
+    ///             MqttBroker::new("mqtt://localhost:1883", "device-svc").reconnect(Reconnect::never()),
+    ///             |b| {
+    ///                 b.include(run);
+    ///             },
+    ///         )
+    /// }
+    /// # }
+    /// # fn main() {}
+    /// ```
+    pub fn reconnect(mut self, reconnect: Reconnect) -> Self {
+        self.reconnect = reconnect;
+        self
+    }
+
+    pub(crate) const fn reconnect_mode(&self) -> &Reconnect {
+        &self.reconnect
+    }
+
+    /// The URL the broker connects to, as it was given.
+    #[must_use]
+    pub fn url(&self) -> &str {
+        &self.url
+    }
+
+    /// The client id the connection opens its session under.
+    #[must_use]
+    pub fn client_id(&self) -> &str {
+        &self.client_id
+    }
+
     /// A publisher sharing this broker's connection cell; buildable before `connect`.
     #[must_use]
     pub fn publisher(&self) -> MqttPublisher {
@@ -624,6 +686,7 @@ impl Broker for MqttBroker {
                     shared: Arc::clone(&shared),
                     first_connack: Some(connack_tx),
                     parked: VecDeque::new(),
+                    policy: Policy::new(&self),
                 }));
                 // The task retries transient failures itself; the first CONNACK (or a fatal
                 // refusal) decides whether connect succeeds.
@@ -636,7 +699,7 @@ impl Broker for MqttBroker {
                         )));
                     }
                     Err(_) => {
-                        shared.closed.store(true, Ordering::Release);
+                        shared.close();
                         // A task still dialing would otherwise connect later and run unowned;
                         // the queued DISCONNECT is what stops a task that got through.
                         let _ = client.try_disconnect();
@@ -849,7 +912,7 @@ impl ConnectedBroker for ConnectedMqttBroker {
     type Closed = ();
 
     async fn shutdown(self) -> Result<(), Self::Error> {
-        self.shared.closed.store(true, Ordering::Release);
+        self.shared.close();
         let held = self.shared.held();
         if held > 0 {
             // Unacknowledged, so the broker redelivers them when the session resumes; they are

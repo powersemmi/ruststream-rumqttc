@@ -1,0 +1,16 @@
+name: Approve green pull requests
+
+# The approval rules live in the core repository and are shared by every broker repository.
+
+on:
+  # zizmor: ignore[dangerous-triggers] the job checks out and runs nothing from the pull request
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  approve:
+    uses: powersemmi/ruststream/.github/workflows/pr-approve.yml@main

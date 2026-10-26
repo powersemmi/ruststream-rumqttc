@@ -9,8 +9,6 @@
 //!
 //! `MQTT_TEST_URL=mqtt://127.0.0.1:1883 cargo test --all-features --test suite reconnect_live_mqtt::`.
 
-mod relay;
-
 use std::collections::BTreeSet;
 use std::pin::pin;
 use std::time::Duration;
@@ -22,7 +20,7 @@ use ruststream::{
 };
 use ruststream_rumqttc::{ConnectedMqttBroker, MqttBroker, MqttPublish, MqttTopic, Qos};
 
-use relay::{Relay, SERVER_SHUTTING_DOWN};
+use crate::relay::{Relay, SERVER_SHUTTING_DOWN};
 
 const RECV_TIMEOUT: Duration = Duration::from_secs(15);
 

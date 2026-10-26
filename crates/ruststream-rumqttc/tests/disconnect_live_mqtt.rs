@@ -5,11 +5,9 @@
 //! word, as mosquitto does. Each test reads a topic of its own, because the tests of this file run
 //! at once against one server.
 //!
-//! `MQTT_TEST_URL=mqtt://127.0.0.1:1883 cargo test --all-features --test disconnect_live_mqtt`.
+//! `MQTT_TEST_URL=mqtt://127.0.0.1:1883 cargo test --all-features --test suite disconnect_live_mqtt::`.
 
 #![cfg(feature = "testing")]
-
-mod relay;
 
 use std::error::Error;
 use std::num::NonZeroU32;
@@ -26,7 +24,7 @@ use ruststream_rumqttc::{
 };
 use serde::{Deserialize, Serialize};
 
-use relay::{NOT_AUTHORIZED, Relay, SERVER_SHUTTING_DOWN};
+use crate::relay::{NOT_AUTHORIZED, Relay, SERVER_SHUTTING_DOWN};
 
 /// How long a stream gets to yield what the test waits for.
 const RECV_TIMEOUT: Duration = Duration::from_secs(15);

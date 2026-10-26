@@ -16,6 +16,11 @@ on:
 permissions:
   contents: read
 
+# No debug info: no step reads it, and it is most of the size of every linked test binary. A
+# failing test still reports the file and line of its panic.
+env:
+  CARGO_PROFILE_DEV_DEBUG: "0"
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -121,6 +126,9 @@ jobs:
       - name: Cache cargo
         if: "!cancelled() && env.RUST_CHANGED == 'true'"
         uses: Swatinem/rust-cache@v2
+        with:
+          # Saved from main only: a pull request reuses main's cache and never replaces it.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-hack
         if: "!cancelled() && env.RUST_CHANGED == 'true'"
@@ -160,16 +168,26 @@ jobs:
 
       # Minimum dependencies on the minimum compiler: the worst case a user can assemble.
       # Resolution above needs nightly, so only this step drops to the floor.
+      # It builds into a target directory of its own, deleted afterwards, so its artifacts stay
+      # out of the cache.
       - name: Build and test against minimal versions
         id: minimal-test
         if: "!cancelled() && steps.minimal-resolve.outcome == 'success'"
         env:
           RUSTUP_TOOLCHAIN: "1.95"
+          CARGO_TARGET_DIR: ${{ runner.temp }}/target-minimal
+        # The test lines build no example (each one's tests are a module of one test binary), so
+        # the examples get a check of their own against the minimal graph.
         run: |
-          cargo check --locked --workspace --exclude ruststream-rumqttc-bench --all-targets \
-            --all-features
           cargo check --locked -p ruststream-rumqttc-bench --all-targets
-          cargo test --locked --workspace --all-features --no-fail-fast
+          cargo check --locked --workspace --exclude ruststream-rumqttc-bench --examples \
+            --all-features
+          cargo test --locked --workspace --all-features --no-fail-fast --tests
+          cargo test --locked --workspace --all-features --no-fail-fast --doc
+
+      - name: Delete the minimal versions build
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/target-minimal"
 
   rust:
     name: Build and test
@@ -179,7 +197,9 @@ jobs:
     # once stable passed as a whole: a break stable already reports is not worth two more
     # builds. Releases between the floor and stable add nothing: what fails on a later one fails
     # on the floor too. Stable is the default through `rust-toolchain.toml`; the later steps
-    # name theirs through RUSTUP_TOOLCHAIN, which outranks the file.
+    # name theirs through RUSTUP_TOOLCHAIN, which outranks the file. Each of the two builds into a
+    # target directory of its own, deleted when its leg ends: it never stacks on the stable build,
+    # and the cache holds the stable build alone.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -196,6 +216,9 @@ jobs:
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+        with:
+          # Saved from main only: a pull request reuses main's cache and never replaces it.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # The crate-root missing_docs deny covers item docs; this gate catches what rustc
       # cannot: broken intra-doc links and redundant targets only rustdoc resolves.
@@ -207,21 +230,22 @@ jobs:
       - name: cargo check (no default features)
         run: cargo check --locked --workspace --no-default-features
 
-      # The benchmark package is left out of every all-features check on purpose: it is built
-      # with the feature set a service ships, and the framework's harness feature is a compile
-      # error in it. Its own check follows, so it stays compiled.
-      - name: cargo check (all features)
-        run: |
-          cargo check --locked --workspace --exclude ruststream-rumqttc-bench --all-targets \
-            --all-features
-          cargo check --locked -p ruststream-rumqttc-bench --all-targets
+      # The benchmark package is built with the feature set a service ships, so it gets a check of
+      # its own. The test step below builds the tests with all features, and clippy has compiled
+      # every other target.
+      - name: cargo check (benchmarks)
+        run: cargo check --locked -p ruststream-rumqttc-bench --all-targets
 
       # The handler-stub suite: the live tests skip themselves without MQTT_TEST_URL, and the
       # broker-integration job runs them against a real mosquitto.
       # --no-fail-fast: a failing target must not hide failures in the targets behind it; the log
       # then lists every red test, not just the first binary's.
       - name: cargo test (handler-stub only, no live broker)
-        run: cargo test --locked --workspace --all-features --no-fail-fast
+        # `--tests` and not every target: the examples' tests are modules of one test binary, so
+        # an example needs no binary of its own, and clippy has already compiled each one.
+        run: |
+          cargo test --locked --workspace --all-features --no-fail-fast --tests
+          cargo test --locked --workspace --all-features --no-fail-fast --doc
 
       # The gate the later toolchains wait on: it succeeds only when every stable step did.
       - name: Stable passed
@@ -235,6 +259,7 @@ jobs:
         continue-on-error: true
         env:
           RUSTUP_TOOLCHAIN: beta
+          CARGO_TARGET_DIR: ${{ runner.temp }}/target-beta
         run: |
           cargo clippy --locked --workspace --exclude ruststream-rumqttc-bench --all-targets \
             --all-features -- -D warnings
@@ -244,43 +269,62 @@ jobs:
         if: "!cancelled() && steps.stable.outcome == 'success'"
         env:
           RUSTUP_TOOLCHAIN: beta
+          CARGO_TARGET_DIR: ${{ runner.temp }}/target-beta
         run: cargo check --locked --workspace --no-default-features
 
-      - name: cargo check (all features, beta)
+      - name: cargo check (benchmarks, beta)
         if: "!cancelled() && steps.stable.outcome == 'success'"
         env:
           RUSTUP_TOOLCHAIN: beta
-        run: |
-          cargo check --locked --workspace --exclude ruststream-rumqttc-bench --all-targets \
-            --all-features
-          cargo check --locked -p ruststream-rumqttc-bench --all-targets
+          CARGO_TARGET_DIR: ${{ runner.temp }}/target-beta
+        run: cargo check --locked -p ruststream-rumqttc-bench --all-targets
 
       - name: cargo test (beta)
         if: "!cancelled() && steps.stable.outcome == 'success'"
         env:
           RUSTUP_TOOLCHAIN: beta
-        run: cargo test --locked --workspace --all-features --no-fail-fast
+          CARGO_TARGET_DIR: ${{ runner.temp }}/target-beta
+        # `--tests` and not every target: the examples' tests are modules of one test binary, so
+        # an example needs no binary of its own, and clippy has already compiled each one.
+        run: |
+          cargo test --locked --workspace --all-features --no-fail-fast --tests
+          cargo test --locked --workspace --all-features --no-fail-fast --doc
+
+      - name: Delete the beta build
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/target-beta"
 
       - name: cargo check (no default features, 1.95)
         if: "!cancelled() && steps.stable.outcome == 'success'"
         env:
           RUSTUP_TOOLCHAIN: "1.95"
+          CARGO_TARGET_DIR: ${{ runner.temp }}/target-floor
         run: cargo check --locked --workspace --no-default-features
 
-      - name: cargo check (all features, 1.95)
+      - name: cargo check (benchmarks, 1.95)
         if: "!cancelled() && steps.stable.outcome == 'success'"
         env:
           RUSTUP_TOOLCHAIN: "1.95"
-        run: |
-          cargo check --locked --workspace --exclude ruststream-rumqttc-bench --all-targets \
-            --all-features
-          cargo check --locked -p ruststream-rumqttc-bench --all-targets
+          CARGO_TARGET_DIR: ${{ runner.temp }}/target-floor
+        run: cargo check --locked -p ruststream-rumqttc-bench --all-targets
 
       - name: cargo test (1.95)
         if: "!cancelled() && steps.stable.outcome == 'success'"
         env:
           RUSTUP_TOOLCHAIN: "1.95"
-        run: cargo test --locked --workspace --all-features --no-fail-fast
+          CARGO_TARGET_DIR: ${{ runner.temp }}/target-floor
+        # `--tests` and not every target: the examples' tests are modules of one test binary, so
+        # an example needs no binary of its own. Nothing else compiles the examples on the floor,
+        # so they get a check of their own.
+        run: |
+          cargo check --locked --workspace --exclude ruststream-rumqttc-bench --examples \
+            --all-features
+          cargo test --locked --workspace --all-features --no-fail-fast --tests
+          cargo test --locked --workspace --all-features --no-fail-fast --doc
+
+      - name: Delete the floor build
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/target-floor"
 
   broker-integration:
     name: Broker integration (mosquitto)
@@ -306,6 +350,9 @@ jobs:
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+        with:
+          # Saved from main only: a pull request reuses main's cache and never replaces it.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Run integration + conformance against mosquitto
         env:
@@ -320,13 +367,9 @@ jobs:
           # missing URL fails the suite instead of skipping it.
           RUSTSTREAM_REQUIRE_LIVE: "1"
         run: >-
-          cargo test --locked -p ruststream-rumqttc --all-features
-          --test integration_mqtt
-          --test conformance_mqtt
-          --test handlers_live_mqtt
-          --test overlap_live_mqtt
-          --test both_modes_mqtt
-          -- --test-threads=1
+          cargo test --locked -p ruststream-rumqttc --all-features --test suite --
+          integration_mqtt:: conformance_mqtt:: handlers_live_mqtt:: overlap_live_mqtt::
+          both_modes_mqtt:: --test-threads=1
 
       - name: Cleanup
         if: always()
@@ -367,6 +410,9 @@ jobs:
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+        with:
+          # Saved from main only: a pull request reuses main's cache and never replaces it.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # The API links on the pages resolve against this rustdoc, the one docs.rs renders for the
       # same code; an item it lacks fails the build below.

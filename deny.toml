@@ -48,3 +48,6 @@ multiple-versions = "warn"
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
+# The examples' test-suite macro lives in the core repository and is not published; it is a
+# dev-dependency only, dropped on publish.
+allow-git = ["https://github.com/powersemmi/ruststream"]

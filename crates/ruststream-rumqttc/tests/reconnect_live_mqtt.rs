@@ -7,7 +7,7 @@
 //! server sends, and the client reconnects through it to a broker that never received a byte of
 //! those publishes. A subscriber connected straight to the broker counts what arrived.
 //!
-//! `MQTT_TEST_URL=mqtt://127.0.0.1:1883 cargo test --all-features --test reconnect_live_mqtt`.
+//! `MQTT_TEST_URL=mqtt://127.0.0.1:1883 cargo test --all-features --test suite reconnect_live_mqtt::`.
 
 mod relay;
 

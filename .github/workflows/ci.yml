@@ -369,7 +369,7 @@ jobs:
         run: >-
           cargo test --locked -p ruststream-rumqttc --all-features --test suite --
           integration_mqtt:: conformance_mqtt:: handlers_live_mqtt:: overlap_live_mqtt::
-          both_modes_mqtt:: --test-threads=1
+          both_modes_mqtt:: disconnect_live_mqtt:: reconnect_live_mqtt:: --test-threads=1
 
       - name: Cleanup
         if: always()

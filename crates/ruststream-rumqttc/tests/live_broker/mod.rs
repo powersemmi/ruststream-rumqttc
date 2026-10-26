@@ -9,6 +9,7 @@
 #![allow(dead_code)]
 
 use std::error::Error;
+use std::panic::Location;
 use std::path::PathBuf;
 use std::process;
 use std::thread;
@@ -60,8 +61,18 @@ pub(crate) fn tls() -> Option<(String, PathBuf)> {
 
 /// A client id this run alone holds: a second connection under one id takes the session over, and
 /// other runs use the same stand at the same time.
+///
+/// The macros and the manual variant of an example run in one process under one name, so the id
+/// also says which of them asked: otherwise the second variant inherits the session and the
+/// retained messages the first one left.
+#[track_caller]
 pub(crate) fn client_id(name: &str) -> String {
-    format!("{name}-{}", process::id())
+    let variant = if Location::caller().file().contains("/manual/") {
+        "manual-"
+    } else {
+        ""
+    };
+    format!("{name}-{variant}{}", process::id())
 }
 
 /// Starts the app `build` returns against the stand, then kills it: its runtime is dropped with

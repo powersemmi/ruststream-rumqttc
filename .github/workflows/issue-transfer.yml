@@ -1,0 +1,43 @@
+name: Issue transfer
+
+# Issues of every RustStream crate are tracked in the core repository. The issue chooser here only
+# links there; an issue opened past it (through the API or `gh`) is moved to the core repository
+# and labelled with this crate's name. The built-in token cannot transfer an issue to another
+# repository, so the job runs on the owner's token from the ISSUE_TRANSFER_TOKEN secret and
+# leaves the issue in place, with a warning, while the secret is not set.
+
+on:
+  issues:
+    types: [opened]
+
+permissions: {}
+
+jobs:
+  transfer:
+    name: Move the issue to the core repository
+    if: github.event.issue.user.type != 'Bot'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ secrets.ISSUE_TRANSFER_TOKEN }}
+      ISSUE_ID: ${{ github.event.issue.node_id }}
+      REPO: ${{ github.repository }}
+      CORE: powersemmi/ruststream
+    steps:
+      - name: Transfer the issue and label it with this crate
+        run: |
+          set -euo pipefail
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning::ISSUE_TRANSFER_TOKEN is not set, the issue stays in $REPO."
+            exit 0
+          fi
+          # The core repository labels each crate by its name without the family prefix.
+          label="${REPO#*/ruststream-}"
+          core_id=$(gh api "repos/$CORE" -q .node_id)
+          number=$(gh api graphql \
+            -f query='mutation($issue: ID!, $repo: ID!) {
+              transferIssue(input: {issueId: $issue, repositoryId: $repo}) { issue { number } }
+            }' \
+            -f issue="$ISSUE_ID" -f repo="$core_id" -q .data.transferIssue.issue.number)
+          gh api "repos/$CORE/issues/$number/labels" -f "labels[]=$label" --silent
+          echo "Moved to https://github.com/$CORE/issues/$number" >> "$GITHUB_STEP_SUMMARY"

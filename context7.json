@@ -26,6 +26,7 @@
     "Return `HandlerOutcome::retry_after(delay)` to retry within the session; `retry()` leaves a QoS 1/2 delivery unacknowledged until a persistent session resumes (retry_after and retry pages).",
     "Cap redeliveries with `.max_attempts(n).dead_letter(topic)` after `include`, with a dead-letter topic that matches no filter the service reads (Retries and Dead letters pages).",
     "Keep a session across restarts with `MqttBroker::clean_start(false)` and a `session_expiry`, so the server queues what arrives while the service is away (Session page).",
+    "Choose what a lost connection does with `MqttBroker::reconnect(Reconnect::..)`: `automatic(AutoReconnect)` is the default, `never()` ends every stream, `custom(reconnector)` runs a `Reconnector` of the service's own (Reconnect page).",
     "Answer a request on its response topic with a reply transform that reads `reply-to` and copies `correlation-id`, declaring `Destination = Names` (Responders page).",
     "Test a service by handing the app `main` runs to `TestApp::start` with the `testing` feature and addressing the broker as `tb.broker::<MqttBroker>()` (Testing page).",
     "Run the same test body against a running MQTT server with `TestApp::start_live` for a persistent session, the last will and the receive window (Live page).",

@@ -18,7 +18,7 @@ export const words = {
   "options": ["Check the settings:", "port, keep-alive, TLS"],
   "dial": ["Start the task, wait", "30 s for a CONNACK"],
   "subscribe": ["Each subscription:", "SUBSCRIBE, SUBACK"],
-  "running": ["Reconnect with", "backoff, resubscribe"],
+  "running": ["Recover a lost connection", "as the reconnect mode says"],
   "disconnect": ["Mark closed, send", "DISCONNECT, flush"],
   "afterShutdown": ["A publisher that outlives the connection", "answers MqttError::NotConnected, never a silent success"],
   "connect": "connect(self)",
@@ -52,10 +52,12 @@ connected broker. It sends a SUBSCRIBE and waits for the SUBACK, so the server h
 subscription before the app reports that it started. A filter the server refuses fails the start
 with `MqttError::Subscribe`.
 
-While the service runs, the task [reconnects](../components/broker/reconnect.md) a lost connection.
-It waits 100 milliseconds before the first attempt and doubles the wait up to 5 seconds. When the
-CONNACK reports the session gone, it subscribes every filter again. A refusal the connection cannot
-outgrow ends the task instead, and every subscription returns it as `MqttError::Receive`.
+While the service runs, the task recovers a lost connection as the broker's
+[reconnect mode](../components/broker/reconnect.md) says. By default it waits 100 milliseconds
+before the first attempt and doubles the wait up to 5 seconds. When the CONNACK reports the session
+gone, it subscribes every filter again. A refusal the connection cannot outgrow ends the task
+instead, and so does a mode that gives up: every subscription returns the reason as
+`MqttError::Receive`, and its stream ends.
 
 [Shutdown](../components/broker/shutdown.md) marks the connection closed first, so a publisher
 that aliases it cannot slip a message in. It then queues a DISCONNECT behind every acknowledgement

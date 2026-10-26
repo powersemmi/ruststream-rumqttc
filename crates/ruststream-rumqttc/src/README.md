@@ -5,7 +5,7 @@ subscriptions, retained publishes, and headers that ride user properties.
 A subscription is a topic or a topic filter the server delivers matching messages to, and a
 publish is one PUBLISH packet with a quality of service and a retain flag. The crate owns one task
 that drives the client's event loop, hands each packet to the subscriptions whose filters match,
-and reconnects when the connection drops.
+and recovers the connection when it drops, as the broker's reconnect mode says.
 
 # A service
 
@@ -77,7 +77,9 @@ item's own documentation keeps the detail.
 - [last_will][c-last-will]: [`MqttBroker::last_will`], the message the server publishes when the
   connection ends without a clean disconnect.
 - [Limits][c-limits]: [`MqttBroker::max_packet_size`] and [`MqttBroker::receive_maximum`].
-- [Reconnect][c-reconnect]: the backoff from 100 ms to 5 s, and [`MqttBroker::keep_alive`].
+- [Reconnect][c-reconnect]: [`MqttBroker::reconnect`] with a [`Reconnect`] mode (the client's
+  own by default, never, or a [`Reconnector`] of the service's own), and
+  [`MqttBroker::keep_alive`].
 - [Startup][c-startup]: the wait for the server's `CONNACK`, and the refusals that fail it.
 - [Shutdown][c-shutdown]: the clean `DISCONNECT`, and [`MqttError::NotConnected`] for a
   publisher used afterwards.

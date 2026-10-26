@@ -69,8 +69,8 @@ pub use ruststream::prelude::*;
 // one. The name is this glob's to give: a handler bounds its slot with a capability trait through
 // the framework's prelude, and never sees this one.
 pub use crate::{
-    DeliveryTopic, MqttBroker, MqttContext, MqttFilter, MqttPublish as Publish, MqttPublishOptions,
-    MqttPublishSteps, MqttTopic, PARTITION_KEY_HEADER, Qos,
+    AutoReconnect, DeliveryTopic, MqttBroker, MqttContext, MqttFilter, MqttPublish as Publish,
+    MqttPublishOptions, MqttPublishSteps, MqttTopic, PARTITION_KEY_HEADER, Qos, Reconnect,
 };
 
 // Capability manifest deliberately empty. Of the framework's optional capabilities MQTT

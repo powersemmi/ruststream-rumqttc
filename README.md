@@ -28,7 +28,8 @@ the framework; this crate is the transport.
 ## Features
 
 - **A connection task the crate owns:** one event loop per broker, per-subscription streams,
-  reconnects with backoff and resubscribes when the session is gone.
+  recovers a lost connection as the chosen reconnect mode says (by default the client dials again
+  and the crate resubscribes when the session is gone).
 - **QoS-aware acknowledgement** for QoS 1 and 2; QoS 0 reports that it has none.
 - **Shared subscriptions** for competing consumers.
 - **Overlapping filters on one connection,** each receiving a message once (MQTT 5 subscription

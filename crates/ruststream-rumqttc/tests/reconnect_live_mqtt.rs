@@ -1,18 +1,16 @@
 //! A publish that returned `Ok` survives the connection it was written to, gated behind
 //! `MQTT_TEST_URL`.
 //!
-//! The publisher reaches the broker through a relay this file owns, so a test decides when the
+//! The publisher reaches the broker through a relay the tests own, so a test decides when the
 //! connection drops and what the broker saw before it did: the relay swallows what the client
-//! writes, then closes the connection, and the client reconnects through it to a broker that never
-//! received a byte of those publishes. A subscriber connected straight to the broker counts what
-//! arrived.
+//! writes, then ends the connection, closed without a word or with the `DISCONNECT` a restarting
+//! server sends, and the client reconnects through it to a broker that never received a byte of
+//! those publishes. A subscriber connected straight to the broker counts what arrived.
 //!
 //! `MQTT_TEST_URL=mqtt://127.0.0.1:1883 cargo test --all-features --test suite reconnect_live_mqtt::`.
 
 use std::collections::BTreeSet;
 use std::pin::pin;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use futures::StreamExt;
@@ -21,9 +19,8 @@ use ruststream::{
     Broker, ConnectedBroker, IncomingMessage, Outgoing, PublishPolicy, Serialized, Subscriber,
 };
 use ruststream_rumqttc::{ConnectedMqttBroker, MqttBroker, MqttPublish, MqttTopic, Qos};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream};
-use tokio::task::JoinHandle;
+
+use crate::relay::{Relay, SERVER_SHUTTING_DOWN};
 
 const RECV_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -53,114 +50,38 @@ fn unique(name: &str) -> String {
 #[derive(Outgoing, Serialized)]
 struct Reading(Vec<u8>);
 
-/// A TCP relay between the client and the broker that can stop forwarding what the client writes
-/// and then drop the connection.
-struct Relay {
-    url: String,
-    swallowing: Arc<AtomicBool>,
-    pumps: Arc<Mutex<Vec<JoinHandle<()>>>>,
-    accept: JoinHandle<()>,
+/// How the relay ends the connection the publishes were written to.
+#[derive(Clone, Copy)]
+enum End {
+    /// Closed without a word.
+    Cut,
+    /// The `DISCONNECT` a server sends before it restarts, then closed.
+    Announced,
 }
 
-impl Relay {
-    async fn start(broker_url: &str) -> Self {
-        let upstream = broker_url
-            .split_once("://")
-            .map_or(broker_url, |(_, rest)| rest)
-            .trim_end_matches('/')
-            .to_owned();
-        let listener = TcpListener::bind("127.0.0.1:0").await.expect("relay binds");
-        let url = format!("mqtt://{}", listener.local_addr().expect("relay address"));
-        let swallowing = Arc::new(AtomicBool::new(false));
-        let pumps: Arc<Mutex<Vec<JoinHandle<()>>>> = Arc::default();
-        let accept = tokio::spawn({
-            let swallowing = Arc::clone(&swallowing);
-            let pumps = Arc::clone(&pumps);
-            async move {
-                while let Ok((client, _)) = listener.accept().await {
-                    let server = TcpStream::connect(&upstream)
-                        .await
-                        .expect("relay reaches the broker");
-                    let (mut client_read, mut client_write) = client.into_split();
-                    let (mut server_read, mut server_write) = server.into_split();
-                    let swallowing = Arc::clone(&swallowing);
-                    let up = tokio::spawn(async move {
-                        let mut buffer = vec![0; 64 * 1024];
-                        loop {
-                            let read = match client_read.read(&mut buffer).await {
-                                Ok(0) | Err(_) => return,
-                                Ok(read) => read,
-                            };
-                            if swallowing.load(Ordering::Acquire) {
-                                continue;
-                            }
-                            if server_write.write_all(&buffer[..read]).await.is_err() {
-                                return;
-                            }
-                        }
-                    });
-                    let down = tokio::spawn(async move {
-                        let _ = tokio::io::copy(&mut server_read, &mut client_write).await;
-                    });
-                    pumps.lock().expect("relay pumps").extend([up, down]);
-                }
-            }
-        });
-        Self {
-            url,
-            swallowing,
-            pumps,
-            accept,
-        }
-    }
-
-    /// From now on the broker hears nothing the client writes, so nothing it sends is
-    /// acknowledged either.
-    fn swallow(&self) {
-        self.swallowing.store(true, Ordering::Release);
-    }
-
-    /// Closes every relayed connection, and relays the next one faithfully.
-    async fn cut(&self) {
-        let pumps: Vec<_> = self.pumps.lock().expect("relay pumps").drain(..).collect();
-        for pump in pumps {
-            pump.abort();
-            let _ = pump.await;
-        }
-        self.swallowing.store(false, Ordering::Release);
-    }
-}
-
-impl Drop for Relay {
-    fn drop(&mut self) {
-        self.accept.abort();
-        for pump in self.pumps.lock().expect("relay pumps").drain(..) {
-            pump.abort();
-        }
-    }
-}
-
-/// Publishes `SWALLOWED` messages at `QoS` 1 through `relay` that the broker never receives,
-/// drops the connection they were written to, and answers the payloads a subscriber on the broker
-/// received afterwards.
+/// Publishes `SWALLOWED` messages at `qos` through `relay` that the broker never receives, ends
+/// the connection they were written to as `end` says, and answers the payloads a subscriber on
+/// the broker received afterwards.
 async fn publish_across_a_lost_connection(
     url: &str,
     relay: &Relay,
     sender: MqttBroker,
     topic: &str,
+    qos: Qos,
+    end: End,
 ) -> BTreeSet<String> {
     let watcher = MqttBroker::new(url, format!("watch-{topic}").replace('/', "-"))
         .connect()
         .await
         .expect("watcher connects");
     let mut subscriber = watcher
-        .subscribe_topic(MqttTopic::new(topic).qos(Qos::AtLeastOnce))
+        .subscribe_topic(MqttTopic::new(topic).qos(qos))
         .await
         .expect("subscription opens");
 
     let sender: ConnectedMqttBroker = sender.connect().await.expect("sender connects");
     let publisher = MqttPublish::default()
-        .qos(Qos::AtLeastOnce)
+        .qos(qos)
         .pair(&sender)
         .await
         .expect("the policy pairs with the connected broker");
@@ -174,7 +95,10 @@ async fn publish_across_a_lost_connection(
             .await
             .expect("the publish is handed to the client session");
     }
-    relay.cut().await;
+    match end {
+        End::Cut => relay.cut().await,
+        End::Announced => relay.disconnect(SERVER_SHUTTING_DOWN).await,
+    }
 
     let mut received = BTreeSet::new();
     let mut stream = pin!(subscriber.stream());
@@ -210,7 +134,9 @@ async fn a_clean_session_sends_again_what_the_lost_connection_never_confirmed() 
         format!("it-resend-clean-{}", std::process::id()),
     );
 
-    let received = publish_across_a_lost_connection(&url, &relay, sender, &topic).await;
+    let received =
+        publish_across_a_lost_connection(&url, &relay, sender, &topic, Qos::AtLeastOnce, End::Cut)
+            .await;
 
     assert_eq!(received, every_reading());
 }
@@ -228,7 +154,33 @@ async fn a_resumed_session_retransmits_what_the_lost_connection_never_confirmed(
     .clean_start(false)
     .session_expiry(Duration::from_mins(5));
 
-    let received = publish_across_a_lost_connection(&url, &relay, sender, &topic).await;
+    let received =
+        publish_across_a_lost_connection(&url, &relay, sender, &topic, Qos::AtLeastOnce, End::Cut)
+            .await;
 
     assert_eq!(received, every_reading());
+}
+
+/// A server that announces its restart ends the connection, not the session: the client resumes
+/// the persistent session and retransmits what it never had confirmed, at either quality of
+/// service that waits for a confirmation.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_session_resumed_after_an_announced_restart_retransmits_what_was_in_flight() {
+    let Some(url) = test_url() else { return };
+    for (qos, name) in [(Qos::AtLeastOnce, "qos1"), (Qos::ExactlyOnce, "qos2")] {
+        let relay = Relay::start(&url).await;
+        let topic = unique(&format!("resend-announced-{name}"));
+        let sender = MqttBroker::new(
+            &relay.url,
+            format!("it-resend-announced-{name}-{}", std::process::id()),
+        )
+        .clean_start(false)
+        .session_expiry(Duration::from_mins(5));
+
+        let received =
+            publish_across_a_lost_connection(&url, &relay, sender, &topic, qos, End::Announced)
+                .await;
+
+        assert_eq!(received, every_reading(), "{name}");
+    }
 }

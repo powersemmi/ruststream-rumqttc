@@ -18,7 +18,7 @@ The client's errors become text inside it, so the `rumqttc` types stay out of th
 |---|---|
 | `Connect` | the server refused the connection, the TLS handshake failed, or no `CONNACK` came within 30 seconds |
 | `Subscribe` | the server rejected a filter, or the connection ended while a subscription opened |
-| `Receive` | the connection ended for good: the server refused a reconnect for a reason no retry changes |
+| `Receive` | the connection ended for good: the server refused it for a reason no retry changes, or the [reconnect mode](./reconnect.md) gave up |
 | `Publish` | the topic is not one a server takes (empty, with a wildcard or a control character), a [header](../publishing/headers.md) has no MQTT form, or the connection task is gone |
 | `NotConnected` | a publisher was used, or a subscription opened, after the broker [shut down](./shutdown.md) |
 | `Invalid` | a setting or a descriptor cannot work, such as a keep-alive under five seconds or a share group with a `/` |

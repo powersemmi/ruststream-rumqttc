@@ -1,5 +1,5 @@
-//! The connection task: owns the client event loop, reconnects with backoff, and
-//! demultiplexes packets to subscriptions.
+//! The connection task: owns the client event loop, recovers a lost connection as the broker's
+//! [`Reconnect`](crate::Reconnect) mode says, and demultiplexes packets to subscriptions.
 //!
 //! The client exposes a single event loop that must be polled continuously - polling drives
 //! keep-alive, acknowledgements, and flow control alike - so the task does nothing but poll:
@@ -15,8 +15,8 @@ use std::time::Duration;
 
 use rumqttc::Outgoing;
 use rumqttc::v5::mqttbytes::v5::{
-    ConnAck, ConnectReturnCode, Filter, Packet, RetainForwardRule, SubscribeProperties,
-    SubscribeReasonCode,
+    ConnAck, ConnectReturnCode, DisconnectReasonCode, Filter, Packet, RetainForwardRule,
+    SubscribeProperties, SubscribeReasonCode,
 };
 use rumqttc::v5::mqttbytes::{QoS, matches};
 use rumqttc::v5::{AsyncClient, ConnectionError, Event, EventLoop, Request, StateError};
@@ -25,10 +25,11 @@ use tokio::sync::{Notify, oneshot};
 use crate::broker::Link;
 use crate::error::MqttError;
 use crate::message::MqttMessage;
+use crate::reconnect::{Policy, Recovered, recover};
 use crate::registry::{DeliverySender, Registry, SubscribeRequest};
 
 /// Who waits for the `SUBACK` of one subscribe.
-enum Awaiting {
+pub(crate) enum Awaiting {
     /// A subscription being opened: its member and the caller waiting on the answer.
     Open {
         member: u64,
@@ -38,15 +39,19 @@ enum Awaiting {
     Identify,
     /// A filter subscribed again after the server lost the session; nobody waits.
     Resubscribe,
+    /// A filter a custom reconnection restores, waiting for the answer.
+    Restore {
+        done: oneshot::Sender<Result<(), MqttError>>,
+    },
 }
 
 /// A subscribe awaiting its `SUBACK`. The event loop emits the packet id after the request
 /// leaves, in issue order, so ids are assigned first-come-first-served; every subscribe enters
 /// this queue and the request channel under one guard, so the two orders are the same.
-struct PendingSub {
-    filter: String,
-    pkid: Option<u16>,
-    awaiting: Awaiting,
+pub(crate) struct PendingSub {
+    pub(crate) filter: String,
+    pub(crate) pkid: Option<u16>,
+    pub(crate) awaiting: Awaiting,
 }
 
 /// How many deliveries matching no subscription are held before the oldest is dropped.
@@ -74,6 +79,8 @@ pub(crate) struct Shared {
     /// report that it waited.
     last_error: Mutex<Option<String>>,
     pub(crate) closed: AtomicBool,
+    /// Wakes a connection task recovering a lost connection when the broker shuts down.
+    closing: Notify,
     /// The connection task has stopped, so nothing drains the client's request queue any more.
     exited: AtomicBool,
     /// Wakes a shutdown waiting for the connection task to flush what was queued before it.
@@ -90,6 +97,7 @@ impl Shared {
             held: Mutex::new(VecDeque::new()),
             last_error: Mutex::new(None),
             closed: AtomicBool::new(false),
+            closing: Notify::new(),
             exited: AtomicBool::new(false),
             stopped: Notify::new(),
             // The protocol's default when the property is absent.
@@ -134,6 +142,24 @@ impl Shared {
         self.held.lock().expect("mqtt held mutex poisoned").len()
     }
 
+    /// Marks the broker shut down, and wakes a recovery that would otherwise keep dialing.
+    pub(crate) fn close(&self) {
+        self.closed.store(true, Ordering::Release);
+        self.closing.notify_waiters();
+    }
+
+    /// Resolves once the broker is shut down.
+    pub(crate) async fn closing(&self) {
+        let notified = self.closing.notified();
+        let mut notified = pin!(notified);
+        // Registered before the flag is read, so a shutdown in between still wakes us.
+        notified.as_mut().enable();
+        if self.closed.load(Ordering::Acquire) {
+            return;
+        }
+        notified.await;
+    }
+
     pub(crate) fn ensure_open(&self) -> Result<(), MqttError> {
         if self.closed.load(Ordering::Acquire) {
             return Err(MqttError::NotConnected);
@@ -153,7 +179,7 @@ impl Shared {
         notified.await;
     }
 
-    fn gone(&self) -> bool {
+    pub(crate) fn gone(&self) -> bool {
         self.closed.load(Ordering::Acquire) || self.exited.load(Ordering::Acquire)
     }
 
@@ -290,7 +316,7 @@ impl Shared {
     /// when the client's request queue refuses it.
     // The pending guard spans the send on purpose: it is what keeps the two orders the same.
     #[allow(clippy::significant_drop_tightening)]
-    fn send_subscribe(
+    pub(crate) fn send_subscribe(
         &self,
         client: &AsyncClient,
         request: &SubscribeRequest,
@@ -377,9 +403,9 @@ impl Shared {
             .leave(member);
     }
 
-    /// Reads what the server offers from a `CONNACK`, and subscribes again every filter a lost
-    /// session took with it.
-    fn connected(&self, client: &AsyncClient, connack: &ConnAck) {
+    /// Reads what the server offers from a `CONNACK`, and, when `restore` says so, subscribes
+    /// again every filter a lost session took with it.
+    fn connected(&self, client: &AsyncClient, connack: &ConnAck, restore: bool) {
         let identifiers = connack
             .properties
             .as_ref()
@@ -393,6 +419,9 @@ impl Shared {
         }
         let mut registry = self.registry.lock().expect("mqtt registry mutex poisoned");
         registry.resubscribing(identifiers);
+        if !restore {
+            return;
+        }
         for wire in &registry.wires {
             if !identifiers && wire.identifier.is_some() {
                 tracing::warn!(
@@ -419,27 +448,95 @@ impl Shared {
         }
     }
 
-    fn broadcast_error(&self, reason: &str) {
-        {
-            let registry = self.registry.lock().expect("mqtt registry mutex poisoned");
-            for member in registry.wires.iter().flat_map(|wire| &wire.members) {
-                let _ = member.tx.send(Err(MqttError::Receive(reason.to_owned())));
-            }
+    /// Every wire filter of this connection and the quality of service it is subscribed at, in
+    /// the order they were opened.
+    pub(crate) fn wires(&self) -> Vec<(String, QoS)> {
+        self.registry
+            .lock()
+            .expect("mqtt registry mutex poisoned")
+            .wires
+            .iter()
+            .map(|wire| (wire.filter.clone(), wire.qos))
+            .collect()
+    }
+
+    /// The subscribe that puts the wire filter `filter` on the server again as it was declared,
+    /// or `None` when no subscription holds it any more.
+    pub(crate) fn restore_request(&self, filter: &str) -> Option<SubscribeRequest> {
+        let identifiers = self.identifiers.load(Ordering::Relaxed);
+        self.registry
+            .lock()
+            .expect("mqtt registry mutex poisoned")
+            .wires
+            .iter()
+            .find(|wire| wire.filter == filter)
+            .map(|wire| SubscribeRequest {
+                filter: wire.filter.clone(),
+                qos: wire.qos,
+                identifier: wire.identifier.filter(|_| identifiers),
+                refresh: false,
+            })
+    }
+
+    /// Forgets the restores nobody waits for any more: a connection lost again took their
+    /// `SUBACK`s with it, and a stale record would take the packet id of a later subscribe.
+    pub(crate) fn abandon_restores(&self) {
+        self.pending
+            .lock()
+            .expect("mqtt pending mutex poisoned")
+            .retain(|sub| !matches!(&sub.awaiting, Awaiting::Restore { done } if done.is_closed()));
+    }
+
+    /// Ends the stream of every local subscription on the wire filter `filter`, after an error
+    /// naming `reason`.
+    pub(crate) fn end_filter(&self, filter: &str, reason: &str) {
+        let mut registry = self.registry.lock().expect("mqtt registry mutex poisoned");
+        let Some(index) = registry.wires.iter().position(|wire| wire.filter == filter) else {
+            return;
+        };
+        let wire = registry.wires.swap_remove(index);
+        drop(registry);
+        for member in wire.members {
+            let _ = member.tx.send(Err(MqttError::Receive(reason.to_owned())));
+        }
+    }
+
+    /// Ends every subscription's stream after an error naming `reason`, and fails every subscribe
+    /// still waiting for its answer: the connection is gone for good.
+    fn end(&self, reason: &str) {
+        // Closed before any stream ends, so a publish made after a stream ended fails instead of
+        // landing in a request queue the task no longer drains.
+        self.close();
+        // Taken out of the registry, so the senders drop and every stream ends once it has
+        // yielded the error.
+        let wires = std::mem::take(
+            &mut self
+                .registry
+                .lock()
+                .expect("mqtt registry mutex poisoned")
+                .wires,
+        );
+        for member in wires.into_iter().flat_map(|wire| wire.members) {
+            let _ = member.tx.send(Err(MqttError::Receive(reason.to_owned())));
         }
         let mut pending = self.pending.lock().expect("mqtt pending mutex poisoned");
         for sub in pending.drain(..) {
-            if let Awaiting::Open { done, .. } = sub.awaiting {
-                let _ = done.send(Err(MqttError::Subscribe {
-                    filter: sub.filter,
-                    reason: reason.to_owned(),
-                }));
+            let refused = Err(MqttError::Subscribe {
+                filter: sub.filter,
+                reason: reason.to_owned(),
+            });
+            match sub.awaiting {
+                Awaiting::Open { done, .. } | Awaiting::Restore { done } => {
+                    let _ = done.send(refused);
+                }
+                Awaiting::Identify | Awaiting::Resubscribe => {}
             }
         }
     }
 }
 
 /// A `poll` error that means the configuration is wrong and retrying cannot help.
-fn fatal_reason(err: &ConnectionError) -> Option<String> {
+pub(crate) fn fatal_reason(err: &ConnectionError) -> Option<String> {
     match err {
         ConnectionError::ConnectionRefused(code) => match code {
             ConnectReturnCode::ServerUnavailable
@@ -448,8 +545,11 @@ fn fatal_reason(err: &ConnectionError) -> Option<String> {
             | ConnectReturnCode::QuotaExceeded => None,
             other => Some(format!("broker refused the connection: {other:?}")),
         },
+        // A server that withdraws the authorization answers a new login the same way. Every other
+        // DISCONNECT, a server shutting down or a keep-alive that ran out among them, ends this
+        // connection and not the next one.
         ConnectionError::MqttState(StateError::ServerDisconnect {
-            reason_code,
+            reason_code: reason_code @ DisconnectReasonCode::NotAuthorized,
             reason_string,
         }) => Some(format!(
             "broker disconnected the session: {reason_code:?} {reason_string:?}"
@@ -473,9 +573,56 @@ pub(crate) struct Conn {
     /// server kept the session. The client drops all of it when the session is new, and a
     /// publish in it already reported success to its caller.
     pub(crate) parked: VecDeque<Request>,
+    /// What a connection lost after startup does.
+    pub(crate) policy: Policy,
+}
+
+/// Whether the connection task keeps reading after an event.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Flow {
+    Continue,
+    /// The `DISCONNECT` shutdown queued last is on the wire, after everything queued before it.
+    Stop,
 }
 
 impl Conn {
+    /// Sets aside what the connection that failed with `err` left unconfirmed, and keeps the
+    /// failure where `connect` can name it.
+    pub(crate) fn lost(&mut self, err: &ConnectionError) {
+        // The client clears what it set aside as soon as a CONNACK reports a new session, before
+        // this task sees that CONNACK.
+        self.park();
+        // A refusal the broker issues after the TLS handshake - a client certificate it wanted
+        // and did not get - reaches the client wrapped as a deserialization error, which is what
+        // a corrupt stream looks like too. Reconnecting is right for one and futile for the
+        // other, so the task keeps retrying and leaves the reason where `connect` can name it.
+        self.shared.record_error(err);
+    }
+
+    /// Handles one event the event loop yielded.
+    pub(crate) fn handle(&mut self, event: Event) -> Flow {
+        match event {
+            Event::Incoming(packet) => handle_incoming(self, packet),
+            Event::Outgoing(Outgoing::Subscribe(pkid)) => {
+                // The loop emits packet ids in issue order; hand this one to the oldest pending
+                // subscribe without one.
+                let mut pending = self
+                    .shared
+                    .pending
+                    .lock()
+                    .expect("mqtt pending mutex poisoned");
+                if let Some(sub) = pending.iter_mut().find(|sub| sub.pkid.is_none()) {
+                    sub.pkid = Some(pkid);
+                }
+            }
+            // The requests channel is FIFO, so every acknowledgement queued before shutdown is on
+            // the wire once the DISCONNECT that shutdown queued last has been flushed.
+            Event::Outgoing(Outgoing::Disconnect) => return Flow::Stop,
+            Event::Outgoing(_) => {}
+        }
+        Flow::Continue
+    }
+
     /// Takes over what the client set aside from the connection that just failed: the publishes
     /// it had not seen confirmed and the requests still queued.
     fn park(&mut self) {
@@ -506,60 +653,63 @@ impl Conn {
 
 /// Drives the event loop for the lifetime of the broker.
 pub(crate) async fn run(mut conn: Conn) {
-    // The client retries with zero delay forever (including on fatal auth failures), so the
-    // backoff is ours to own.
-    let mut backoff = Duration::from_millis(100);
+    // The client retries with zero delay forever (including on fatal auth failures), so the pause
+    // before the first CONNACK is ours to own; after it, the broker's reconnect mode decides.
+    let mut backoff = STARTUP_FIRST_PAUSE;
     loop {
-        match conn.eventloop.poll().await {
+        let err = match conn.eventloop.poll().await {
+            // The delivery path, matched here so it costs what it did before the other events
+            // went through `handle`.
             Ok(Event::Incoming(packet)) => {
-                backoff = Duration::from_millis(100);
                 handle_incoming(&mut conn, packet);
+                continue;
             }
-            Ok(Event::Outgoing(Outgoing::Subscribe(pkid))) => {
-                // The loop emits packet ids in issue order; hand this one to the oldest
-                // pending subscribe without one.
-                let mut pending = conn
-                    .shared
-                    .pending
-                    .lock()
-                    .expect("mqtt pending mutex poisoned");
-                if let Some(sub) = pending.iter_mut().find(|sub| sub.pkid.is_none()) {
-                    sub.pkid = Some(pkid);
-                }
-            }
-            // The requests channel is FIFO, so every acknowledgement queued before shutdown is
-            // on the wire once the DISCONNECT that shutdown queued last has been flushed.
-            Ok(Event::Outgoing(Outgoing::Disconnect)) => break,
-            Ok(Event::Outgoing(_)) => {}
-            Err(err) => {
-                if conn.shared.closed.load(Ordering::Acquire) {
+            Ok(event) => {
+                if conn.handle(event) == Flow::Stop {
                     break;
                 }
-                if let Some(reason) = fatal_reason(&err) {
-                    if let Some(done) = conn.first_connack.take() {
-                        let _ = done.send(Err(MqttError::Connect(Box::from(reason.clone()))));
-                    }
-                    conn.shared.broadcast_error(&reason);
-                    break;
-                }
-                tracing::debug!(error = %err, "mqtt connection error; backing off");
-                // The client clears what it set aside as soon as a CONNACK reports a new session,
-                // before this task sees that CONNACK.
-                conn.park();
-                // A refusal the broker issues after the TLS handshake - a client certificate it
-                // wanted and did not get - reaches the client wrapped as a deserialization error,
-                // which is what a corrupt stream looks like too. Reconnecting is right for one and
-                // futile for the other, so the task keeps retrying and leaves the reason where
-                // `connect` can name it.
-                conn.shared.record_error(&err);
-                tokio::time::sleep(backoff).await;
-                backoff = (backoff * 2).min(Duration::from_secs(5));
+                continue;
             }
+            Err(err) => err,
+        };
+        if conn.shared.closed.load(Ordering::Acquire) {
+            break;
+        }
+        if let Some(reason) = fatal_reason(&err) {
+            if let Some(done) = conn.first_connack.take() {
+                let _ = done.send(Err(MqttError::Connect(Box::from(reason.clone()))));
+            }
+            conn.shared.end(&reason);
+            break;
+        }
+        conn.lost(&err);
+        if conn.first_connack.is_some() {
+            tracing::debug!(error = %err, "mqtt connection error before the first CONNACK; backing off");
+            tokio::time::sleep(backoff).await;
+            backoff = (backoff * 2).min(STARTUP_LONGEST_PAUSE);
+            continue;
+        }
+        tracing::warn!(error = %err, "mqtt connection lost; recovering");
+        // Boxed, so the recovery's state lives on the heap only while a connection is lost, and
+        // the task polled for every delivery stays as small as it was.
+        match Box::pin(recover(&mut conn, &err)).await {
+            Recovered::Resumed => tracing::info!("mqtt connection recovered"),
+            Recovered::GaveUp(reason) => {
+                tracing::error!(reason = %reason, "mqtt connection not recovered; every subscription ends");
+                conn.shared.end(&reason);
+                break;
+            }
+            Recovered::Closing => break,
         }
     }
     conn.shared.exited.store(true, Ordering::Release);
     conn.shared.stopped.notify_waiters();
 }
+
+/// The pause after the first failed dial at startup, doubled after each later one.
+const STARTUP_FIRST_PAUSE: Duration = Duration::from_millis(100);
+/// The longest pause between two dials at startup.
+const STARTUP_LONGEST_PAUSE: Duration = Duration::from_secs(5);
 
 fn handle_incoming(conn: &mut Conn, packet: Packet) {
     match packet {
@@ -567,7 +717,8 @@ fn handle_incoming(conn: &mut Conn, packet: Packet) {
             conn.unpark(connack.session_present);
             // Recorded before `connect` wakes: a subscription opened right after it reads whether
             // the server offers identifiers.
-            conn.shared.connected(&conn.client, &connack);
+            conn.shared
+                .connected(&conn.client, &connack, conn.policy.restores_on_connack());
             if let Some(done) = conn.first_connack.take() {
                 let _ = done.send(Ok(()));
             }
@@ -622,6 +773,15 @@ fn handle_incoming(conn: &mut Conn, packet: Packet) {
                     if let Some(reason) = refused {
                         tracing::warn!(filter = %sub.filter, reason = %reason, "mqtt resubscribe refused");
                     }
+                }
+                Awaiting::Restore { done } => {
+                    let _ = done.send(match refused {
+                        None => Ok(()),
+                        Some(reason) => Err(MqttError::Subscribe {
+                            filter: sub.filter,
+                            reason,
+                        }),
+                    });
                 }
             }
         }
@@ -703,6 +863,7 @@ mod tests {
             shared: Arc::new(Shared::new()),
             first_connack: None,
             parked: VecDeque::new(),
+            policy: Policy::Never,
         };
         conn.eventloop.pending.extend(left);
         conn.park();
@@ -726,6 +887,35 @@ mod tests {
             )),
             unconfirmed(0),
         ]
+    }
+
+    fn server_disconnect(reason_code: DisconnectReasonCode) -> ConnectionError {
+        ConnectionError::MqttState(StateError::ServerDisconnect {
+            reason_code,
+            reason_string: None,
+        })
+    }
+
+    #[test]
+    fn a_server_disconnect_ends_the_connection_not_the_service() {
+        for code in [
+            DisconnectReasonCode::ServerShuttingDown,
+            DisconnectReasonCode::KeepAliveTimeout,
+            DisconnectReasonCode::SessionTakenOver,
+            DisconnectReasonCode::AdministrativeAction,
+        ] {
+            assert_eq!(fatal_reason(&server_disconnect(code)), None, "{code:?}");
+        }
+    }
+
+    #[test]
+    fn a_withdrawn_authorization_is_fatal() {
+        let reason = fatal_reason(&server_disconnect(DisconnectReasonCode::NotAuthorized));
+
+        assert!(
+            reason.is_some_and(|reason| reason.contains("NotAuthorized")),
+            "a new login would be refused the same way"
+        );
     }
 
     #[test]

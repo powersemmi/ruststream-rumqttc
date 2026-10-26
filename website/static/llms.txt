@@ -27,7 +27,7 @@ This site holds the guides, one page per component and the architecture of the c
 - [Session](https://powersemmi.github.io/ruststream-rumqttc/latest/components/broker/session/): `clean_start(false)` and `session_expiry`, a session the server keeps between connections
 - [last_will](https://powersemmi.github.io/ruststream-rumqttc/latest/components/broker/last-will/): the message the server publishes when the connection ends without a clean disconnect
 - [Limits](https://powersemmi.github.io/ruststream-rumqttc/latest/components/broker/limits/): `max_packet_size` and `receive_maximum`, the packet size cap and the flow-control window
-- [Reconnect](https://powersemmi.github.io/ruststream-rumqttc/latest/components/broker/reconnect/): the backoff from 100 ms to 5 s, the resubscribe, and `keep_alive`
+- [Reconnect](https://powersemmi.github.io/ruststream-rumqttc/latest/components/broker/reconnect/): `reconnect` and its modes (the client's own from 100 ms to 5 s by default, never, a custom `Reconnector`), the resubscribe, and `keep_alive`
 - [Startup](https://powersemmi.github.io/ruststream-rumqttc/latest/components/broker/startup/): the wait for the server's `CONNACK`, and the refusals that fail it at once
 - [Shutdown](https://powersemmi.github.io/ruststream-rumqttc/latest/components/broker/shutdown/): the clean `DISCONNECT`, and `MqttError::NotConnected` for a publisher used afterwards
 - [Prelude](https://powersemmi.github.io/ruststream-rumqttc/latest/components/broker/prelude/): `ruststream_rumqttc::prelude`, the one glob an MQTT service imports

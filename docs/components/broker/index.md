@@ -13,7 +13,7 @@ import TabItem from '@theme/TabItem';
 [`MqttBroker::new`](api:ruststream_rumqttc::MqttBroker::new) takes the server's URL, `mqtt://host:port` or `mqtts://host:port`, and the client id.
 A URL without a port takes 1883, or 8883 for `mqtts://`.
 It does no I/O, so the whole service fits the synchronous `#[ruststream::app]` builder.
-The settings that follow it are builder steps too: [credentials and TLS](./security.md), the [session](./session.md), the [last will](./last-will.md), the [limits](./limits.md) and the [keep-alive](./reconnect.md).
+The settings that follow it are builder steps too: [credentials and TLS](./security.md), the [session](./session.md), the [last will](./last-will.md), the [limits](./limits.md), the [reconnect mode and the keep-alive](./reconnect.md).
 Each page gives the default a setting has when the service leaves it unset.
 
 The client id is the session's identity on the server.

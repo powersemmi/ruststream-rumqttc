@@ -58,7 +58,8 @@ Replicas that split the work join a [share group](topics.md) instead.
 </Tabs>
 
 The broker connects once the service starts.
-A lost connection [reconnects](../components/broker/reconnect.md) with a backoff that starts at 100 ms and doubles up to 5 seconds, and the broker subscribes again when the server reports the session gone.
+A lost connection, a server restart that announces itself with a `DISCONNECT` among them, [reconnects](../components/broker/reconnect.md) with a pause that starts at 100 ms and doubles up to 5 seconds, and the broker subscribes again when the server reports the session gone.
+The broker's `reconnect` step chooses another mode: no reconnection, or one of the service's own.
 A refusal the connection will not outgrow ends the connection task instead: bad credentials, a client id the server does not accept, or a TLS handshake the certificates cannot satisfy.
 Every subscription then returns that error.
 

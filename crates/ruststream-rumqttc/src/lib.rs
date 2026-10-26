@@ -13,6 +13,7 @@ mod in_process;
 mod message;
 pub mod prelude;
 mod publisher;
+mod reconnect;
 mod registry;
 mod subscriber;
 
@@ -22,4 +23,7 @@ pub use error::MqttError;
 pub use filter::{MqttFilter, MqttTopic, Qos};
 pub use message::{MqttMessage, PARTITION_KEY_HEADER};
 pub use publisher::{MqttPublish, MqttPublishOptions, MqttPublishSteps, MqttPublisher};
+pub use reconnect::{
+    AutoReconnect, LostConnection, LostSubscription, Reconnect, Reconnected, Reconnector, Recovery,
+};
 pub use subscriber::MqttSubscriber;

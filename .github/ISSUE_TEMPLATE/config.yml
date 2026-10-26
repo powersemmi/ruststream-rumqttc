@@ -1,8 +1,5 @@
 blank_issues_enabled: false
 contact_links:
-  - name: Documentation
-    url: https://powersemmi.github.io/ruststream/
-    about: The RustStream framework docs - check here before opening an issue.
-  - name: Design and scope
-    url: https://github.com/powersemmi/ruststream/issues/191
-    about: The tracking issue for this broker crate - design discussion happens there.
+  - name: Open an issue in the core repository
+    url: https://github.com/powersemmi/ruststream/issues/new/choose
+    about: Issues of every RustStream crate are tracked in the core repository.

@@ -685,7 +685,7 @@ dependencies = [
 
 [[package]]
 name = "ruststream-rumqttc"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "bytes",
  "futures",
@@ -702,7 +702,7 @@ dependencies = [
 
 [[package]]
 name = "ruststream-rumqttc-bench"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "bytes",
  "futures",

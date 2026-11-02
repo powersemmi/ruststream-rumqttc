@@ -13,12 +13,16 @@ yanked = "deny"
 # The findings are X.509 validation corner cases (URI name constraints, wildcard subtree
 # constraints, a CRL-parsing panic) and an unmaintained-crate notice - none reachable
 # without TLS to a hostile broker. Revisit on the next rumqttc release.
+# RUSTSEC-2026-0382 (distrusted emSign intermediates) matches rustls-webpki 0.102 as well, but
+# rumqttc links that copy only for its error type: certificate paths are verified by rustls
+# through rustls-webpki 0.103, which the lock file holds at the fixed 0.103.16 or later.
 ignore = [
     "RUSTSEC-2025-0134",
     "RUSTSEC-2026-0049",
     "RUSTSEC-2026-0098",
     "RUSTSEC-2026-0099",
     "RUSTSEC-2026-0104",
+    "RUSTSEC-2026-0382",
 ]
 
 [licenses]

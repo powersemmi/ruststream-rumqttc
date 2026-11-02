@@ -13,7 +13,7 @@ authors = ["RustStream contributors"]
 
 [workspace.dependencies]
 ruststream-rumqttc = { path = "crates/ruststream-rumqttc" }
-ruststream = { version = "0.7", default-features = false }
+ruststream = { version = "0.7.5", default-features = false }
 
 rumqttc = "0.25"
 bytes = "1"

@@ -162,7 +162,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -644,24 +644,82 @@ dependencies = [
 
 [[package]]
 name = "ruststream"
-version = "0.7.5"
+version = "0.7.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "16703bcc614b0bb6fa741b6e5805428f059e47d41491b72e66da47ff49121697"
+checksum = "1662f29fc955ed7fed2f396659a58381e6d8be91cf691caef98a30d0a522f323"
 dependencies = [
  "bytes",
  "bytes-utils",
- "futures",
  "inventory",
- "rtrb",
+ "ruststream-asyncapi",
+ "ruststream-cli",
+ "ruststream-conformance",
+ "ruststream-core",
  "ruststream-macros",
+ "ruststream-memory",
+ "ruststream-runtime",
+ "ruststream-testing",
  "schemars",
+]
+
+[[package]]
+name = "ruststream-asyncapi"
+version = "0.7.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "99ff236c2a3b416e742e478b2cc0cafe9681581e7208c9c46c0b7eaec9b8ea8e"
+dependencies = [
+ "ruststream-core",
+ "ruststream-runtime",
  "serde",
+ "serde_json",
+ "serde_norway",
+ "tracing",
+]
+
+[[package]]
+name = "ruststream-cli"
+version = "0.7.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9c6dec10e6a15208ab6533b246a78c98d25f7b02a0fc095d6e271628244a550c"
+dependencies = [
+ "ruststream-asyncapi",
+ "ruststream-runtime",
  "serde_json",
  "serde_norway",
  "thiserror",
  "tokio",
- "tokio-util",
- "tracing",
+]
+
+[[package]]
+name = "ruststream-conformance"
+version = "0.7.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "98ea87456977a21ad3a0ef75a1992ae4dff1dbf54a5a23a7497500d76e286ff2"
+dependencies = [
+ "bytes",
+ "futures",
+ "inventory",
+ "ruststream-asyncapi",
+ "ruststream-core",
+ "ruststream-runtime",
+ "serde_json",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "ruststream-core"
+version = "0.7.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6d96617de2f8621959ad2d80b9cf8efe0d2bfe3e905ae185518fb2f88906637f"
+dependencies = [
+ "bytes",
+ "bytes-utils",
+ "futures",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
 ]
 
 [[package]]
@@ -674,13 +732,30 @@ dependencies = [
 
 [[package]]
 name = "ruststream-macros"
-version = "0.7.5"
+version = "0.7.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c6b01a6d229bf75a76d5806e57e7c7bf64d6f9b022681f3414816e7a0d63c74b"
+checksum = "ff57ef6fb132627421187107ea5269889eb0844db35190a4490423d6e0f06800"
 dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.3",
+]
+
+[[package]]
+name = "ruststream-memory"
+version = "0.7.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "107e27f56298fccbd3d3091f119a60767cd2124e6a850813e56908273cc62a0d"
+dependencies = [
+ "bytes",
+ "bytes-utils",
+ "futures",
+ "ruststream-core",
+ "ruststream-runtime",
+ "serde",
+ "thiserror",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -713,6 +788,42 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+]
+
+[[package]]
+name = "ruststream-runtime"
+version = "0.7.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c88ae535ec23a98beeb9acaca700c399538e3cc350a4dd72dba8ff7aca775629"
+dependencies = [
+ "bytes",
+ "bytes-utils",
+ "futures",
+ "inventory",
+ "rtrb",
+ "ruststream-core",
+ "schemars",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "ruststream-testing"
+version = "0.7.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e6e321a3207e37139715b2cef46d0d4cb46779ad557612140caf1123597d05d1"
+dependencies = [
+ "inventory",
+ "ruststream-core",
+ "ruststream-runtime",
+ "serde",
+ "tokio",
+ "tokio-util",
+ "tracing",
 ]
 
 [[package]]

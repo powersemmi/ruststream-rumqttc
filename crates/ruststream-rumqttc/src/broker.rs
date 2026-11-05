@@ -173,7 +173,7 @@ const DEFAULT_RECEIVE_MAXIMUM: NonZeroU16 = NonZeroU16::new(1000).unwrap();
 ///             .clean_start(false)
 ///             .session_expiry(Duration::from_hours(1)),
 ///         |b| {
-///             b.include(confirm);
+///             b.include(confirm)
 ///         },
 ///     )
 /// }
@@ -230,7 +230,6 @@ const DEFAULT_RECEIVE_MAXIMUM: NonZeroU16 = NonZeroU16::new(1000).unwrap();
 ///                 .out(DefaultSlot, Publish::default().qos(Qos::AtLeastOnce))
 ///                 .out_retry(Publish::default())
 ///                 .to("devices/retry/telemetry")
-///                 .build();
 ///         },
 ///     )
 /// }
@@ -369,7 +368,7 @@ impl MqttBroker {
     ///     RustStream::new(AppInfo::new("telemetry", "0.1.0")).with_broker(
     ///         MqttBroker::new("mqtt://localhost:1883", "telemetry-svc").max_packet_size(MAX_FRAME),
     ///         |b| {
-    ///             b.include(record);
+    ///             b.include(record)
     ///         },
     ///     )
     /// }
@@ -421,7 +420,7 @@ impl MqttBroker {
     ///     RustStream::new(AppInfo::new("renderer", "0.1.0")).with_broker(
     ///         MqttBroker::new("mqtt://localhost:1883", "renderer-svc").receive_maximum(IN_FLIGHT),
     ///         |b| {
-    ///             b.include(render);
+    ///             b.include(render)
     ///         },
     ///     )
     /// }
@@ -504,7 +503,7 @@ impl MqttBroker {
     ///         .with_broker(
     ///             MqttBroker::new("mqtt://localhost:1883", "device-svc").reconnect(Reconnect::never()),
     ///             |b| {
-    ///                 b.include(run);
+    ///                 b.include(run)
     ///             },
     ///         )
     /// }

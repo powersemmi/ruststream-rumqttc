@@ -69,8 +69,9 @@ const CORRELATION_ID: Str = Str::from_static("correlation-id");
 ///     RustStream::new(AppInfo::new("orders", "0.1.0")).with_broker(
 ///         MqttBroker::new("mqtt://localhost:1883", "orders-svc"),
 ///         |b| {
-///             b.include(place);
-///             b.include(checkout).out(DefaultSlot, Publish::default()).build();
+///             b.include(place)
+///                 .include(checkout)
+///                 .out(DefaultSlot, Publish::default())
 ///         },
 ///     )
 /// }

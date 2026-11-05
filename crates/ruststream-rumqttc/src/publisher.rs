@@ -437,9 +437,9 @@ impl MqttPublishOptions {
 ///             // The mount site fixes what every publish through the slot takes; the handler's
 ///             // step is what one message changes.
 ///             .include(announce_state)
-///                 .out(States, Publish::default().qos(Qos::AtLeastOnce))
-///                 .out_retry(Publish::default())
-///                 .to("devices/retry/telemetry")
+///             .out(States, Publish::default().qos(Qos::AtLeastOnce))
+///             .out_retry(Publish::default())
+///             .to("devices/retry/telemetry")
 ///         },
 ///     )
 /// }

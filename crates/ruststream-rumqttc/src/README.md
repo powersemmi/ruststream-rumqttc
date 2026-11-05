@@ -43,7 +43,7 @@ fn app() -> impl App {
             // deferred retry copy goes.
             b.include(handle)
                 .out_retry(Publish::default())
-                .to("devices/retry/telemetry");
+                .to("devices/retry/telemetry")
         },
     )
 }

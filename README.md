@@ -105,7 +105,6 @@ fn app() -> impl App {
                 .out(DefaultSlot, Publish::default().qos(Qos::AtLeastOnce))
                 .out_retry(Publish::default())
                 .to("devices/retry/telemetry")
-                .build();
         },
     )
 }

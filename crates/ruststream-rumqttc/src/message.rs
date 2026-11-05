@@ -9,7 +9,7 @@ use std::str;
 use bytes::Bytes;
 use rumqttc::v5::mqttbytes::QoS;
 use rumqttc::v5::mqttbytes::v5::{Publish, PublishProperties};
-use ruststream::{AckError, HeaderMap, IncomingMessage, OutgoingMessage, Partitioned, Str};
+use ruststream::{AckError, HeaderMap, IncomingMessage, OutgoingMessage, Partitioned, Settle, Str};
 
 use crate::broker::Link;
 use crate::error::MqttError;
@@ -196,7 +196,9 @@ impl IncomingMessage for MqttMessage {
     fn partition_key(&self) -> Option<&[u8]> {
         self.headers.get(PARTITION_KEY_HEADER)
     }
+}
 
+impl Settle for MqttMessage {
     async fn ack(self) -> Result<(), AckError> {
         let Some((link, publish)) = self.acker else {
             return Err(AckError::Unsupported);

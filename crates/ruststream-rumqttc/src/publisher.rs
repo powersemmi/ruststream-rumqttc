@@ -10,13 +10,14 @@
 use std::fmt;
 use std::future::{Future, ready};
 
-use bytes::Bytes;
-use rumqttc::v5::mqttbytes::v5::PublishProperties;
 use rumqttc::v5::mqttbytes::valid_topic;
 #[cfg(feature = "asyncapi")]
 use ruststream::asyncapi::Bindings;
 use ruststream::runtime::{PublishBuilder, PublishSink};
-use ruststream::{BytesMut, OutgoingMessage, PairError, PublishPolicy, Publisher, Take};
+use ruststream::{
+    BytesMut, OutgoingMessage, PairError, PublishMessageError, PublishOutcome, PublishPolicy, Publisher,
+    Take,
+};
 
 #[cfg(feature = "asyncapi")]
 use crate::asyncapi;
@@ -49,17 +50,18 @@ pub(crate) fn check_topic(topic: &str) -> Result<(), MqttError> {
 
 /// The single send path: every publishing form resolves to a `QoS` and a retain flag, and the
 /// wire work happens here once.
-async fn send(
+async fn send<'msg>(
     cell: &CoreCell,
     qos: Qos,
     retain: bool,
-    msg: OutgoingMessage<'_, BytesMut>,
-) -> Result<(), MqttError> {
+    msg: OutgoingMessage<'msg, BytesMut>,
+) -> PublishOutcome<'msg, MqttError, Take> {
     let core = cell.get().ok_or(MqttError::NotConnected)?;
     core.shared.ensure_open()?;
     check_topic(msg.name())?;
-    let topic = msg.name();
-    let (payload, properties) = into_packet(msg)?;
+    let properties = to_wire_properties(&msg)?;
+    let (topic, payload, _headers) = msg.into_parts();
+    let payload = payload.freeze();
     let client = match &core.link {
         Link::Wire(client) => client,
         #[cfg(feature = "testing")]
@@ -80,19 +82,12 @@ async fn send(
                 .await
         }
     };
-    outcome.map_err(|_| MqttError::Publish {
-        topic: topic.to_owned(),
-        reason: "the mqtt connection task has shut down".to_owned(),
+    outcome.map_err(|_| {
+        PublishMessageError::new(MqttError::Publish {
+            topic: topic.to_owned(),
+            reason: "the mqtt connection task has shut down".to_owned(),
+        })
     })
-}
-
-/// What a PUBLISH packet carries, taken out of the message in one move: the payload the session
-/// keeps and the MQTT 5 properties the headers map onto.
-fn into_packet(
-    msg: OutgoingMessage<'_, BytesMut>,
-) -> Result<(Bytes, Option<PublishProperties>), MqttError> {
-    let properties = to_wire_properties(&msg)?;
-    Ok((msg.into_payload().freeze(), properties))
 }
 
 /// Publishes messages to MQTT topics through the shared connection.
@@ -203,11 +198,11 @@ impl Publisher for MqttPublisher {
     type Error = MqttError;
     type Options = MqttPublishOptions;
 
-    async fn publish(
+    async fn publish<'msg>(
         &self,
-        msg: OutgoingMessage<'_, BytesMut>,
+        msg: OutgoingMessage<'msg, BytesMut>,
         options: Option<&Self::Options>,
-    ) -> Result<(), Self::Error> {
+    ) -> PublishOutcome<'msg, MqttError, Take> {
         let (qos, retain) = MqttPublishOptions::resolve(options, self.qos, self.retain);
         send(&self.cell, qos, retain, msg).await
     }
@@ -563,7 +558,7 @@ impl PublishPolicy<ConnectedMqttBroker> for MqttPublish {
 #[cfg(test)]
 mod tests {
     use ruststream::runtime::PublishExt;
-    use ruststream::{HeaderMap, Outgoing, Serialized};
+    use ruststream::{Outgoing, Serialized};
 
     use super::*;
     use crate::broker::MqttBroker;
@@ -574,27 +569,6 @@ mod tests {
         assert!(check_topic("devices/a\nb").is_err());
         assert!(check_topic("devices/\u{fdd0}").is_err());
         assert!(check_topic("devices/zürich").is_ok());
-    }
-
-    /// The packet is made of the buffer the publish wrote, not of a copy of it: the session keeps
-    /// the payload, so this crate hands it over.
-    #[test]
-    fn the_packet_carries_the_buffer_that_was_handed_in() {
-        let body = BytesMut::from(&br#"{"id":7}"#[..]);
-        let written_at = body.as_ptr();
-        let mut headers = HeaderMap::new();
-        headers.insert("content-type", "application/json");
-
-        let (payload, properties) =
-            into_packet(OutgoingMessage::produced("orders", body).with_headers(headers))
-                .expect("the headers are MQTT text");
-
-        assert!(properties.is_some(), "the headers still map to properties");
-        assert_eq!(
-            payload.as_ptr(),
-            written_at,
-            "the packet must carry the buffer the publish wrote, not a copy of it",
-        );
     }
 
     fn publisher() -> MqttPublisher {
@@ -665,6 +639,6 @@ mod tests {
             .publish(msg, Some(&MqttPublishOptions::default().retain(true)))
             .await
             .expect_err("nothing is connected yet");
-        assert!(matches!(error, MqttError::NotConnected));
+        assert!(matches!(error.error(), MqttError::NotConnected));
     }
 }

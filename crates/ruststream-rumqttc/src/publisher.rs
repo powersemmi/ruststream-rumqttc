@@ -11,12 +11,13 @@ use std::fmt;
 use std::future::{Future, ready};
 
 use rumqttc::v5::mqttbytes::valid_topic;
+use rumqttc::v5::{ClientError, Request};
 #[cfg(feature = "asyncapi")]
 use ruststream::asyncapi::Bindings;
 use ruststream::runtime::{PublishBuilder, PublishSink};
 use ruststream::{
-    BytesMut, OutgoingMessage, PairError, PublishMessageError, PublishOutcome, PublishPolicy, Publisher,
-    Take,
+    BytesMut, OutgoingMessage, PairError, PublishMessageError, PublishOutcome, PublishPolicy,
+    Publisher, Take,
 };
 
 #[cfg(feature = "asyncapi")]
@@ -50,17 +51,26 @@ pub(crate) fn check_topic(topic: &str) -> Result<(), MqttError> {
 
 /// The single send path: every publishing form resolves to a `QoS` and a retain flag, and the
 /// wire work happens here once.
+///
+/// A refusal hands the message back. Every check runs before the payload leaves the message, and
+/// a client whose event loop has gone returns the PUBLISH packet it could not queue, whose payload
+/// is still the buffer this call froze; only a payload something else came to share stays behind.
 async fn send<'msg>(
     cell: &CoreCell,
     qos: Qos,
     retain: bool,
     msg: OutgoingMessage<'msg, BytesMut>,
 ) -> PublishOutcome<'msg, MqttError, Take> {
-    let core = cell.get().ok_or(MqttError::NotConnected)?;
-    core.shared.ensure_open()?;
-    check_topic(msg.name())?;
-    let properties = to_wire_properties(&msg)?;
-    let (topic, payload, _headers) = msg.into_parts();
+    let checked = cell.get().ok_or(MqttError::NotConnected).and_then(|core| {
+        core.shared.ensure_open()?;
+        check_topic(msg.name())?;
+        Ok((core, to_wire_properties(&msg)?))
+    });
+    let (core, properties) = match checked {
+        Ok(checked) => checked,
+        Err(error) => return Err(PublishMessageError::with_message(error, msg)),
+    };
+    let (topic, payload, headers) = msg.into_parts();
     let payload = payload.freeze();
     let client = match &core.link {
         Link::Wire(client) => client,
@@ -82,12 +92,28 @@ async fn send<'msg>(
                 .await
         }
     };
-    outcome.map_err(|_| {
-        PublishMessageError::new(MqttError::Publish {
+    outcome.map_err(|refused| {
+        let error = MqttError::Publish {
             topic: topic.to_owned(),
             reason: "the mqtt connection task has shut down".to_owned(),
-        })
+        };
+        match unsent_payload(refused) {
+            Some(payload) => PublishMessageError::with_message(
+                error,
+                OutgoingMessage::assembled(topic, payload, headers),
+            ),
+            None => PublishMessageError::new(error),
+        }
     })
+}
+
+/// The payload of the PUBLISH packet a client could not queue, as the buffer it was frozen from.
+fn unsent_payload(refused: ClientError) -> Option<BytesMut> {
+    match refused {
+        ClientError::Request(Request::Publish(publish))
+        | ClientError::TryRequest(Request::Publish(publish)) => publish.payload.try_into_mut().ok(),
+        ClientError::Request(_) | ClientError::TryRequest(_) => None,
+    }
 }
 
 /// Publishes messages to MQTT topics through the shared connection.
@@ -97,6 +123,10 @@ async fn send<'msg>(
 /// it, across reconnects: a resumed session retransmits it, and a new session sends it again,
 /// where it may arrive twice. Buildable before `connect` and usable until `shutdown`; afterwards
 /// every publish reports [`MqttError::NotConnected`].
+///
+/// A refused publish hands its message back: the error's
+/// [`into_message`](ruststream::PublishMessageError::into_message) returns the topic, payload
+/// and headers as they were published, so a service can send them again or set them aside.
 ///
 /// Headers are sent as MQTT 5 user properties, so non-Rust peers see plain MQTT messages. The
 /// `content-type`, `reply-to` and `correlation-id` headers take the matching first-class
@@ -122,6 +152,7 @@ async fn send<'msg>(
 /// /// States the media type of every message this position sends, which is what fills the content
 /// /// type property and decides the payload format indicator. It reads nothing about the delivery,
 /// /// so it is generic over the position and mounts on any of them.
+/// #[derive(Clone, Copy)]
 /// struct Json;
 ///
 /// impl<K: ContextKind, Options> PublishTransform<K, Options> for Json {
@@ -161,7 +192,7 @@ async fn send<'msg>(
 ///                 .out_reply(Publish::default())
 ///                 .transform(Json)
 ///                 .out_retry(Publish::default())
-///                 .to("devices/retry/telemetry");
+///                 .to("devices/retry/telemetry")
 ///         },
 ///     )
 /// }
@@ -260,7 +291,7 @@ impl Publisher for MqttPublisher {
 ///     RustStream::new(AppInfo::new("states", "0.1.0")).with_broker(
 ///         MqttBroker::new("mqtt://localhost:1883", "states-svc"),
 ///         |b| {
-///             b.include(announce).out(States, Publish::default()).build();
+///             b.include(announce).out(States, Publish::default())
 ///         },
 ///     )
 /// }
@@ -402,14 +433,13 @@ impl MqttPublishOptions {
 ///                         .publish()
 ///                         .await
 ///                 },
-///             );
+///             )
 ///             // The mount site fixes what every publish through the slot takes; the handler's
 ///             // step is what one message changes.
-///             b.include(announce_state)
+///             .include(announce_state)
 ///                 .out(States, Publish::default().qos(Qos::AtLeastOnce))
 ///                 .out_retry(Publish::default())
 ///                 .to("devices/retry/telemetry")
-///                 .build();
 ///         },
 ///     )
 /// }
@@ -484,7 +514,7 @@ where
 ///             b.include(track)
 ///                 .out_reply(MqttPublish::default().qos(Qos::ExactlyOnce).retain(true))
 ///                 .out_retry(MqttPublish::default())
-///                 .to("devices/retry/telemetry");
+///                 .to("devices/retry/telemetry")
 ///         },
 ///     )
 /// }
@@ -557,6 +587,8 @@ impl PublishPolicy<ConnectedMqttBroker> for MqttPublish {
 
 #[cfg(test)]
 mod tests {
+    use rumqttc::v5::mqttbytes::QoS;
+    use rumqttc::v5::mqttbytes::v5::Publish;
     use ruststream::runtime::PublishExt;
     use ruststream::{Outgoing, Serialized};
 
@@ -569,6 +601,34 @@ mod tests {
         assert!(check_topic("devices/a\nb").is_err());
         assert!(check_topic("devices/\u{fdd0}").is_err());
         assert!(check_topic("devices/zürich").is_ok());
+    }
+
+    /// The packet is made of the buffer the publish wrote, not of a copy of it, and a client
+    /// that cannot queue the packet gives that same buffer back for the refusal to return.
+    #[test]
+    fn a_refused_packet_gives_back_the_buffer_that_was_handed_in() {
+        let body = BytesMut::from(&br#"{"id":7}"#[..]);
+        let written_at = body.as_ptr();
+        let packet = Publish::new("orders", QoS::AtLeastOnce, body.freeze(), None);
+
+        let unsent = unsent_payload(ClientError::Request(Request::Publish(packet)))
+            .expect("the refused packet still owns the only handle to its payload");
+
+        assert_eq!(
+            unsent.as_ptr(),
+            written_at,
+            "the refusal must return the buffer the publish wrote, not a copy of it",
+        );
+        assert_eq!(&unsent[..], br#"{"id":7}"#);
+    }
+
+    /// A payload something else shares cannot become a buffer again, so the refusal carries none.
+    #[test]
+    fn a_shared_payload_stays_with_its_other_owner() {
+        let payload = BytesMut::from(&b"shared"[..]).freeze();
+        let packet = Publish::new("orders", QoS::AtLeastOnce, payload.clone(), None);
+
+        assert!(unsent_payload(ClientError::TryRequest(Request::Publish(packet))).is_none());
     }
 
     fn publisher() -> MqttPublisher {

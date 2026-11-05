@@ -3,9 +3,9 @@ resolver = "3"
 members = ["crates/ruststream-rumqttc", "crates/ruststream-rumqttc-bench"]
 
 [workspace.package]
-version = "0.7.2"
+version = "0.8.0"
 edition = "2024"
-# The floor tracks the core line: ruststream 0.7 requires 1.95, so a lower one cannot resolve it.
+# The floor tracks the core line: ruststream 0.8 requires 1.95, so a lower one cannot resolve it.
 rust-version = "1.95"
 license = "Apache-2.0"
 repository = "https://github.com/powersemmi/ruststream-rumqttc"
@@ -13,7 +13,10 @@ authors = ["RustStream contributors"]
 
 [workspace.dependencies]
 ruststream-rumqttc = { path = "crates/ruststream-rumqttc" }
-ruststream = { version = "0.7", default-features = false }
+# The lower bound names the pre-release so cargo admits it: a range that mentions no pre-release
+# excludes every pre-release, so `>=0.8.0` would skip 0.8.0-rc.1. The final 0.8.0 satisfies this
+# range too. The client runs on tokio, so the library names the core's tokio runner in every build.
+ruststream = { version = ">=0.8.0-rc.1, <0.9.0", default-features = false, features = ["tokio"] }
 
 rumqttc = "0.25"
 bytes = "1"

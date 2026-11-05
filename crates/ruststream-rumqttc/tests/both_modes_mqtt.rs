@@ -6,6 +6,8 @@
 //! the start call differs between the two modes; the app is the one a service builds, on
 //! `MqttBroker`.
 
+// A scenario takes the started harness by value, and the app's cold path carries no `Send`.
+#![allow(clippy::future_not_send)]
 #![cfg(feature = "testing")]
 
 use std::time::Duration;

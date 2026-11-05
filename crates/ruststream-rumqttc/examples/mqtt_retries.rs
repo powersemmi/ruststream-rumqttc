@@ -12,6 +12,9 @@
 //! cargo run --example mqtt_retries -- run
 //! ```
 
+// A test drives the app on its own task; the app's cold path carries no Send.
+#![allow(clippy::future_not_send)]
+
 use std::time::Duration;
 
 // The derive and the value a publish transform reads share the name in different namespaces: the

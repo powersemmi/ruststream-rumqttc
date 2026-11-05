@@ -2,6 +2,8 @@
 // handler scaffolding, and a measured loop panics on a broker fault rather than threading a
 // `Result` through a scenario nobody recovers from.
 #![allow(
+    // A scenario drives the app on the measured runtime; the app's cold path carries no Send.
+    clippy::future_not_send,
     missing_docs,
     unreachable_pub,
     unused_qualifications,

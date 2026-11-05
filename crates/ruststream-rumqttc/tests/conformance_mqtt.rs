@@ -109,7 +109,7 @@ async fn mqtt_broker_passes_lifecycle() {
 async fn the_in_process_broker_returns_a_refused_message() {
     lifecycle::refused_publish_returns_message(
         in_process,
-        |connected| connected.publisher(),
+        ConnectedMqttBroker::publisher,
         Unsent::Returned,
     )
     .await;
@@ -120,7 +120,7 @@ async fn mqtt_broker_returns_a_refused_message() {
     let Some(url) = test_url() else { return };
     lifecycle::refused_publish_returns_message(
         move || live(&url, "unsent"),
-        |connected| connected.publisher(),
+        ConnectedMqttBroker::publisher,
         Unsent::Returned,
     )
     .await;

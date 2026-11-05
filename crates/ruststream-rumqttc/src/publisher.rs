@@ -629,6 +629,7 @@ mod tests {
         let packet = Publish::new("orders", QoS::AtLeastOnce, payload.clone(), None);
 
         assert!(unsent_payload(ClientError::TryRequest(Request::Publish(packet))).is_none());
+        assert_eq!(&payload[..], b"shared", "the other owner keeps the bytes");
     }
 
     fn publisher() -> MqttPublisher {

@@ -92,7 +92,7 @@ use rumqttc::v5::{AsyncClient, Event, MqttOptions};
 use ruststream::runtime::RunningApp;
 use ruststream::{
     AckError, Broker, ConnectedBroker, IncomingMessage, OutgoingMessage, PublishPolicy, Publisher,
-    Subscriber,
+    Settle, Subscriber,
 };
 use ruststream_rumqttc::{ConnectedMqttBroker, MqttPublish, MqttPublisher};
 // The framework loop is a mount site, and a mount site names its broker through this glob.
@@ -658,7 +658,7 @@ async fn start_at_most_once(url: &str, names: &Names, run: Run) -> RunningApp {
     RustStream::new(AppInfo::new("mqtt-bench", "0.0.0"))
         .on_startup(async move |()| Ok::<_, Infallible>(run))
         .with_broker(MqttBroker::new(url, names.consumer.clone()), |b| {
-            b.include(at_most_once);
+            b.include(at_most_once)
         })
         .start()
         .await
@@ -669,7 +669,7 @@ async fn start_at_least_once(url: &str, names: &Names, run: Run) -> RunningApp {
     RustStream::new(AppInfo::new("mqtt-bench", "0.0.0"))
         .on_startup(async move |()| Ok::<_, Infallible>(run))
         .with_broker(MqttBroker::new(url, names.consumer.clone()), |b| {
-            b.include(at_least_once);
+            b.include(at_least_once)
         })
         .start()
         .await

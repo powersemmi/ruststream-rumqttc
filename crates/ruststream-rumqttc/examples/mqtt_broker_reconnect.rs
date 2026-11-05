@@ -17,6 +17,7 @@ use std::time::Duration;
 
 use ruststream::runtime::SubscriptionEnd;
 use serde::{Deserialize, Serialize};
+use tokio::time::{MissedTickBehavior, interval};
 
 use ruststream_rumqttc::prelude::*;
 use ruststream_rumqttc::{MqttError, Reconnected, Reconnector, Recovery};
@@ -71,15 +72,18 @@ fn current_password() -> String {
 impl Reconnector for FreshLogin {
     async fn reconnect(&self, recovery: &mut Recovery<'_>) -> Result<Reconnected, MqttError> {
         tracing::warn!(reason = %recovery.lost(), "mqtt connection lost");
+        // One dial every two seconds at most; the first goes at once.
+        let mut dials = interval(Duration::from_secs(2));
+        dials.set_missed_tick_behavior(MissedTickBehavior::Delay);
         let mut failed = 0;
         let reconnected = loop {
+            dials.tick().await;
             recovery.credentials("telemetry-svc", current_password());
             match recovery.connect().await {
                 Ok(reconnected) => break reconnected,
                 Err(err) if failed == 30 => return Err(err),
                 Err(_) => failed += 1,
             }
-            tokio::time::sleep(Duration::from_secs(2)).await;
         };
         if !reconnected.session_present() {
             recovery.restore_all().await?;

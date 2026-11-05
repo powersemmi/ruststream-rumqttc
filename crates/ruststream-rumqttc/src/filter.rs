@@ -420,7 +420,7 @@ impl RedeliveryAddressed<ConnectedMqttBroker> for MqttTopic {
     fn redelivery_address(
         &self,
         _connected: &ConnectedMqttBroker,
-    ) -> impl Future<Output = Result<RedeliveryAddress, MqttError>> + Send {
+    ) -> impl Future<Output = Result<RedeliveryAddress, MqttError>> {
         ready(self.address())
     }
 }

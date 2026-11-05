@@ -59,7 +59,7 @@ fn app() -> impl App {
                 subscriber("devices/dev42/commands", Execute)
                     .build()
                     .map_source(|_| commands),
-            );
+            )
         },
     )
 }

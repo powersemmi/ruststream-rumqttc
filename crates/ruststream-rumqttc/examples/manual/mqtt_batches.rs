@@ -52,7 +52,7 @@ fn app() -> impl App<State = ()> {
                     .map_source(|_| fleet),
             )
             .out_retry(Publish::default())
-            .to("devices/retry/telemetry");
+            .to("devices/retry/telemetry")
         },
     )
 }
@@ -135,7 +135,7 @@ mod tests {
                         .map_source(|_| MqttFilter::new(FLEET).shared("workers")),
                 )
                 .out_retry(Publish::default())
-                .to("devices/retry/telemetry");
+                .to("devices/retry/telemetry")
             },
         );
         let tb = TestApp::start(pairs).await?;

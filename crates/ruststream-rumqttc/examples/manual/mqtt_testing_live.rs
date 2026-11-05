@@ -56,12 +56,10 @@ impl Handle<Telemetry> for Record {
 
 /// The service on the server at `url`, connected under `client_id`.
 fn app(url: &str, client_id: &str) -> impl App<State = ()> {
-    RustStream::new(AppInfo::new("telemetry", "0.1.0")).with_broker(
-        MqttBroker::new(url, client_id),
-        |b| {
-            b.include(subscriber("testing-live/telemetry", Record).build());
-        },
-    )
+    RustStream::new(AppInfo::new("telemetry", "0.1.0"))
+        .with_broker(MqttBroker::new(url, client_id), |b| {
+            b.include(subscriber("testing-live/telemetry", Record).build())
+        })
 }
 
 fn service() -> impl App<State = ()> {

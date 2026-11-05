@@ -51,7 +51,7 @@ fn app() -> impl App {
                     .map_source(|_| fleet),
             )
             .out_retry(Publish::default())
-            .to("devices/retry/telemetry");
+            .to("devices/retry/telemetry")
         },
     )
 }
@@ -114,7 +114,7 @@ mod tests {
                     subscriber("devices/+/telemetry", Collect)
                         .build()
                         .map_source(|_| fleet),
-                );
+                )
             },
         );
 

@@ -101,7 +101,6 @@ fn service(broker: MqttBroker) -> RustStream {
         .out(Alerts, Publish::default().qos(Qos::AtLeastOnce))
         .out_retry(Publish::default())
         .to("freezers/retry/temperature")
-        .build();
     })
 }
 

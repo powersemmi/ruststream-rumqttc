@@ -85,7 +85,6 @@ fn app() -> impl App<State = ()> {
                 .out(DefaultSlot, Publish::default())
                 .out_retry(Publish::default())
                 .to("devices/retry/telemetry")
-                .build();
         },
     )
 }

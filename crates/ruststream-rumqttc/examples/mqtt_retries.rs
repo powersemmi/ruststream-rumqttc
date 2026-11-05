@@ -83,6 +83,7 @@ async fn collect(reading: &Reading) -> HandlerOutcome {
 /// Sends every copy back to the topic its delivery arrived on, the one topic of the filter's many
 /// that this message belongs to. A transform on the retry position reads the delivery being
 /// retried, and the topic lives in the broker's per-delivery context.
+#[derive(Clone, Copy)]
 struct ToDeliveryTopic;
 
 impl<Options> PublishTransform<ForReply<MqttContext>, Options> for ToDeliveryTopic {
@@ -120,21 +121,21 @@ fn app() -> impl App {
             // "dead/readings" instead, payload and headers as they arrived.
             b.include(store)
                 .max_attempts(nonzero!(5u32))
-                .dead_letter("dead/readings");
-            b.include(on_dead_letter);
-            // A filter names where its copies go: here one topic the filter matches, so they
-            // come back to this subscription.
-            b.include(collect)
+                .dead_letter("dead/readings")
+                .include(on_dead_letter)
+                // A filter names where its copies go: here one topic the filter matches, so they
+                // come back to this subscription.
+                .include(collect)
                 .max_attempts(nonzero!(5u32))
                 .dead_letter("dead/telemetry")
                 .out_retry(Publish::default())
-                .to("devices/retry/telemetry");
-            // Or per delivery: each copy returns to the topic it arrived on.
-            b.include(track)
+                .to("devices/retry/telemetry")
+                // Or per delivery: each copy returns to the topic it arrived on.
+                .include(track)
                 .max_attempts(nonzero!(5u32))
                 .dead_letter("dead/sites")
                 .out_retry(Publish::default())
-                .transform(ToDeliveryTopic);
+                .transform(ToDeliveryTopic)
         },
     )
 }
@@ -312,10 +313,10 @@ mod tests {
         let app = RustStream::new(AppInfo::new("telemetry-retries", "0.1.0")).with_broker(
             MqttBroker::new("mqtt://localhost:1883", "telemetry-retries"),
             |b| {
-                b.include(super::store);
-                b.include(audit)
+                b.include(super::store)
+                    .include(audit)
                     .out_retry(Publish::default())
-                    .to("meters/audit");
+                    .to("meters/audit")
             },
         );
         let tb = TestApp::start(app).await?;
@@ -352,9 +353,7 @@ mod tests {
     fn deferring(url: &str) -> RustStream {
         RustStream::new(AppInfo::new("telemetry-retries", "0.1.0")).with_broker(
             MqttBroker::new(url, format!("telemetry-retries-{}", std::process::id())),
-            |b| {
-                b.include(defer_once);
-            },
+            |b| b.include(defer_once),
         )
     }
 
@@ -411,7 +410,7 @@ mod tests {
             |b| {
                 b.include(retry_now)
                     .max_attempts(nonzero!(3u32))
-                    .dead_letter("dead/batch");
+                    .dead_letter("dead/batch")
             },
         );
         let tb = TestApp::start(app).await?;

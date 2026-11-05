@@ -39,7 +39,7 @@ impl Handle<Telemetry> for Record {
 
 fn service(broker: MqttBroker) -> impl App<State = ()> {
     RustStream::new(AppInfo::new("telemetry", "0.1.0")).with_broker(broker, |b| {
-        b.include(subscriber("broker-session/telemetry", Record).build());
+        b.include(subscriber("broker-session/telemetry", Record).build())
     })
 }
 

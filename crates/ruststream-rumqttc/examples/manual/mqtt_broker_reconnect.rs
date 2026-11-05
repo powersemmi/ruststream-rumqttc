@@ -44,7 +44,7 @@ fn service(broker: MqttBroker) -> impl App<State = ()> {
     RustStream::new(AppInfo::new("telemetry", "0.1.0"))
         .on_subscription_end(SubscriptionEnd::FailFast)
         .with_broker(broker, |b| {
-            b.include(subscriber("broker-reconnect/telemetry", Record).build());
+            b.include(subscriber("broker-reconnect/telemetry", Record).build())
         })
 }
 

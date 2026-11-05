@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use futures::StreamExt;
 use ruststream::testing::TestApp;
-use ruststream::{Broker, ConnectedBroker, IncomingMessage, Subscriber};
+use ruststream::{Broker, ConnectedBroker, Settle, Subscriber};
 use ruststream_rumqttc::prelude::*;
 use ruststream_rumqttc::{
     ConnectedMqttBroker, MqttError, MqttSubscriber, Reconnected, Reconnector, Recovery,
@@ -75,21 +75,12 @@ async fn record_custom(telemetry: &Telemetry) -> HandlerOutcome {
     HandlerOutcome::ack()
 }
 
-/// The service, reading `topic`.
-fn service(broker: MqttBroker, topic: &str) -> impl App<State = ()> {
-    let topic = topic.to_owned();
-    RustStream::new(AppInfo::new("telemetry", "0.1.0")).with_broker(broker, move |b| {
-        match topic.as_str() {
-            ANNOUNCED => {
-                b.include(record_announced);
-            }
-            DROPPED => {
-                b.include(record_dropped);
-            }
-            _ => {
-                b.include(record_custom);
-            }
-        }
+/// The service: one subscription per scenario, each scenario publishing to its own topic only.
+fn service(broker: MqttBroker) -> impl App<State = ()> {
+    RustStream::new(AppInfo::new("telemetry", "0.1.0")).with_broker(broker, |b| {
+        b.include(record_announced)
+            .include(record_dropped)
+            .include(record_custom)
     })
 }
 
@@ -127,7 +118,7 @@ async fn a_service_keeps_reading_after_the_server_announces_a_restart() -> Resul
     let Some(url) = test_url() else { return Ok(()) };
     let relay = Relay::start(&url).await;
     let broker = MqttBroker::new(&relay.url, client_id("announced"));
-    let tb = TestApp::start_live(service(broker, ANNOUNCED)).await?;
+    let tb = TestApp::start_live(service(broker)).await?;
     reads(&tb, ANNOUNCED, "before", 1).await?;
     // Confirmed, so the client has nothing of it to send again on the next connection.
     relay.confirmed().await;
@@ -148,7 +139,7 @@ async fn a_service_keeps_reading_after_the_connection_drops_without_a_word()
     let Some(url) = test_url() else { return Ok(()) };
     let relay = Relay::start(&url).await;
     let broker = MqttBroker::new(&relay.url, client_id("dropped"));
-    let tb = TestApp::start_live(service(broker, DROPPED)).await?;
+    let tb = TestApp::start_live(service(broker)).await?;
     reads(&tb, DROPPED, "before", 1).await?;
     relay.confirmed().await;
 
@@ -196,7 +187,7 @@ async fn a_custom_reconnection_recovers_the_service() -> Result<(), Box<dyn Erro
             reasons: Arc::clone(&reasons),
         },
     ));
-    let tb = TestApp::start_live(service(broker, CUSTOM)).await?;
+    let tb = TestApp::start_live(service(broker)).await?;
     reads(&tb, CUSTOM, "before", 1).await?;
     relay.confirmed().await;
 

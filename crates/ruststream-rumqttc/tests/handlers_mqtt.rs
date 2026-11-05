@@ -63,9 +63,7 @@ async fn raise_alert(telemetry: &Telemetry, Out(out): Out<impl Publisher>) -> Ha
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_handler_publishes_through_its_slot_on_the_in_process_broker() {
     let app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(broker(), |b| {
-        b.include(raise_alert)
-            .out(DefaultSlot, Publish::default())
-            .build();
+        b.include(raise_alert).out(DefaultSlot, Publish::default())
     });
 
     let tb = TestApp::start(app).await.expect("the harness starts");
@@ -135,9 +133,7 @@ async fn announce_state(
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_per_message_arguments_ride_the_slot_and_stop_at_the_transport() {
     let app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(broker(), |b| {
-        b.include(announce_state)
-            .out(States, Publish::default())
-            .build();
+        b.include(announce_state).out(States, Publish::default())
     });
 
     let tb = TestApp::start(app).await.expect("the harness starts");
@@ -199,7 +195,6 @@ async fn a_publish_that_takes_no_step_carries_the_policy_alone() {
     let app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(broker(), |b| {
         b.include(announce_plainly)
             .out(States, Publish::default().qos(Qos::ExactlyOnce))
-            .build();
     });
 
     let tb = TestApp::start(app).await.expect("the harness starts");
@@ -234,9 +229,8 @@ async fn ingest(readings: &[Telemetry]) -> HandlerOutcome {
 /// suite covers the general case at size three, against this transport and a server alike.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_batch_handler_is_handed_batches_of_the_size_its_mount_site_named() {
-    let app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(broker(), |b| {
-        b.include(ingest.batch(nonzero!(1)));
-    });
+    let app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0"))
+        .with_broker(broker(), |b| b.include(ingest.batch(nonzero!(1))));
 
     let tb = TestApp::start(app).await.expect("the harness starts");
     for temperature in [21.5, 22.0, 23.5] {
@@ -283,7 +277,7 @@ async fn the_declaration_a_service_ships_mounts_on_the_in_process_broker() {
     let app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(broker(), |b| {
         b.include(collect_telemetry)
             .out_retry(Publish::default())
-            .to(TELEMETRY);
+            .to(TELEMETRY)
     });
 
     let tb = TestApp::start(app).await.expect("the harness starts");
@@ -320,7 +314,7 @@ async fn a_descriptor_a_server_would_reject_does_not_start_here_either() {
     let app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(broker(), |b| {
         b.include(never_subscribes)
             .out_retry(Publish::default())
-            .to(TELEMETRY);
+            .to(TELEMETRY)
     });
 
     let error = TestApp::start(app)
@@ -359,7 +353,7 @@ async fn a_production_routes_line_mounts_whole_on_the_in_process_broker() {
         b.include(answer_ping)
             .out_reply(Publish::default())
             .out_retry(Publish::default())
-            .to(PING);
+            .to(PING)
     });
 
     let tb = TestApp::start(app).await.expect("the harness starts");
@@ -418,9 +412,8 @@ async fn issue_receipt(command: &Command) -> Receipt {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_reply_lands_on_the_topic_its_type_declares() {
-    let app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(broker(), |b| {
-        b.include(acknowledge);
-    });
+    let app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0"))
+        .with_broker(broker(), |b| b.include(acknowledge));
 
     let tb = TestApp::start(app).await.expect("the harness starts");
     let command = Command { id: 7 };
@@ -444,7 +437,7 @@ async fn a_reply_lands_on_the_topic_its_type_declares() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_reply_that_declares_no_topic_lands_on_the_mount_site_one() {
     let app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(broker(), |b| {
-        b.include(issue_receipt).out_reply(Publish::default());
+        b.include(issue_receipt).out_reply(Publish::default())
     });
 
     let tb = TestApp::start(app).await.expect("the harness starts");
@@ -520,7 +513,7 @@ async fn a_transform_on_the_retry_position_stamps_the_deferred_copy() {
     let app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(broker(), |b| {
         b.include(reconcile)
             .out_retry(Publish::default())
-            .transform(StampRetry);
+            .transform(StampRetry)
     });
 
     let tb = TestApp::start(app).await.expect("the harness starts");
@@ -568,9 +561,8 @@ async fn reconcile_anywhere(telemetry: &Telemetry, ctx: &mut Context) -> Handler
 /// than losing every delayed message to a publish that reaches nothing.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_filter_registration_that_names_no_destination_does_not_start() {
-    let app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(broker(), |b| {
-        b.include(reconcile_anywhere);
-    });
+    let app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0"))
+        .with_broker(broker(), |b| b.include(reconcile_anywhere));
 
     let error = TestApp::start(app)
         .await
@@ -593,7 +585,7 @@ async fn a_filter_registration_publishes_its_copies_where_the_mount_site_names()
     let app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(broker(), |b| {
         b.include(reconcile_anywhere)
             .out_retry(Publish::default())
-            .to(DEFERRED);
+            .to(DEFERRED)
     });
 
     let tb = TestApp::start(app).await.expect("the harness starts");
@@ -647,7 +639,7 @@ async fn a_capped_registration_on_a_topic_dead_letters_the_spent_delivery() {
     let app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(broker(), |b| {
         b.include(never_settles)
             .max_attempts(nonzero!(2u32))
-            .dead_letter(DEAD);
+            .dead_letter(DEAD)
     });
 
     let tb = TestApp::start(app).await.expect("the harness starts");
@@ -684,7 +676,7 @@ async fn a_capped_registration_on_a_filter_dead_letters_the_spent_delivery() {
             .max_attempts(nonzero!(2u32))
             .dead_letter(DEAD)
             .out_retry(Publish::default())
-            .to(CAPPED);
+            .to(CAPPED)
     });
 
     let tb = TestApp::start(app).await.expect("the harness starts");
@@ -718,6 +710,7 @@ const DEVICE_43: &str = "devices/43/deferred";
 
 /// Sends every copy back to the topic its delivery arrived on, which is what a filter
 /// subscription needs: its many topics have no single answer, and each message belongs to one.
+#[derive(Clone, Copy)]
 struct ToDeliveryTopic;
 
 impl<Options> PublishTransform<ForReply<MqttContext>, Options> for ToDeliveryTopic {
@@ -761,7 +754,7 @@ async fn a_naming_transform_returns_a_copy_to_the_topic_it_arrived_on() {
     let app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(broker(), |b| {
         b.include(reconcile_per_device)
             .out_retry(Publish::default())
-            .transform(ToDeliveryTopic);
+            .transform(ToDeliveryTopic)
     });
 
     let tb = TestApp::start(app).await.expect("the harness starts");
@@ -812,10 +805,10 @@ async fn overlapping_filters_run_each_handler_once() {
         // A filter is no topic to send a deferred copy to, so each mount names one.
         b.include(record_reading)
             .out_retry(Publish::default())
-            .to(READING);
-        b.include(archive_sensor_traffic)
+            .to(READING)
+            .include(archive_sensor_traffic)
             .out_retry(Publish::default())
-            .to(READING);
+            .to(READING)
     });
 
     let tb = TestApp::start(app).await.expect("the harness starts");
@@ -858,9 +851,8 @@ async fn place_order(order: &Order) -> HandlerOutcome {
 /// all four orders at once and finish in one second.
 #[tokio::test(start_paused = true)]
 async fn the_partition_key_header_keeps_one_key_on_one_lane() {
-    let app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0")).with_broker(broker(), |b| {
-        b.include(place_order);
-    });
+    let app = RustStream::new(AppInfo::new("mqtt-handlers", "0.0.0"))
+        .with_broker(broker(), |b| b.include(place_order));
     let tb = TestApp::start(app).await.expect("the harness starts");
 
     let orders: Vec<(Order, HeaderMap)> = [(1, "acme"), (2, "globex"), (3, "acme"), (4, "globex")]

@@ -39,10 +39,10 @@ fn app() -> impl App {
             // back to the subscription that asked for it alone.
             b.include(record)
                 .out_retry(Publish::default())
-                .to("devices/retry/telemetry");
-            b.include(watch)
+                .to("devices/retry/telemetry")
+                .include(watch)
                 .out_retry(Publish::default())
-                .to("devices/dev42/retry");
+                .to("devices/dev42/retry")
         },
     )
 }

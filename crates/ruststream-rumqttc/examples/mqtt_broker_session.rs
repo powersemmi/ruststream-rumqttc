@@ -28,9 +28,7 @@ async fn record(telemetry: &Telemetry) -> HandlerOutcome {
 }
 
 fn service(broker: MqttBroker) -> impl App<State = ()> {
-    RustStream::new(AppInfo::new("telemetry", "0.1.0")).with_broker(broker, |b| {
-        b.include(record);
-    })
+    RustStream::new(AppInfo::new("telemetry", "0.1.0")).with_broker(broker, |b| b.include(record))
 }
 
 // --8<-- [start:broker]

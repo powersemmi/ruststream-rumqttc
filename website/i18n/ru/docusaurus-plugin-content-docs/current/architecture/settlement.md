@@ -84,7 +84,7 @@ MQTT: одним подтверждением при QoS 1 и 2, ничем пр
 <Diagram name="retries" words={retries} />
 
 Предел объявляется в точке монтирования через
-[`max_attempts`](api:ruststream::runtime::Mounting::max_attempts), и первая доставка считается
+[`max_attempts`](api:ruststream::runtime::RouterWith::max_attempts), и первая доставка считается
 первой попыткой. MQTT сам не считает доставки, поэтому рантайм считает опубликованные копии в
 заголовке каждой копии `x-ruststream-retry-count`.
 

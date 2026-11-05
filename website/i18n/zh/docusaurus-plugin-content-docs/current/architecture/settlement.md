@@ -71,7 +71,7 @@ MQTT 没有否定确认，所以服务器绝不会在当前连接上再次发送
 
 <Diagram name="retries" words={retries} />
 
-上限在挂载点用 [`max_attempts`](api:ruststream::runtime::Mounting::max_attempts) 声明，第一次投递算作一次。MQTT 自己不统计投递次数，所以由运行时统计它发布的副本，次数记录在每份副本的 `x-ruststream-retry-count` 消息头中。
+上限在挂载点用 [`max_attempts`](api:ruststream::runtime::RouterWith::max_attempts) 声明，第一次投递算作一次。MQTT 自己不统计投递次数，所以由运行时统计它发布的副本，次数记录在每份副本的 `x-ruststream-retry-count` 消息头中。
 
 低于上限时，副本发往订阅形式的地址。[`MqttTopic`](../components/subscriptions/mqtt-topic.md) 的地址是它自己的主题，共享的 `MqttTopic` 也是如此，因此它的注册无需指定任何东西。[`MqttFilter`](../components/subscriptions/mqtt-filter.md) 匹配许多主题，却不能发布到其中任何一个，所以它的注册要[指定副本发往的主题](../components/settlement/out-retry.md)：可以只指定一次，也可以通过转换为每次投递指定。两者都没有指定的过滤器注册无法启动。
 

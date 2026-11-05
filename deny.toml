@@ -41,6 +41,9 @@ allow = [
     # webpki-roots ships the Mozilla CA bundle under CDLA-Permissive-2.0, a
     # permissive data license covering the embedded certificate set.
     "CDLA-Permissive-2.0",
+    # assert_no_alloc, the failing allocator of the core's no-heap test leg, reached through the
+    # framework's test features (dev-dependencies only); permissive.
+    "BSD-1-Clause",
 ]
 
 [bans]

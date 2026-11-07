@@ -18,6 +18,7 @@ use std::time::Duration;
 
 use ruststream::conformance::harness::{self, InProcessBroker};
 use ruststream::conformance::in_process::{self, Refusal};
+use ruststream::conformance::lifecycle::Unsent;
 use ruststream::conformance::message_shape::{self, OptionCases};
 use ruststream::conformance::{
     capabilities, helpers::unique_subject, lifecycle, retry, settlement,
@@ -98,6 +99,29 @@ async fn mqtt_broker_passes_lifecycle() {
         move || live(&url, "lifecycle"),
         |name| MqttTopic::new(name),
         |connected| connected.publisher(),
+    )
+    .await;
+}
+
+/// A publish refused after the shutdown hands its message back: every check the crate makes runs
+/// before the payload leaves the message.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_in_process_broker_returns_a_refused_message() {
+    lifecycle::refused_publish_returns_message(
+        in_process,
+        ConnectedMqttBroker::publisher,
+        Unsent::Returned,
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mqtt_broker_returns_a_refused_message() {
+    let Some(url) = test_url() else { return };
+    lifecycle::refused_publish_returns_message(
+        move || live(&url, "unsent"),
+        ConnectedMqttBroker::publisher,
+        Unsent::Returned,
     )
     .await;
 }

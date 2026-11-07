@@ -35,6 +35,7 @@ struct DeviceState {
 /// States the media type of every message the position sends. The header fills the content type
 /// property and sets the payload format indicator, so a peer reads the body as UTF-8 JSON. The
 /// transform reads nothing of the delivery, so it mounts on any position.
+#[derive(Clone, Copy)]
 struct Json;
 
 impl<K: ContextKind, Options> PublishTransform<K, Options> for Json {
@@ -66,7 +67,7 @@ fn app() -> impl App {
         |b| {
             b.include(subscriber("devices/dev42/telemetry", Track).reply().build())
                 .out_reply(Publish::default())
-                .transform(Json);
+                .transform(Json)
         },
     )
 }
@@ -105,6 +106,7 @@ mod tests {
     }
 
     /// Marks a reply with the site it came from, in a value that carries a control character.
+    #[derive(Clone, Copy)]
     struct Unprintable;
 
     impl<K: ContextKind, Options> PublishTransform<K, Options> for Unprintable {
@@ -124,7 +126,7 @@ mod tests {
             |b| {
                 b.include(subscriber("devices/dev42/telemetry", Track).reply().build())
                     .out_reply(Publish::default())
-                    .transform(Unprintable);
+                    .transform(Unprintable)
             },
         );
         let tb = TestApp::start(app).await?;

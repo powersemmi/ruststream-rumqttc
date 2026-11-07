@@ -9,7 +9,7 @@ import TabItem from '@theme/TabItem';
 
 # out_retry
 
-A filter subscription names where its retry copies go, once with [`out_retry(..).to(..)`](api:ruststream::runtime::Mounting::out_retry) or per delivery with a transform.
+A filter subscription names where its retry copies go, once with [`out_retry(..).to(..)`](api:ruststream::runtime::RouterWith::out_retry) or per delivery with a transform.
 
 An [`MqttTopic`](../subscriptions/mqtt-topic.md) reads one topic, and its copies go there; a share group's copies go to the plain topic, not to `$share/..`.
 An [`MqttFilter`](../subscriptions/mqtt-filter.md) matches many topics and is a topic of its own only by accident, so the mount site names the destination.

@@ -40,7 +40,7 @@ use crate::message::MqttMessage;
 ///         |b| {
 ///             b.include(record)
 ///                 .out_retry(Publish::default())
-///                 .to("devices/retry/telemetry");
+///                 .to("devices/retry/telemetry")
 ///         },
 ///     )
 /// }
@@ -120,7 +120,6 @@ impl MqttContext {
 ///                 .out(DefaultSlot, Publish::default())
 ///                 .out_retry(Publish::default())
 ///                 .to("devices/retry/telemetry")
-///                 .build();
 ///         },
 ///     )
 /// }

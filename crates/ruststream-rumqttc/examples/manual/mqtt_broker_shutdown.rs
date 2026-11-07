@@ -48,7 +48,6 @@ fn service(broker: MqttBroker) -> impl App<State = ()> {
         .with_broker(broker, |b| {
             b.include(subscriber("broker-shutdown/telemetry", Check).build())
                 .out(DefaultSlot, Publish::default())
-                .build();
         })
 }
 

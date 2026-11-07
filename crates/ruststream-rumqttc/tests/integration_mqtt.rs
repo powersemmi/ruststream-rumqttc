@@ -17,7 +17,7 @@ use rumqttc::v5::{AsyncClient, Event, EventLoop, MqttOptions};
 use ruststream::runtime::PublishExt;
 use ruststream::{
     AckError, Broker, ConnectedBroker, HeaderMap, IncomingMessage, Outgoing, OutgoingMessage,
-    PublishPolicy, Publisher, Serialized, ServerSpec, Subscriber,
+    PublishPolicy, Publisher, Serialized, ServerSpec, Settle, Subscriber,
 };
 use ruststream_rumqttc::{
     ConnectedMqttBroker, MqttBroker, MqttError, MqttFilter, MqttPublish, MqttPublishSteps,

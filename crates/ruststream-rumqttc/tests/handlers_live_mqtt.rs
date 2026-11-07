@@ -124,9 +124,7 @@ async fn a_reply_lands_where_it_was_declared_and_names_no_response_topic() {
 
     let app = RustStream::new(AppInfo::new("live-reply", "0.1.0")).with_broker(
         MqttBroker::new(&url, format!("live-reply-{}", std::process::id())),
-        |b| {
-            b.include(answer_ping);
-        },
+        |b| b.include(answer_ping),
     );
     let running = app.start().await.expect("the service starts");
 

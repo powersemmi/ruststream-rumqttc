@@ -36,7 +36,7 @@ fn app() -> impl App {
         |b| {
             b.include(record)
                 .out_retry(Publish::default())
-                .to("devices/retry/telemetry");
+                .to("devices/retry/telemetry")
         },
     )
 }

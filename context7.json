@@ -16,6 +16,7 @@
   ],
   "rules": [
     "Import `ruststream_rumqttc::prelude::*` at a mount site, which brings the core prelude, the descriptors and the policy as `Publish`; a handler body imports `ruststream::prelude::*` alone (Prelude page).",
+    "Return the mount chain from the `with_broker` closure, `|b| b.include(a).include(c)`, with `after_startup` hooks written before the `include`s (Startup page).",
     "Subscribe with `MqttTopic` for one topic and `MqttFilter` for a filter with `+` or `#`; a bare `#[subscriber(\"devices/dev42/telemetry\")]` is an `MqttTopic` with the defaults (Subscriptions page).",
     "Spread a topic over replicas with `.shared(\"group\")` on the descriptor, so the server hands each message to one member of the share group (shared page).",
     "Name where an `MqttFilter` registration's retry copies go with `.out_retry(Publish::default()).to(\"topic\")`, or per delivery with a transform declaring `Destination = Names` (out_retry page).",

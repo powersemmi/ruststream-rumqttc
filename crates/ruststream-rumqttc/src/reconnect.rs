@@ -78,7 +78,7 @@ use crate::filter::Qos;
 ///         .with_broker(
 ///             MqttBroker::new("mqtt://localhost:1883", "telemetry-svc").reconnect(reconnect),
 ///             |b| {
-///                 b.include(record);
+///                 b.include(record)
 ///             },
 ///         )
 /// }
@@ -260,7 +260,7 @@ impl Default for AutoReconnect {
 ///         MqttBroker::new("mqtt://localhost:1883", "telemetry-svc")
 ///             .reconnect(Reconnect::custom(FreshToken)),
 ///         |b| {
-///             b.include(record);
+///             b.include(record)
 ///         },
 ///     )
 /// }

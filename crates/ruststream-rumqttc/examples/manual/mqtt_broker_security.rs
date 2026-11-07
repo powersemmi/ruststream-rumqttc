@@ -8,6 +8,8 @@
 //!     MQTT_TEST_TLS_DIR=.stand-tls cargo test --example manual_mqtt_broker_security --features testing
 //! ```
 
+// A test drives the app on its own task; the app's cold path carries no Send.
+#![allow(clippy::future_not_send)]
 // A plain build compiles the service; the tests that use it exist only in the test build.
 #![cfg_attr(not(test), allow(dead_code, unused_imports))]
 
@@ -42,7 +44,7 @@ impl Handle<Telemetry> for Record {
 
 fn service(broker: MqttBroker) -> impl App<State = ()> {
     RustStream::new(AppInfo::new("telemetry", "0.1.0")).with_broker(broker, |b| {
-        b.include(subscriber("broker-security/telemetry", Record).build());
+        b.include(subscriber("broker-security/telemetry", Record).build())
     })
 }
 

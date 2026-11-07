@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use futures::StreamExt;
 use ruststream::{
-    Broker, ConnectedBroker, IncomingMessage, OutgoingMessage, Publisher, Subscriber,
+    Broker, ConnectedBroker, IncomingMessage, OutgoingMessage, Publisher, Settle, Subscriber,
 };
 use ruststream_rumqttc::{
     ConnectedMqttBroker, MqttBroker, MqttFilter, MqttPublishOptions, MqttSubscriber, MqttTopic,

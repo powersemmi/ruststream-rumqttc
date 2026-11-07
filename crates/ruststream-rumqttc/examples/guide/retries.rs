@@ -101,6 +101,7 @@ async fn review(update: &Update, ctx: &mut Context) -> HandlerOutcome {
 // --8<-- [start:reports]
 /// Sends every copy back to the topic its delivery arrived on, the one topic of the filter's many
 /// that the report belongs to.
+#[derive(Clone, Copy)]
 struct ToDeliveryTopic;
 
 impl<Options> PublishTransform<ForReply<MqttContext>, Options> for ToDeliveryTopic {
@@ -138,13 +139,13 @@ fn app() -> impl App<State = ()> {
             // "updates/dead", payload and headers as they arrived.
             b.include(install)
                 .max_attempts(nonzero!(4u32))
-                .dead_letter("updates/dead");
-            b.include(review);
-            b.include(record)
+                .dead_letter("updates/dead")
+                .include(review)
+                .include(record)
                 .max_attempts(nonzero!(4u32))
                 .dead_letter("reports/dead")
                 .out_retry(Publish::default())
-                .transform(ToDeliveryTopic);
+                .transform(ToDeliveryTopic)
         },
     )
 }

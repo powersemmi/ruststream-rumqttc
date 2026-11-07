@@ -68,10 +68,9 @@ fn app() -> impl App {
                 subscriber("orders/placed", Place)
                     .workers_by_key(nonzero!(8))
                     .build(),
-            );
-            b.include(subscriber("checkout/completed", Checkout).build())
-                .out(DefaultSlot, Publish::default())
-                .build();
+            )
+            .include(subscriber("checkout/completed", Checkout).build())
+            .out(DefaultSlot, Publish::default())
         },
     )
 }
@@ -184,7 +183,6 @@ mod tests {
                         .build(),
                 )
                 .out(DefaultSlot, Publish::default())
-                .build();
             },
         )
     }

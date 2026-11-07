@@ -67,6 +67,7 @@ async fn collect(
 
 // --8<-- [start:replies]
 /// Answers on the topic the request names in its response topic, the `reply-to` header.
+#[derive(Clone, Copy)]
 struct ToResponseTopic;
 
 impl<C, Options> PublishTransform<ForReply<C>, Options> for ToResponseTopic {
@@ -117,10 +118,9 @@ fn service(broker: MqttBroker) -> impl App<State = ()> {
             .out(Alerts, Publish::default().retain(true))
             .out_retry(Publish::default())
             .to("devices/retry/telemetry")
-            .build();
-        b.include(answer)
+            .include(answer)
             .out_reply(Publish::default())
-            .transform(ToResponseTopic);
+            .transform(ToResponseTopic)
     })
 }
 

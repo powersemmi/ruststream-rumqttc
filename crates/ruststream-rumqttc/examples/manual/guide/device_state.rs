@@ -128,6 +128,9 @@ fn broker(url: &str, client_id: &str) -> MqttBroker {
 
 // --8<-- [start:app]
 fn service(broker: MqttBroker) -> RustStream {
+    // Every state goes out retained, so a dashboard that starts later reads it at once.
+    let retained = Publish::default().qos(Qos::AtLeastOnce).retain(true);
+    let heartbeats = MqttFilter::new("gateways/+/heartbeat").qos(Qos::AtLeastOnce);
     RustStream::new(AppInfo::new("gateway-monitor", "0.1.0")).with_broker(broker, |b| {
         // Runs once the broker is connected, and replaces the will's `offline` of an earlier run.
         b.after_startup(
@@ -138,11 +141,8 @@ fn service(broker: MqttBroker) -> RustStream {
                     .publish()
                     .await
             },
-        );
-        // Every state goes out retained, so a dashboard that starts later reads it at once.
-        let retained = Publish::default().qos(Qos::AtLeastOnce).retain(true);
-        let heartbeats = MqttFilter::new("gateways/+/heartbeat").qos(Qos::AtLeastOnce);
-        b.include(
+        )
+        .include(
             subscriber("gateways/+/heartbeat", Track)
                 .map_source(|_| heartbeats)
                 .build(),
@@ -150,10 +150,8 @@ fn service(broker: MqttBroker) -> RustStream {
         .out(States, retained)
         .out_retry(Publish::default())
         .to("gateways/retry/heartbeat")
-        .build();
-        b.include(subscriber("fleet/decommissioned", Forget).build())
-            .out(States, retained)
-            .build();
+        .include(subscriber("fleet/decommissioned", Forget).build())
+        .out(States, retained)
     })
 }
 
@@ -276,10 +274,7 @@ mod tests {
     fn dashboard(url: &str) -> RustStream {
         RustStream::new(AppInfo::new("dashboard", "0.1.0")).with_broker(
             MqttBroker::new(url, live::client_id("guide-dashboard")),
-            |b| {
-                b.include(watch_status);
-                b.include(watch_state);
-            },
+            |b| b.include(watch_status).include(watch_state),
         )
     }
 

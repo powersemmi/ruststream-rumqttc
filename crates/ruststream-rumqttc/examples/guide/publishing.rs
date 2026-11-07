@@ -65,6 +65,7 @@ async fn dispatch(
 // --8<-- [start:app]
 /// States the media type of everything the slot sends, which fills the content type property
 /// and tells a device to read the body as UTF-8 text.
+#[derive(Clone, Copy)]
 struct Json;
 
 impl<K: ContextKind, Options> PublishTransform<K, Options> for Json {
@@ -83,7 +84,6 @@ fn app() -> impl App<State = ()> {
             b.include(dispatch)
                 .out(Commands, Publish::default().qos(Qos::AtLeastOnce))
                 .transform(Json)
-                .build();
         },
     )
 }

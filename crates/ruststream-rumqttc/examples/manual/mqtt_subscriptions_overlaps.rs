@@ -64,14 +64,14 @@ fn app() -> impl App {
                     .map_source(|_| MqttFilter::new("devices/+/telemetry")),
             )
             .out_retry(Publish::default())
-            .to("devices/retry/telemetry");
-            b.include(
+            .to("devices/retry/telemetry")
+            .include(
                 subscriber("devices/dev42/#", Watch)
                     .build()
                     .map_source(|_| MqttFilter::new("devices/dev42/#")),
             )
             .out_retry(Publish::default())
-            .to("devices/dev42/retry");
+            .to("devices/dev42/retry")
         },
     )
 }

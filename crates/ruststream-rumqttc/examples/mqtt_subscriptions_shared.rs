@@ -31,7 +31,7 @@ fn app() -> impl App {
         |b| {
             b.include(process)
                 .out_retry(Publish::default())
-                .to("devices/retry/telemetry");
+                .to("devices/retry/telemetry")
         },
     )
 }
@@ -67,14 +67,16 @@ mod tests {
         let fleet = RustStream::new(AppInfo::new("telemetry", "0.1.0")).with_broker(
             MqttBroker::new("mqtt://localhost:1883", "telemetry-svc"),
             |b| {
-                for _ in 0..2 {
-                    b.include(process)
-                        .out_retry(Publish::default())
-                        .to("devices/retry/telemetry");
-                }
-                b.include(archive)
+                // Two members of the share group, then the plain subscription.
+                b.include(process)
                     .out_retry(Publish::default())
-                    .to("devices/retry/telemetry");
+                    .to("devices/retry/telemetry")
+                    .include(process)
+                    .out_retry(Publish::default())
+                    .to("devices/retry/telemetry")
+                    .include(archive)
+                    .out_retry(Publish::default())
+                    .to("devices/retry/telemetry")
             },
         );
         let tb = TestApp::start(fleet).await?;

@@ -131,6 +131,7 @@ fn dead_updates() -> MqttTopic {
 // --8<-- [start:reports]
 /// Sends every copy back to the topic its delivery arrived on, the one topic of the filter's many
 /// that the report belongs to.
+#[derive(Clone, Copy)]
 struct ToDeliveryTopic;
 
 impl<Options> PublishTransform<ForReply<MqttContext>, Options> for ToDeliveryTopic {
@@ -184,13 +185,13 @@ fn app() -> impl App<State = ()> {
                     .build(),
             )
             .max_attempts(nonzero!(4u32))
-            .dead_letter("updates/dead");
-            b.include(
+            .dead_letter("updates/dead")
+            .include(
                 subscriber("updates/dead", Review)
                     .map_source(|_| dead_updates())
                     .build(),
-            );
-            b.include(
+            )
+            .include(
                 subscriber("devices/+/reports", Record)
                     .map_source(|_| reports())
                     .build(),
@@ -198,7 +199,7 @@ fn app() -> impl App<State = ()> {
             .max_attempts(nonzero!(4u32))
             .dead_letter("reports/dead")
             .out_retry(Publish::default())
-            .transform(ToDeliveryTopic);
+            .transform(ToDeliveryTopic)
         },
     )
 }

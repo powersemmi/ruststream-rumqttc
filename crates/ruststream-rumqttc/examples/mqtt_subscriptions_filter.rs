@@ -32,7 +32,7 @@ fn app() -> impl App {
             // goes: a topic the filter matches, so the copy comes back here.
             b.include(collect)
                 .out_retry(Publish::default())
-                .to("devices/retry/telemetry");
+                .to("devices/retry/telemetry")
         },
     )
 }
@@ -84,9 +84,7 @@ mod tests {
     async fn a_filter_that_names_no_retry_topic_does_not_start() {
         let unnamed = RustStream::new(AppInfo::new("telemetry", "0.1.0")).with_broker(
             MqttBroker::new("mqtt://localhost:1883", "telemetry-svc"),
-            |b| {
-                b.include(collect);
-            },
+            |b| b.include(collect),
         );
 
         let refused = TestApp::start(unnamed)

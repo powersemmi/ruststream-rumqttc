@@ -28,9 +28,7 @@ async fn record(telemetry: &Telemetry) -> HandlerOutcome {
 fn app() -> impl App {
     RustStream::new(AppInfo::new("telemetry", "0.1.0")).with_broker(
         MqttBroker::new("mqtt://localhost:1883", "telemetry-svc"),
-        |b| {
-            b.include(record);
-        },
+        |b| b.include(record),
     )
 }
 // --8<-- [end:handler]
@@ -75,9 +73,7 @@ mod tests {
     async fn a_wildcard_in_the_name_does_not_start() {
         let wildcard = RustStream::new(AppInfo::new("telemetry", "0.1.0")).with_broker(
             MqttBroker::new("mqtt://localhost:1883", "telemetry-svc"),
-            |b| {
-                b.include(fleet);
-            },
+            |b| b.include(fleet),
         );
 
         let refused = TestApp::start(wildcard)

@@ -6,6 +6,8 @@
 //! the start call differs between the two modes; the app is the one a service builds, on
 //! `MqttBroker`.
 
+// A scenario takes the started harness by value, and the app's cold path carries no `Send`.
+#![allow(clippy::future_not_send)]
 #![cfg(feature = "testing")]
 
 use std::time::Duration;
@@ -70,12 +72,8 @@ async fn defer_once(reading: &Reading, ctx: &mut Context) -> HandlerOutcome {
 }
 
 fn deferring_app(url: &str) -> RustStream {
-    RustStream::new(AppInfo::new("both-retry", "0.1.0")).with_broker(
-        broker(url, "both-retry"),
-        |b| {
-            b.include(defer_once);
-        },
-    )
+    RustStream::new(AppInfo::new("both-retry", "0.1.0"))
+        .with_broker(broker(url, "both-retry"), |b| b.include(defer_once))
 }
 
 /// `retry_after` on MQTT is a publish: the runtime acknowledges the original, waits, and sends a
@@ -157,8 +155,8 @@ fn capped_app(url: &str) -> RustStream {
         |b| {
             b.include(never_settles)
                 .max_attempts(nonzero!(2u32))
-                .dead_letter("both/retry/dead");
-            b.include(collect_spent);
+                .dead_letter("both/retry/dead")
+                .include(collect_spent)
         },
     )
 }
@@ -221,6 +219,7 @@ struct FleetReading {
 
 /// Sends every copy back to the topic its own delivery arrived on, which is the one topic of the
 /// filter's many that this message belongs to.
+#[derive(Clone, Copy)]
 struct ToDeliveryTopic;
 
 impl<Options> PublishTransform<ForReply<MqttContext>, Options> for ToDeliveryTopic {
@@ -256,7 +255,7 @@ fn fleet_app(url: &str) -> RustStream {
         |b| {
             b.include(reconcile_per_device)
                 .out_retry(Publish::default())
-                .transform(ToDeliveryTopic);
+                .transform(ToDeliveryTopic)
         },
     )
 }

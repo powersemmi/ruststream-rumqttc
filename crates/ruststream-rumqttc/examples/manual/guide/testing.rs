@@ -6,6 +6,9 @@
 //! MQTT_TEST_URL=mqtt://127.0.0.1:1883 cargo test --example manual_guide_testing --features testing
 //! ```
 
+// A test drives the app on its own task; the app's cold path carries no Send.
+#![allow(clippy::future_not_send)]
+
 use std::process::ExitCode;
 use std::time::Duration;
 
@@ -101,7 +104,6 @@ fn service(broker: MqttBroker) -> RustStream {
         .out(Alerts, Publish::default().qos(Qos::AtLeastOnce))
         .out_retry(Publish::default())
         .to("freezers/retry/temperature")
-        .build();
     })
 }
 

@@ -31,7 +31,7 @@ fn app() -> impl App<State = ()> {
             // At most 64 readings per call; a batch that has fewer closes 20 ms after its first.
             b.include(ingest.batch(nonzero!(64)))
                 .out_retry(Publish::default())
-                .to("devices/retry/telemetry");
+                .to("devices/retry/telemetry")
         },
     )
 }
@@ -104,7 +104,7 @@ mod tests {
             |b| {
                 b.include(ingest.batch(nonzero!(2)))
                     .out_retry(Publish::default())
-                    .to("devices/retry/telemetry");
+                    .to("devices/retry/telemetry")
             },
         );
         let tb = TestApp::start(pairs).await?;

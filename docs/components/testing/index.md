@@ -35,7 +35,7 @@ The dependency line:
 
 ```toml
 [dev-dependencies]
-ruststream-rumqttc = { version = "0.7", features = ["testing"] }
+ruststream-rumqttc = { version = "0.8", features = ["testing"] }
 ```
 
 The test publishes a hot reading to one device's topic, and reads how the handler settled it and the alert it published.

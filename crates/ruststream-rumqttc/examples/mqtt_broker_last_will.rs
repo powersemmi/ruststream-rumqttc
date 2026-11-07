@@ -26,9 +26,7 @@ async fn record(telemetry: &Telemetry) -> HandlerOutcome {
 }
 
 fn service(broker: MqttBroker) -> impl App<State = ()> {
-    RustStream::new(AppInfo::new("telemetry", "0.1.0")).with_broker(broker, |b| {
-        b.include(record);
-    })
+    RustStream::new(AppInfo::new("telemetry", "0.1.0")).with_broker(broker, |b| b.include(record))
 }
 
 // --8<-- [start:broker]
@@ -90,9 +88,7 @@ mod tests {
     fn dashboard(url: &str) -> impl App<State = ()> {
         RustStream::new(AppInfo::new("dashboard", "0.1.0")).with_broker(
             MqttBroker::new(url, live::client_id("broker-last-will-dashboard")),
-            |b| {
-                b.include(watch);
-            },
+            |b| b.include(watch),
         )
     }
 

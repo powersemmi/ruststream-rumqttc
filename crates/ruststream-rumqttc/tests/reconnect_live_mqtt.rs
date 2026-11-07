@@ -16,7 +16,8 @@ use std::time::Duration;
 use futures::StreamExt;
 use ruststream::runtime::PublishExt;
 use ruststream::{
-    Broker, ConnectedBroker, IncomingMessage, Outgoing, PublishPolicy, Serialized, Subscriber,
+    Broker, ConnectedBroker, IncomingMessage, Outgoing, PublishPolicy, Serialized, Settle,
+    Subscriber,
 };
 use ruststream_rumqttc::{ConnectedMqttBroker, MqttBroker, MqttPublish, MqttTopic, Qos};
 

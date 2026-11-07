@@ -92,7 +92,7 @@ fn service(broker: MqttBroker) -> RustStream {
                 .build(),
         )
         .out_retry(Publish::default())
-        .to("devices/retry/telemetry");
+        .to("devices/retry/telemetry")
     })
 }
 

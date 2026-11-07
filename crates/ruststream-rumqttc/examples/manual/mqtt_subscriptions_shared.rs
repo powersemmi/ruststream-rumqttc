@@ -52,7 +52,7 @@ fn app() -> impl App {
                     .map_source(|_| fleet()),
             )
             .out_retry(Publish::default())
-            .to("devices/retry/telemetry");
+            .to("devices/retry/telemetry")
         },
     )
 }
@@ -86,18 +86,20 @@ mod tests {
         let fleet_app = RustStream::new(AppInfo::new("telemetry", "0.1.0")).with_broker(
             MqttBroker::new("mqtt://localhost:1883", "telemetry-svc"),
             |b| {
-                for _ in 0..2 {
-                    b.include(subscriber(FLEET, Process).build().map_source(|_| fleet()))
-                        .out_retry(Publish::default())
-                        .to("devices/retry/telemetry");
-                }
-                b.include(
-                    subscriber(FLEET, Process)
-                        .build()
-                        .map_source(|_| MqttFilter::new(FLEET)),
-                )
-                .out_retry(Publish::default())
-                .to("devices/retry/telemetry");
+                // Two members of the share group, then the plain subscription.
+                b.include(subscriber(FLEET, Process).build().map_source(|_| fleet()))
+                    .out_retry(Publish::default())
+                    .to("devices/retry/telemetry")
+                    .include(subscriber(FLEET, Process).build().map_source(|_| fleet()))
+                    .out_retry(Publish::default())
+                    .to("devices/retry/telemetry")
+                    .include(
+                        subscriber(FLEET, Process)
+                            .build()
+                            .map_source(|_| MqttFilter::new(FLEET)),
+                    )
+                    .out_retry(Publish::default())
+                    .to("devices/retry/telemetry")
             },
         );
         let tb = TestApp::start(fleet_app).await?;

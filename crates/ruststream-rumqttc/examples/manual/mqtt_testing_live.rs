@@ -7,6 +7,8 @@
 //!     cargo test --example manual_mqtt_testing_live --features testing
 //! ```
 
+// A test drives the app on its own task; the app's cold path carries no Send.
+#![allow(clippy::future_not_send)]
 // A plain build compiles the service; the tests that use it exist only in the test build.
 #![cfg_attr(not(test), allow(dead_code, unused_imports))]
 
@@ -56,12 +58,10 @@ impl Handle<Telemetry> for Record {
 
 /// The service on the server at `url`, connected under `client_id`.
 fn app(url: &str, client_id: &str) -> impl App<State = ()> {
-    RustStream::new(AppInfo::new("telemetry", "0.1.0")).with_broker(
-        MqttBroker::new(url, client_id),
-        |b| {
-            b.include(subscriber("testing-live/telemetry", Record).build());
-        },
-    )
+    RustStream::new(AppInfo::new("telemetry", "0.1.0"))
+        .with_broker(MqttBroker::new(url, client_id), |b| {
+            b.include(subscriber("testing-live/telemetry", Record).build())
+        })
 }
 
 fn service() -> impl App<State = ()> {

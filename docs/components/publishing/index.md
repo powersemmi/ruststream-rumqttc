@@ -19,6 +19,7 @@ A reply mounted without a policy sends through `Publish::default()`, to the topi
 A publish returns once the client session owns the message, not once the server confirmed it.
 At QoS 1 and 2 the session sends the message again until the server acknowledges it, across reconnects.
 A topic with a `+` or `#` wildcard is refused with [`MqttError::Publish`](api:ruststream_rumqttc::MqttError::Publish).
+A refused publish hands its message back: the error's [`into_message`](api:ruststream::PublishMessageError::into_message) returns the topic, the payload and the headers as they were published.
 One message changes the arguments with the [`qos` and `retain` steps](./mqtt-publish-steps.md).
 
 ## Example

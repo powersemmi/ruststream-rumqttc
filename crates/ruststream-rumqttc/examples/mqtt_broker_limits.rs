@@ -32,9 +32,7 @@ async fn stage(firmware: &Firmware) -> HandlerOutcome {
 }
 
 fn service(broker: MqttBroker) -> impl App<State = ()> {
-    RustStream::new(AppInfo::new("firmware", "0.1.0")).with_broker(broker, |b| {
-        b.include(stage);
-    })
+    RustStream::new(AppInfo::new("firmware", "0.1.0")).with_broker(broker, |b| b.include(stage))
 }
 
 // --8<-- [start:broker]
@@ -122,9 +120,8 @@ mod tests {
         };
         let broker =
             broker(&url, &live::client_id("broker-limits")).receive_maximum(NonZeroU16::MIN);
-        let app = RustStream::new(AppInfo::new("jobs", "0.1.0")).with_broker(broker, |b| {
-            b.include(hold);
-        });
+        let app =
+            RustStream::new(AppInfo::new("jobs", "0.1.0")).with_broker(broker, |b| b.include(hold));
         // The second job never arrives, so the bound is how long the test waits for it.
         let tb = TestApp::start_live_within(app, Duration::from_secs(2)).await?;
 

@@ -46,10 +46,9 @@ fn app() -> impl App {
     RustStream::new(AppInfo::new("orders", "0.1.0")).with_broker(
         MqttBroker::new("mqtt://localhost:1883", "orders-svc"),
         |b| {
-            b.include(place);
-            b.include(checkout)
+            b.include(place)
+                .include(checkout)
                 .out(DefaultSlot, Publish::default())
-                .build();
         },
     )
 }
@@ -122,11 +121,7 @@ mod tests {
     fn timed() -> impl App<State = ()> {
         RustStream::new(AppInfo::new("orders", "0.1.0")).with_broker(
             MqttBroker::new("mqtt://localhost:1883", "orders-svc"),
-            |b| {
-                b.include(place_timed)
-                    .out(Finishes, Publish::default())
-                    .build();
-            },
+            |b| b.include(place_timed).out(Finishes, Publish::default()),
         )
     }
 

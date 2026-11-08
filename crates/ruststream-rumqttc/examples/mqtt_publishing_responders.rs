@@ -32,6 +32,7 @@ struct Status {
 // --8<-- [start:responder]
 /// Answers on the response topic of the request, which arrives as the `reply-to` header, and
 /// copies the request's correlation data so the requester matches the answer to its question.
+#[derive(Clone, Copy)]
 struct ToResponseTopic;
 
 impl<C, Options> PublishTransform<ForReply<C>, Options> for ToResponseTopic {
@@ -72,7 +73,7 @@ fn app() -> impl App {
         |b| {
             b.include(report)
                 .out_reply(Publish::default())
-                .transform(ToResponseTopic);
+                .transform(ToResponseTopic)
         },
     )
 }

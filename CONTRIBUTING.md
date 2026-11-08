@@ -66,10 +66,11 @@ prints each breach under the table.
 ## Testing against a local core
 
 A change in the core is tested here before it is released, with the `ruststream` dependency
-patched to the checkout next to this one:
+patched to the facade crate of the checkout next to this one (the core's root is a virtual
+workspace, which cargo does not take as a patch):
 
 ```bash
-cargo test --workspace --all-features --config "patch.crates-io.ruststream.path='../ruststream'"
+cargo test --workspace --all-features --config "patch.crates-io.ruststream.path='../ruststream/crates/ruststream'"
 ```
 
 From the core, `just brokers rumqttc` runs the same command against the core's working tree.
@@ -86,7 +87,7 @@ MQTT_TEST_TLS_URL=mqtts://127.0.0.1:8883 \
 MQTT_TEST_TLS_DIR="$PWD/.stand-tls" \
 RUSTSTREAM_REQUIRE_LIVE=1 \
     cargo test --workspace --all-features \
-    --config "patch.crates-io.ruststream.path='../ruststream'" -- --test-threads=1
+    --config "patch.crates-io.ruststream.path='../ruststream/crates/ruststream'" -- --test-threads=1
 just brokers-down
 ```
 

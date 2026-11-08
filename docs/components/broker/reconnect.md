@@ -1,7 +1,7 @@
 ---
 sidebar_position: 6
 title: Reconnect
-description: "reconnect chooses what a lost connection does: the client dials again from 100 ms up to 5 s by default, never ends every stream, custom runs the service's own reconnection; keep_alive sets how soon a dead connection is noticed."
+description: "reconnect chooses what a lost connection does: dial again (the default), end every stream, or run your own recovery."
 ---
 
 import Tabs from '@theme/Tabs';

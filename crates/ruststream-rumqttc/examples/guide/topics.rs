@@ -61,11 +61,11 @@ fn app() -> impl App<State = ()> {
             // a topic it matches and no other filter of the service does.
             b.include(store)
                 .out_retry(Publish::default())
-                .to("devices/retry/telemetry");
-            b.include(trace)
+                .to("devices/retry/telemetry")
+                .include(trace)
                 .out_retry(Publish::default())
-                .to("devices/dev42/retry");
-            b.include(schedule_rollout);
+                .to("devices/dev42/retry")
+                .include(schedule_rollout)
         },
     )
 }

@@ -29,7 +29,7 @@ fn app() -> impl App {
             // a retry copy is published.
             b.include(record)
                 .out_retry(Publish::default())
-                .to("devices/retry/telemetry");
+                .to("devices/retry/telemetry")
         },
     )
 }

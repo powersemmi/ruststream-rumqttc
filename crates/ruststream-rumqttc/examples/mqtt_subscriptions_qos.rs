@@ -45,8 +45,8 @@ fn app() -> impl App {
         |b| {
             b.include(sample)
                 .out_retry(Publish::default())
-                .to("devices/retry/telemetry");
-            b.include(execute);
+                .to("devices/retry/telemetry")
+                .include(execute)
         },
     )
 }

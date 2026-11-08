@@ -87,9 +87,9 @@ fn app() -> impl App {
                     .reply()
                     .build(),
             )
-            .out_reply(Publish::default().qos(Qos::ExactlyOnce));
+            .out_reply(Publish::default().qos(Qos::ExactlyOnce))
             // No policy named: the reply goes through the broker's default one.
-            b.include(subscriber("devices/dev42/ping", Answer).reply().build());
+            .include(subscriber("devices/dev42/ping", Answer).reply().build())
         },
     )
 }

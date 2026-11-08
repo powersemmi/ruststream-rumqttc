@@ -70,7 +70,7 @@ fn service(broker: MqttBroker) -> RustStream {
                 subscriber("devices/dev42/firmware", Install)
                     .map_source(|_| firmware())
                     .build(),
-            );
+            )
         },
     )
 }

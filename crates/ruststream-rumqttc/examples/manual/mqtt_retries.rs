@@ -119,6 +119,7 @@ fn fleet() -> MqttFilter {
 /// Sends every copy back to the topic its delivery arrived on, the one topic of the filter's many
 /// that this message belongs to. A transform on the retry position reads the delivery being
 /// retried, and the topic lives in the broker's per-delivery context.
+#[derive(Clone, Copy)]
 struct ToDeliveryTopic;
 
 impl<Options> PublishTransform<ForReply<MqttContext>, Options> for ToDeliveryTopic {
@@ -172,15 +173,15 @@ fn app() -> impl App {
                     .build(),
             )
             .max_attempts(nonzero!(5u32))
-            .dead_letter("dead/readings");
-            b.include(
+            .dead_letter("dead/readings")
+            .include(
                 subscriber("dead/readings", OnDeadLetter)
                     .map_source(|_| dead_readings())
                     .build(),
-            );
+            )
             // A filter names where its copies go: here one topic the filter matches, so they
             // come back to this subscription.
-            b.include(
+            .include(
                 subscriber("devices/+/telemetry", Collect)
                     .map_source(|_| fleet())
                     .build(),
@@ -188,9 +189,9 @@ fn app() -> impl App {
             .max_attempts(nonzero!(5u32))
             .dead_letter("dead/telemetry")
             .out_retry(Publish::default())
-            .to("devices/retry/telemetry");
+            .to("devices/retry/telemetry")
             // Or per delivery: each copy returns to the topic it arrived on.
-            b.include(
+            .include(
                 subscriber("sites/+/telemetry", Track)
                     .map_source(|_| sites())
                     .build(),
@@ -198,7 +199,7 @@ fn app() -> impl App {
             .max_attempts(nonzero!(5u32))
             .dead_letter("dead/sites")
             .out_retry(Publish::default())
-            .transform(ToDeliveryTopic);
+            .transform(ToDeliveryTopic)
         },
     )
 }

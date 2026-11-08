@@ -51,9 +51,7 @@ fn app(url: &str) -> RustStream {
         MqttBroker::new(url, format!("session-restart-{}", std::process::id()))
             .clean_start(false)
             .session_expiry(Duration::from_hours(24)),
-        |b| {
-            b.include(record);
-        },
+        |b| b.include(record),
     )
 }
 

@@ -75,7 +75,6 @@ fn app() -> impl App {
         |b| {
             b.include(subscriber("broker-errors/telemetry", Check).build())
                 .out(DefaultSlot, Publish::default())
-                .build();
         },
     )
 }

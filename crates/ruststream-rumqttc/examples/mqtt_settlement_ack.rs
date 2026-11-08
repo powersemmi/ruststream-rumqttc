@@ -40,9 +40,7 @@ async fn apply(command: &Command) -> HandlerOutcome {
 fn app() -> impl App {
     RustStream::new(AppInfo::new("device-agent", "0.1.0")).with_broker(
         MqttBroker::new("mqtt://localhost:1883", "device-agent-dev42"),
-        |b| {
-            b.include(apply);
-        },
+        |b| b.include(apply),
     )
 }
 // --8<-- [end:handler]

@@ -33,9 +33,7 @@ fn service(broker: MqttBroker) -> impl App<State = ()> {
     RustStream::new(AppInfo::new("telemetry", "0.1.0"))
         .shutdown_timeout(Duration::from_secs(10))
         .with_broker(broker, |b| {
-            b.include(check)
-                .out(DefaultSlot, Publish::default())
-                .build();
+            b.include(check).out(DefaultSlot, Publish::default())
         })
 }
 

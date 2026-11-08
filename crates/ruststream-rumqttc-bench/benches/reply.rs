@@ -37,9 +37,7 @@ async fn confirm(order: &Order, ctx: &mut Context<'_, (), Latch>) -> Confirmatio
 }
 
 fn app(messages: usize) -> Pending {
-    common::pending(messages, |b| {
-        b.include(confirm);
-    })
+    common::pending(messages, |b| b.include(confirm))
 }
 
 // The allocations are the client's as much as the crate's, and a few of them move with how the

@@ -43,7 +43,7 @@ fn app() -> impl App {
             b.include(open_incident)
                 .out_reply(Publish::default())
                 .out_retry(Publish::default())
-                .to("devices/retry/alarms");
+                .to("devices/retry/alarms")
         },
     )
 }

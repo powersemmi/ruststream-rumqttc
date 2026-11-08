@@ -84,6 +84,7 @@ async fn confirm(telemetry: &Telemetry) -> Ack {
 
 /// Answers on the request's own response topic, which arrives as the `reply-to` header. A
 /// transform that names the destination per delivery is what puts the expression in the document.
+#[derive(Clone, Copy)]
 struct ToResponseTopic;
 
 impl<C, Options> PublishTransform<ForReply<C>, Options> for ToResponseTopic {
@@ -156,11 +157,11 @@ fn document() -> Value {
                 .out(Alerts, Publish::default().retain(true))
                 .out_retry(Publish::default())
                 .to("devices/retry/telemetry")
-                .build();
-            b.include(answer)
+                .include(answer)
                 .out_reply(Publish::default())
-                .transform(ToResponseTopic);
-            b.include(confirm).out_reply(Publish::default());
+                .transform(ToResponseTopic)
+                .include(confirm)
+                .out_reply(Publish::default())
         },
     );
     let json = build_spec(&app)

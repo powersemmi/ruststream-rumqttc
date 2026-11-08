@@ -79,12 +79,12 @@ fn app() -> impl App {
                     .map_source(|_| readings()),
             )
             .out_retry(Publish::default())
-            .to("devices/retry/telemetry");
-            b.include(
+            .to("devices/retry/telemetry")
+            .include(
                 subscriber("devices/dev42/commands", Execute)
                     .build()
                     .map_source(|_| commands()),
-            );
+            )
         },
     )
 }

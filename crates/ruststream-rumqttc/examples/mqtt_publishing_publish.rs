@@ -64,9 +64,9 @@ fn app() -> impl App {
         |b| {
             // An acknowledgement must arrive exactly once.
             b.include(acknowledge)
-                .out_reply(Publish::default().qos(Qos::ExactlyOnce));
-            // No policy named: the reply goes through the broker's default one.
-            b.include(pong);
+                .out_reply(Publish::default().qos(Qos::ExactlyOnce))
+                // No policy named: the reply goes through the broker's default one.
+                .include(pong)
         },
     )
 }

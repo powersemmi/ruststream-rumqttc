@@ -74,7 +74,7 @@ fn service(broker: MqttBroker) -> RustStream {
     RustStream::new(AppInfo::new("telemetry", "0.1.0")).with_broker(broker, |b| {
         b.include(record)
             .out_retry(Publish::default())
-            .to("devices/retry/telemetry");
+            .to("devices/retry/telemetry")
     })
 }
 

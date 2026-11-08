@@ -34,13 +34,13 @@ async fn record(telemetry: &Telemetry) -> HandlerOutcome {
 /// status topic, retained for whoever subscribes later.
 fn service(broker: MqttBroker) -> impl App<State = ()> {
     RustStream::new(AppInfo::new("telemetry", "0.1.0")).with_broker(broker, |b| {
-        b.include(record);
         b.after_startup(
             Publish::default().retain(true),
             async move |publisher| -> Result<(), PublishError<MqttError>> {
                 publisher.message(&Status { online: true }).publish().await
             },
-        );
+        )
+        .include(record)
     })
 }
 

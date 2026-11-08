@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::Stream;
-use ruststream::{BatchSubscriber, BufferedSubscriber, Subscriber};
+use ruststream::{BatchStream, BatchSubscriber, BufferedSubscriber, Subscriber};
 use tokio::sync::mpsc;
 
 use crate::broker::Link;
@@ -153,14 +153,14 @@ impl BatchSubscriber for MqttSubscriber {
 
     /// # Cancel safety
     ///
-    /// Cancel-safe between polls, like [`Subscriber::stream`]: the batch being filled lives
-    /// inside the returned stream and survives a cancelled poll. Dropping the whole stream
+    /// Cancel-safe between polls, like [`Subscriber::stream`]: the batch being filled lives in
+    /// the slot the runtime lends and survives a cancelled poll. Dropping the whole stream
     /// abandons that batch's deliveries unacknowledged, and MQTT redelivers them when a
     /// persistent session resumes.
     fn batches(
         &mut self,
         size: NonZeroUsize,
-    ) -> impl Stream<Item = Result<Self::Batch, MqttError>> + Send + '_ {
+    ) -> impl BatchStream<Self::Batch, Error = MqttError> + Send + '_ {
         self.buffered.batches(size)
     }
 }

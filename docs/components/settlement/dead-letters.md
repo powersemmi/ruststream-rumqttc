@@ -9,7 +9,7 @@ import TabItem from '@theme/TabItem';
 
 # Dead letters
 
-[`dead_letter(topic)`](api:ruststream::runtime::Mounting::dead_letter) names the topic a delivery that reached its cap is published to; it lies outside every filter the service reads.
+[`dead_letter(topic)`](api:ruststream::runtime::RouterWith::dead_letter) names the topic a delivery that reached its cap is published to; it lies outside every filter the service reads.
 
 It follows [`max_attempts(n)`](./retries.md) at the mount site.
 When the `n`-th delivery asks for a retry, the runtime acknowledges it and publishes it to the dead-letter topic instead.

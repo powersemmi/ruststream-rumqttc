@@ -24,6 +24,7 @@ A server that refuses a client certificate after the handshake answers the way a
 Once connected, the runtime opens every subscription, each one waiting for the server's `SUBACK`.
 A filter the server rejects fails startup with [`MqttError::Subscribe`](api:ruststream_rumqttc::MqttError::Subscribe).
 The `after_startup` hooks run last, so a hook publishes through a connection whose subscriptions are already open.
+A hook is a step of the mount chain, written before the `include`s it runs after.
 
 A [`TestApp`](../testing/index.md) test in process checks the settings as the connect does, then opens the subscriptions and runs the hooks.
 The dial and the server's refusals are for a [live test](../testing/live.md).

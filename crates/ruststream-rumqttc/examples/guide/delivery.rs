@@ -82,11 +82,11 @@ fn service(broker: MqttBroker) -> RustStream {
     RustStream::new(AppInfo::new("billing", "0.1.0")).with_broker(broker, |b| {
         b.include(bill)
             .out_retry(Publish::default())
-            .to("meters/retry/usage");
-        // At most 64 samples per call; a batch with fewer closes 20 ms after its first sample.
-        b.include(chart.batch(nonzero!(64)))
+            .to("meters/retry/usage")
+            // At most 64 samples per call; a batch with fewer closes 20 ms after its first sample.
+            .include(chart.batch(nonzero!(64)))
             .out_retry(Publish::default())
-            .to("meters/retry/power");
+            .to("meters/retry/power")
     })
 }
 

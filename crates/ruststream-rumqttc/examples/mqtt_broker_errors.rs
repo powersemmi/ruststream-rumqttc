@@ -42,11 +42,7 @@ async fn check(telemetry: &Telemetry, Out(alerts): Out<impl Publisher>) -> Handl
 fn app() -> impl App {
     RustStream::new(AppInfo::new("telemetry", "0.1.0")).with_broker(
         MqttBroker::new("mqtt://localhost:1883", "telemetry-svc"),
-        |b| {
-            b.include(check)
-                .out(DefaultSlot, Publish::default())
-                .build();
-        },
+        |b| b.include(check).out(DefaultSlot, Publish::default()),
     )
 }
 

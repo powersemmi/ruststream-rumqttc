@@ -105,10 +105,10 @@ fn service(broker: MqttBroker) -> RustStream {
                     .publish()
                     .await
             },
-        );
+        )
         // The mount site fixes what every publish through the slot takes; the handler's step is
         // what one message changes.
-        b.include(
+        .include(
             subscriber("devices/+/telemetry", AnnounceState)
                 .map_source(|_| fleet())
                 .build(),
@@ -116,7 +116,6 @@ fn service(broker: MqttBroker) -> RustStream {
         .out(States, Publish::default().qos(Qos::AtLeastOnce))
         .out_retry(Publish::default())
         .to("devices/retry/telemetry")
-        .build();
     })
 }
 // --8<-- [end:app]
@@ -212,10 +211,7 @@ mod tests {
     fn dashboard(url: &str) -> RustStream {
         RustStream::new(AppInfo::new("dashboard", "0.1.0")).with_broker(
             MqttBroker::new(url, format!("dashboard-{}", std::process::id())),
-            |b| {
-                b.include(watch_status);
-                b.include(watch_state);
-            },
+            |b| b.include(watch_status).include(watch_state),
         )
     }
 
@@ -239,7 +235,7 @@ mod tests {
                             .publish()
                             .await
                     },
-                );
+                )
             },
         )
     }

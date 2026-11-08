@@ -105,6 +105,7 @@ fn fleet() -> MqttFilter {
 
 // --8<-- [start:replies]
 /// Answers on the topic the request names in its response topic, the `reply-to` header.
+#[derive(Clone, Copy)]
 struct ToResponseTopic;
 
 impl<C, Options> PublishTransform<ForReply<C>, Options> for ToResponseTopic {
@@ -142,6 +143,9 @@ fn broker(password: &str) -> MqttBroker {
 
 // --8<-- [start:app]
 fn service(broker: MqttBroker) -> impl App<State = ()> {
+    // A request without a response topic is answered on `devices/dev42/pong`.
+    let answer = subscriber("devices/dev42/ping", Answer)
+        .map_source(|_| MqttTopic::new("devices/dev42/ping"));
     RustStream::new(AppInfo::new("telemetry", "1.0.0")).with_broker_labeled("mqtt", broker, |b| {
         b.include(
             subscriber("devices/+/telemetry", Collect)
@@ -151,13 +155,9 @@ fn service(broker: MqttBroker) -> impl App<State = ()> {
         .out(Alerts, Publish::default().retain(true))
         .out_retry(Publish::default())
         .to("devices/retry/telemetry")
-        .build();
-        // A request without a response topic is answered on `devices/dev42/pong`.
-        let answer = subscriber("devices/dev42/ping", Answer)
-            .map_source(|_| MqttTopic::new("devices/dev42/ping"));
-        b.include(answer.reply().to("devices/dev42/pong").build())
-            .out_reply(Publish::default())
-            .transform(ToResponseTopic);
+        .include(answer.reply().to("devices/dev42/pong").build())
+        .out_reply(Publish::default())
+        .transform(ToResponseTopic)
     })
 }
 

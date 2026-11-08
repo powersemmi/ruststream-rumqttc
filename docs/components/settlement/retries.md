@@ -9,7 +9,7 @@ import TabItem from '@theme/TabItem';
 
 # Retries
 
-[`max_attempts(n)`](api:ruststream::runtime::Mounting::max_attempts) caps the deliveries one message gets, counted on the retry-count header, because MQTT counts no redeliveries.
+[`max_attempts(n)`](api:ruststream::runtime::RouterWith::max_attempts) caps the deliveries one message gets, counted on the retry-count header, because MQTT counts no redeliveries.
 
 A redelivered PUBLISH packet carries a duplicate flag and no counter.
 So the runtime counts on [`RETRY_COUNT_HEADER`](api:ruststream::runtime::RETRY_COUNT_HEADER), which travels on the copies [`retry_after`](./retry-after.md) publishes.

@@ -116,16 +116,16 @@ fn service(broker: MqttBroker) -> RustStream {
                 .build(),
         )
         .out_retry(Publish::default())
-        .to("meters/retry/usage");
+        .to("meters/retry/usage")
         // At most 64 samples per call; a batch with fewer closes 20 ms after its first sample.
-        b.include(
+        .include(
             subscriber("meters/+/power", Chart)
                 .batch(nonzero!(64))
                 .build()
                 .map_source(|_| power_of_every_meter()),
         )
         .out_retry(Publish::default())
-        .to("meters/retry/power");
+        .to("meters/retry/power")
     })
 }
 

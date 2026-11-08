@@ -19,7 +19,8 @@ use std::time::Duration;
 use futures::StreamExt;
 use ruststream::testing::{InProcess, TestableBroker};
 use ruststream::{
-    AckError, ConnectedBroker, HeaderMap, IncomingMessage, OutgoingMessage, Publisher, Subscriber,
+    AckError, ConnectedBroker, HeaderMap, IncomingMessage, OutgoingMessage, Publisher, Settle,
+    Subscriber,
 };
 use ruststream_rumqttc::{
     ConnectedMqttBroker, MqttBroker, MqttError, MqttFilter, MqttMessage, MqttPublishOptions,
@@ -389,7 +390,7 @@ async fn a_topic_no_server_takes_is_refused() {
             .await
             .expect_err("the topic is refused");
         assert!(
-            matches!(&error, MqttError::Publish { .. }),
+            matches!(error.error(), MqttError::Publish { .. }),
             "{topic:?}: {error}"
         );
     }
@@ -427,11 +428,26 @@ async fn a_publisher_outliving_the_connection_reports_it() {
         .expect("the production broker connects in process");
     connected.shutdown().await.expect("shutdown succeeds");
 
-    let error = early
-        .publish(OutgoingMessage::new("orders", b"x".as_slice()), None)
+    let mut headers = HeaderMap::new();
+    headers.insert("trace", "t-1");
+    let refused = early
+        .publish(
+            OutgoingMessage::new("orders", b"x".as_slice()).with_headers(headers.clone()),
+            None,
+        )
         .await
         .expect_err("the connection is gone");
-    assert!(matches!(error, MqttError::NotConnected), "{error}");
+    assert!(
+        matches!(refused.error(), MqttError::NotConnected),
+        "{refused}"
+    );
+
+    let unsent = refused
+        .into_message()
+        .expect("a refused publish hands its message back");
+    assert_eq!(unsent.name(), "orders");
+    assert_eq!(unsent.payload(), b"x");
+    assert_eq!(unsent.headers(), &headers);
 }
 
 /// Which subscriptions a publish reaches, as the harness asks it in live mode: every filter that

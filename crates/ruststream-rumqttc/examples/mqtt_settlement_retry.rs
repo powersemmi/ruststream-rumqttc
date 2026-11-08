@@ -51,9 +51,7 @@ fn service(broker: MqttBroker) -> RustStream {
         broker
             .clean_start(false)
             .session_expiry(Duration::from_hours(24)),
-        |b| {
-            b.include(install);
-        },
+        |b| b.include(install),
     )
 }
 // --8<-- [end:app]

@@ -54,7 +54,9 @@ use gungraun::{Callgrind, Dhat, DhatMetric, EntryPoint, LibraryBenchmarkConfig};
 use rumqttc::v5::mqttbytes::QoS;
 use rumqttc::v5::mqttbytes::v5::Packet;
 use rumqttc::v5::{AsyncClient, Event, MqttOptions};
-use ruststream::runtime::{AppInfo, BrokerScope, Identity, RunningApp, RustStream};
+use ruststream::runtime::{
+    AppInfo, BrokerScope, Identity, MountChain, MountRoutes, RunningApp, RustStream,
+};
 use ruststream_rumqttc::MqttBroker;
 use serde::Deserialize;
 use tokio::runtime::{Builder, Runtime};
@@ -263,11 +265,15 @@ pub struct Pending {
     messages: usize,
 }
 
-/// The mount a scenario passes in: what `with_broker` does with the scope.
-pub type Mount<'a> = &'a mut BrokerScope<MqttBroker, Identity, (), Latch>;
+/// The scope a scenario mounts on: what `with_broker` hands its closure.
+pub type Mount = BrokerScope<MqttBroker, Identity, (), Latch>;
 
 /// Builds a one-handler service on the stand's broker, ready to be started by the body.
-pub fn pending(messages: usize, mount: impl FnOnce(Mount<'_>)) -> Pending {
+pub fn pending<Chain, Routes>(messages: usize, mount: impl FnOnce(Mount) -> Chain) -> Pending
+where
+    Chain: MountChain<Routes = Routes>,
+    Routes: MountRoutes<MqttBroker, Identity, Latch>,
+{
     let latch = Latch::default();
     let state = latch.clone();
     let app = RustStream::new(AppInfo::new("bench", "0.0.0"))

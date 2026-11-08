@@ -108,15 +108,15 @@ fn app() -> impl App<State = ()> {
                     .build(),
             )
             .out_retry(Publish::default())
-            .to("devices/retry/telemetry");
-            b.include(
+            .to("devices/retry/telemetry")
+            .include(
                 subscriber("devices/dev42/#", Trace)
                     .map_source(|_| one_device())
                     .build(),
             )
             .out_retry(Publish::default())
-            .to("devices/dev42/retry");
-            b.include(subscriber("fleet/firmware", ScheduleRollout).build());
+            .to("devices/dev42/retry")
+            .include(subscriber("fleet/firmware", ScheduleRollout).build())
         },
     )
 }

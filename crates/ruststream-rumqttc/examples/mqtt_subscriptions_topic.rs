@@ -42,7 +42,7 @@ fn app() -> impl App {
         MqttBroker::new("mqtt://localhost:1883", "valves-svc"),
         |b| {
             // The topic is where a copy goes, so the mount site names nothing.
-            b.include(execute);
+            b.include(execute)
         },
     )
 }

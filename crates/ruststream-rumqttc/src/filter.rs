@@ -110,7 +110,7 @@ fn validate_share_group(group: Option<&String>) -> Result<(), MqttError> {
 ///             // The filter names no single topic, so the mount site says where a retry copy goes.
 ///             b.include(record)
 ///                 .out_retry(Publish::default())
-///                 .to("devices/retry/telemetry");
+///                 .to("devices/retry/telemetry")
 ///         },
 ///     )
 /// }
@@ -141,6 +141,7 @@ fn validate_share_group(group: Option<&String>) -> Result<(), MqttError> {
 ///
 /// /// Sends every copy back to the topic its own delivery arrived on, which is the one topic of
 /// /// the filter's many that this message belongs to.
+/// #[derive(Clone, Copy)]
 /// struct ToDeliveryTopic;
 ///
 /// impl<Options> PublishTransform<ForReply<MqttContext>, Options> for ToDeliveryTopic {
@@ -166,7 +167,7 @@ fn validate_share_group(group: Option<&String>) -> Result<(), MqttError> {
 ///                 .max_attempts(nonzero!(5u32))
 ///                 .dead_letter("dead/commands")
 ///                 .out_retry(Publish::default())
-///                 .transform(ToDeliveryTopic);
+///                 .transform(ToDeliveryTopic)
 ///         },
 ///     )
 /// }
@@ -282,7 +283,7 @@ impl FromName for MqttFilter {
 ///             // A topic addresses its own retry copies, so the mount site names no destination.
 ///             b.include(store)
 ///                 .max_attempts(nonzero!(5u32))
-///                 .dead_letter("dead/telemetry");
+///                 .dead_letter("dead/telemetry")
 ///         },
 ///     )
 /// }
@@ -420,7 +421,7 @@ impl RedeliveryAddressed<ConnectedMqttBroker> for MqttTopic {
     fn redelivery_address(
         &self,
         _connected: &ConnectedMqttBroker,
-    ) -> impl Future<Output = Result<RedeliveryAddress, MqttError>> + Send {
+    ) -> impl Future<Output = Result<RedeliveryAddress, MqttError>> {
         ready(self.address())
     }
 }

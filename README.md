@@ -51,12 +51,12 @@ the framework; this crate is the transport.
 
 ```toml
 [dependencies]
-ruststream = { version = "0.7", features = ["macros", "json"] }
-ruststream-rumqttc = "0.7"
+ruststream = { version = "0.8", features = ["macros", "json"] }
+ruststream-rumqttc = "0.8"
 serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
-ruststream-rumqttc = { version = "0.7", features = ["testing"] }
+ruststream-rumqttc = { version = "0.8", features = ["testing"] }
 ```
 
 ## Write a service
@@ -105,7 +105,6 @@ fn app() -> impl App {
                 .out(DefaultSlot, Publish::default().qos(Qos::AtLeastOnce))
                 .out_retry(Publish::default())
                 .to("devices/retry/telemetry")
-                .build();
         },
     )
 }

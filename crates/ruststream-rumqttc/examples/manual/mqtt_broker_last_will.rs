@@ -38,7 +38,7 @@ impl Handle<Telemetry> for Record {
 
 fn service(broker: MqttBroker) -> impl App<State = ()> {
     RustStream::new(AppInfo::new("telemetry", "0.1.0")).with_broker(broker, |b| {
-        b.include(subscriber("broker-last-will/telemetry", Record).build());
+        b.include(subscriber("broker-last-will/telemetry", Record).build())
     })
 }
 
@@ -135,9 +135,7 @@ mod tests {
     fn dashboard(url: &str) -> impl App<State = ()> {
         RustStream::new(AppInfo::new("dashboard", "0.1.0")).with_broker(
             MqttBroker::new(url, live::client_id("broker-last-will-dashboard")),
-            |b| {
-                b.include(subscriber(status_topic(), Watch).build());
-            },
+            |b| b.include(subscriber(status_topic(), Watch).build()),
         )
     }
 
